@@ -1,0 +1,557 @@
+//////////////////////////////////////////////////////////////
+// BuildWise
+// Construction Materials Procurement, Delivery
+// and Quality Management System
+//////////////////////////////////////////////////////////////
+
+
+//////////////////////////////////////////////////////////////
+// ENUMS
+//////////////////////////////////////////////////////////////
+
+Enum project_status {
+  Planned
+  Active
+  Completed
+  Cancelled
+}
+
+Enum material_request_status {
+  Draft
+  PendingApproval
+  Approved
+  Rejected
+}
+
+Enum approval_decision {
+  Approved
+  Rejected
+  RevisionRequested
+}
+
+Enum supplier_status {
+  Active
+  Inactive
+  Suspended
+}
+
+Enum quotation_status {
+  Submitted
+  UnderReview
+  Selected
+  Rejected
+  Expired
+}
+
+Enum purchase_order_status {
+  Created
+  Confirmed
+  InProgress
+  Completed
+  Cancelled
+}
+
+Enum delivery_status {
+  Scheduled
+  InTransit
+  Delivered
+  Received
+  DiscrepancyReported
+}
+
+Enum inspection_status {
+  Pending
+  UnderInspection
+  Completed
+}
+
+Enum inspection_decision {
+  Accepted
+  PartiallyAccepted
+  Rejected
+}
+
+Enum non_conformance_severity {
+  Low
+  Medium
+  High
+  Critical
+}
+
+Enum non_conformance_status {
+  Open
+  CorrectiveActionRequired
+  Resolved
+  Closed
+}
+
+Enum workflow_status {
+  Pending
+  Running
+  AwaitingApproval
+  Completed
+  Failed
+  Cancelled
+}
+
+Enum workflow_step_status {
+  Pending
+  Running
+  Completed
+  Failed
+  Skipped
+}
+
+Enum agent_approval_status {
+  Pending
+  Approved
+  Rejected
+  RevisionRequested
+}
+
+
+//////////////////////////////////////////////////////////////
+// CORE / SHARED
+//////////////////////////////////////////////////////////////
+
+Table users {
+  id integer [pk, increment]
+  full_name varchar(150) [not null]
+  email varchar(255) [not null, unique]
+  is_active boolean [not null, default: true]
+  created_at timestamp [not null]
+  updated_at timestamp [not null]
+
+  Note: 'Conceptual application user. May later be replaced by ASP.NET Core Identity tables.'
+}
+
+Table roles {
+  id integer [pk, increment]
+  name varchar(100) [not null, unique]
+
+  Note: 'Examples: SiteEngineer, ProjectManager, ProcurementOfficer, ReceivingOfficer, QualityInspector'
+}
+
+Table user_roles {
+  user_id integer [not null]
+  role_id integer [not null]
+
+  indexes {
+    (user_id, role_id) [pk]
+  }
+}
+
+Table projects {
+  id integer [pk, increment]
+  name varchar(200) [not null]
+  location varchar(300)
+  description text
+  status project_status [not null]
+  start_date date
+  end_date date
+  created_at timestamp [not null]
+  updated_at timestamp [not null]
+
+  indexes {
+    status
+  }
+}
+
+Table materials {
+  id integer [pk, increment]
+  name varchar(200) [not null]
+  description text
+  unit varchar(50) [not null]
+  category varchar(100)
+  is_active boolean [not null, default: true]
+  created_at timestamp [not null]
+  updated_at timestamp [not null]
+
+  indexes {
+    name
+    category
+  }
+}
+
+
+//////////////////////////////////////////////////////////////
+// COMPONENT 1
+// MATERIAL REQUEST & APPROVAL MANAGEMENT
+//////////////////////////////////////////////////////////////
+
+Table material_requests {
+  id integer [pk, increment]
+  project_id integer [not null]
+  requested_by_user_id integer [not null]
+  required_date date [not null]
+  reason text
+  status material_request_status [not null, default: 'Draft']
+  created_at timestamp [not null]
+  updated_at timestamp [not null]
+
+  indexes {
+    project_id
+    requested_by_user_id
+    status
+    required_date
+  }
+}
+
+Table material_request_items {
+  id integer [pk, increment]
+  material_request_id integer [not null]
+  material_id integer [not null]
+  requested_quantity decimal(12,2) [not null]
+  notes text
+
+  indexes {
+    material_request_id
+    material_id
+    (material_request_id, material_id) [unique]
+  }
+
+  Note: 'Requested quantity must be greater than zero.'
+}
+
+Table approvals {
+  id integer [pk, increment]
+  material_request_id integer [not null]
+  approved_by_user_id integer [not null]
+  decision approval_decision [not null]
+  comment text
+  decision_date timestamp [not null]
+  created_at timestamp [not null]
+
+  indexes {
+    material_request_id
+    approved_by_user_id
+    decision
+  }
+
+  Note: 'Maintains approval history instead of overwriting previous approval decisions.'
+}
+
+
+//////////////////////////////////////////////////////////////
+// COMPONENT 2
+// SUPPLIER, QUOTATION & PROCUREMENT MANAGEMENT
+//////////////////////////////////////////////////////////////
+
+Table suppliers {
+  id integer [pk, increment]
+  name varchar(200) [not null]
+  contact_person varchar(150)
+  email varchar(255)
+  phone varchar(50)
+  address text
+  status supplier_status [not null, default: 'Active']
+  created_at timestamp [not null]
+  updated_at timestamp [not null]
+
+  indexes {
+    name
+    status
+  }
+}
+
+Table quotations {
+  id integer [pk, increment]
+  material_request_id integer [not null]
+  supplier_id integer [not null]
+  quotation_date date [not null]
+  valid_until date
+  status quotation_status [not null, default: 'Submitted']
+  total_amount decimal(14,2) [not null]
+  created_at timestamp [not null]
+  updated_at timestamp [not null]
+
+  indexes {
+    material_request_id
+    supplier_id
+    status
+    (material_request_id, supplier_id)
+  }
+
+  Note: 'A material request can receive quotations from multiple suppliers.'
+}
+
+Table quotation_items {
+  id integer [pk, increment]
+  quotation_id integer [not null]
+  material_request_item_id integer [not null]
+  quantity decimal(12,2) [not null]
+  unit_price decimal(14,2) [not null]
+
+  indexes {
+    quotation_id
+    material_request_item_id
+    (quotation_id, material_request_item_id) [unique]
+  }
+
+  Note: 'Directly identifies the requested item being quoted. Material is derived through MaterialRequestItem. Line total can be calculated as quantity * unit_price.'
+}
+
+Table purchase_orders {
+  id integer [pk, increment]
+  quotation_id integer [not null, unique]
+  order_date date [not null]
+  expected_delivery_date date
+  status purchase_order_status [not null, default: 'Created']
+  total_amount decimal(14,2) [not null]
+  created_at timestamp [not null]
+  updated_at timestamp [not null]
+
+  indexes {
+    quotation_id
+    status
+    order_date
+  }
+
+  Note: 'Created from the selected quotation. Supplier is determined from the linked quotation.'
+}
+
+Table purchase_order_items {
+  id integer [pk, increment]
+  purchase_order_id integer [not null]
+  quotation_item_id integer [not null]
+  ordered_quantity decimal(12,2) [not null]
+  unit_price decimal(14,2) [not null]
+
+  indexes {
+    purchase_order_id
+    quotation_item_id
+    (purchase_order_id, quotation_item_id) [unique]
+  }
+
+  Note: 'Directly traces the purchase-order item back to the supplier quotation item.'
+}
+
+
+//////////////////////////////////////////////////////////////
+// COMPONENT 3
+// DELIVERY & MATERIAL RECEIVING MANAGEMENT
+//////////////////////////////////////////////////////////////
+
+Table deliveries {
+  id integer [pk, increment]
+  purchase_order_id integer [not null]
+  delivery_date timestamp
+  received_by_user_id integer
+  delivery_reference varchar(100)
+  status delivery_status [not null, default: 'Scheduled']
+  notes text
+  created_at timestamp [not null]
+  updated_at timestamp [not null]
+
+  indexes {
+    purchase_order_id
+    received_by_user_id
+    status
+    delivery_reference
+  }
+
+  Note: 'A purchase order can have multiple deliveries, supporting partial deliveries.'
+}
+
+Table delivery_items {
+  id integer [pk, increment]
+  delivery_id integer [not null]
+  purchase_order_item_id integer [not null]
+  received_quantity decimal(12,2) [not null]
+  damaged_quantity decimal(12,2) [not null, default: 0]
+  notes text
+
+  indexes {
+    delivery_id
+    purchase_order_item_id
+    (delivery_id, purchase_order_item_id) [unique]
+  }
+
+  Note: 'Outstanding quantity is derived from ordered quantity minus total received quantity across deliveries. Quantities must not be negative.'
+}
+
+
+//////////////////////////////////////////////////////////////
+// COMPONENT 4
+// QUALITY INSPECTION & NON-CONFORMANCE MANAGEMENT
+//////////////////////////////////////////////////////////////
+
+Table inspections {
+  id integer [pk, increment]
+  delivery_id integer [not null]
+  inspector_user_id integer [not null]
+  inspection_date timestamp [not null]
+  status inspection_status [not null, default: 'Pending']
+  overall_decision inspection_decision
+  notes text
+  created_at timestamp [not null]
+  updated_at timestamp [not null]
+
+  indexes {
+    delivery_id
+    inspector_user_id
+    status
+    inspection_date
+  }
+
+  Note: 'Multiple inspections may exist for one delivery when re-inspection is required.'
+}
+
+Table inspection_items {
+  id integer [pk, increment]
+  inspection_id integer [not null]
+  delivery_item_id integer [not null]
+  condition varchar(100)
+  accepted_quantity decimal(12,2) [not null, default: 0]
+  rejected_quantity decimal(12,2) [not null, default: 0]
+  remarks text
+
+  indexes {
+    inspection_id
+    delivery_item_id
+    (inspection_id, delivery_item_id) [unique]
+  }
+
+  Note: 'Accepted quantity + rejected quantity must not exceed the corresponding received quantity.'
+}
+
+Table non_conformances {
+  id integer [pk, increment]
+  inspection_item_id integer [not null]
+  issue_description text [not null]
+  severity non_conformance_severity [not null]
+  corrective_action text
+  status non_conformance_status [not null, default: 'Open']
+  created_at timestamp [not null]
+  updated_at timestamp [not null]
+  resolved_at timestamp
+
+  indexes {
+    inspection_item_id
+    severity
+    status
+  }
+}
+
+
+//////////////////////////////////////////////////////////////
+// AGENTIC AI WORKFLOW STATE
+//////////////////////////////////////////////////////////////
+
+Table agent_workflows {
+  id integer [pk, increment]
+  material_request_id integer [not null]
+  initiated_by_user_id integer [not null]
+  objective text [not null]
+  status workflow_status [not null, default: 'Pending']
+  approval_status agent_approval_status [not null, default: 'Pending']
+  final_outcome text
+  started_at timestamp
+  completed_at timestamp
+  created_at timestamp [not null]
+  updated_at timestamp [not null]
+
+  indexes {
+    material_request_id
+    initiated_by_user_id
+    status
+    approval_status
+  }
+
+  Note: 'Represents an Agentic AI workflow linked to a material request, such as quotation analysis and procurement recommendation. Stores structured workflow state only, not hidden reasoning.'
+}
+
+Table agent_workflow_steps {
+  id integer [pk, increment]
+  agent_workflow_id integer [not null]
+  agent_role varchar(100) [not null]
+  step_name varchar(200) [not null]
+  step_order integer [not null]
+  status workflow_step_status [not null, default: 'Pending']
+  structured_result jsonb
+  validation_result jsonb
+  error_message text
+  started_at timestamp
+  completed_at timestamp
+
+  indexes {
+    agent_workflow_id
+    status
+    (agent_workflow_id, step_order) [unique]
+  }
+
+  Note: 'Stores structured outputs, validation results, errors and execution state. Does not store private AI chain-of-thought.'
+}
+
+Table agent_approvals {
+  id integer [pk, increment]
+  agent_workflow_id integer [not null]
+  reviewed_by_user_id integer [not null]
+  decision agent_approval_status [not null]
+  comment text
+  decision_date timestamp [not null]
+
+  indexes {
+    agent_workflow_id
+    reviewed_by_user_id
+    decision
+  }
+
+  Note: 'Maintains auditable human-in-the-loop approval history.'
+}
+
+
+//////////////////////////////////////////////////////////////
+// RELATIONSHIPS
+//////////////////////////////////////////////////////////////
+
+// User / Role
+Ref: user_roles.user_id > users.id
+Ref: user_roles.role_id > roles.id
+
+// Core -> Material Request
+Ref: material_requests.project_id > projects.id
+Ref: material_requests.requested_by_user_id > users.id
+
+Ref: material_request_items.material_request_id > material_requests.id
+Ref: material_request_items.material_id > materials.id
+
+Ref: approvals.material_request_id > material_requests.id
+Ref: approvals.approved_by_user_id > users.id
+
+// Material Request -> Procurement
+Ref: quotations.material_request_id > material_requests.id
+Ref: quotations.supplier_id > suppliers.id
+
+Ref: quotation_items.quotation_id > quotations.id
+Ref: quotation_items.material_request_item_id > material_request_items.id
+
+Ref: purchase_orders.quotation_id > quotations.id
+
+Ref: purchase_order_items.purchase_order_id > purchase_orders.id
+Ref: purchase_order_items.quotation_item_id > quotation_items.id
+
+// Procurement -> Delivery
+Ref: deliveries.purchase_order_id > purchase_orders.id
+Ref: deliveries.received_by_user_id > users.id
+
+Ref: delivery_items.delivery_id > deliveries.id
+Ref: delivery_items.purchase_order_item_id > purchase_order_items.id
+
+// Delivery -> Quality Inspection
+Ref: inspections.delivery_id > deliveries.id
+Ref: inspections.inspector_user_id > users.id
+
+Ref: inspection_items.inspection_id > inspections.id
+Ref: inspection_items.delivery_item_id > delivery_items.id
+
+Ref: non_conformances.inspection_item_id > inspection_items.id
+
+// Agentic AI -> Material Request workflow
+Ref: agent_workflows.material_request_id > material_requests.id
+Ref: agent_workflows.initiated_by_user_id > users.id
+
+Ref: agent_workflow_steps.agent_workflow_id > agent_workflows.id
+
+Ref: agent_approvals.agent_workflow_id > agent_workflows.id
+Ref: agent_approvals.reviewed_by_user_id > users.id
