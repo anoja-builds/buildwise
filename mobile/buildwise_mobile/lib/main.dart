@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
-import 'common/screens/screens.dart';
-import 'core/theme/app_theme.dart';
+import 'features/deliveries/screens/delivery_list_screen.dart';
 
 void main() => runApp(const BuildWiseApp());
 
@@ -23,11 +22,9 @@ class CommonUiPreview extends StatefulWidget {
 }
 
 class _CommonUiPreviewState extends State<CommonUiPreview> {
-  int selectedIndex = 0;
-
   static const screens = [
     MobileHomeBaseScreen(),
-    MobileListBaseScreen(),
+    DeliveryListScreen(),
     MobileFormBaseScreen(),
     MobileDetailBaseScreen(),
     MobileUiStatesScreen(),
@@ -56,9 +53,9 @@ class _CommonUiPreviewState extends State<CommonUiPreview> {
           label: 'Home',
         ),
         NavigationDestination(
-          icon: Icon(Icons.list_alt_outlined),
-          selectedIcon: Icon(Icons.list_alt),
-          label: 'List',
+          icon: Icon(Icons.local_shipping_outlined),
+          selectedIcon: Icon(Icons.local_shipping),
+          label: 'Deliveries',
         ),
         NavigationDestination(
           icon: Icon(Icons.edit_note_outlined),

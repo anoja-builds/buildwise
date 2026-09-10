@@ -40,6 +40,9 @@ namespace BuildWise.Api.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<int?>("DeliveryId")
+                        .HasColumnType("integer");
+
                     b.Property<string>("FinalOutcome")
                         .HasColumnType("text");
 
@@ -69,6 +72,8 @@ namespace BuildWise.Api.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("ApprovalStatus");
+
+                    b.HasIndex("DeliveryId");
 
                     b.HasIndex("InitiatedByUserId");
 
@@ -144,10 +149,10 @@ namespace BuildWise.Api.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
-                    b.Property<DateTime>("CreatedAt")
+                    b.Property<DateTime?>("ActualArrivalDate")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<DateTime?>("DeliveryDate")
+                    b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("DeliveryReference")
@@ -162,6 +167,9 @@ namespace BuildWise.Api.Migrations
 
                     b.Property<int>("PurchaseOrderId")
                         .HasColumnType("integer");
+
+                    b.Property<DateTime?>("ReceivedAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<int?>("ReceivedByUserId")
                         .HasColumnType("integer");
@@ -184,6 +192,107 @@ namespace BuildWise.Api.Migrations
                     b.HasIndex("Status");
 
                     b.ToTable("deliveries", (string)null);
+                });
+
+            modelBuilder.Entity("BuildWise.Api.Models.Entities.DeliveryEvidence", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("DeliveryId")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("DeliveryItemId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("FileType")
+                        .HasColumnType("text");
+
+                    b.Property<string>("FileUrl")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("UploadedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("UploadedByUserId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DeliveryId");
+
+                    b.HasIndex("DeliveryItemId");
+
+                    b.HasIndex("UploadedByUserId");
+
+                    b.ToTable("DeliveryEvidences");
+                });
+
+            modelBuilder.Entity("BuildWise.Api.Models.Entities.DeliveryIssue", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("DeliveryId")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("DeliveryItemId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("IssueType")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("ReportedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("ReportedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Resolution")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("ResolvedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Severity")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DeliveryId");
+
+                    b.HasIndex("DeliveryItemId");
+
+                    b.HasIndex("ReportedByUserId");
+
+                    b.ToTable("DeliveryIssues");
                 });
 
             modelBuilder.Entity("BuildWise.Api.Models.Entities.DeliveryItem", b =>
@@ -227,6 +336,42 @@ namespace BuildWise.Api.Migrations
                         .IsUnique();
 
                     b.ToTable("delivery_items", (string)null);
+                });
+
+            modelBuilder.Entity("BuildWise.Api.Models.Entities.DeliverySchedule", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Notes")
+                        .HasColumnType("text");
+
+                    b.Property<int>("PurchaseOrderId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("ScheduledDate")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ScheduledTimeSlot")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Status")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PurchaseOrderId");
+
+                    b.ToTable("DeliverySchedules");
                 });
 
             modelBuilder.Entity("BuildWise.Api.Models.Entities.Material", b =>
@@ -481,10 +626,16 @@ namespace BuildWise.Api.Migrations
 
             modelBuilder.Entity("BuildWise.Api.Models.Entities.AgentWorkflow", b =>
                 {
+                    b.HasOne("BuildWise.Api.Models.Entities.Delivery", "Delivery")
+                        .WithMany()
+                        .HasForeignKey("DeliveryId");
+
                     b.HasOne("BuildWise.Api.Models.Entities.User", "InitiatedByUser")
                         .WithMany()
                         .HasForeignKey("InitiatedByUserId")
                         .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Delivery");
 
                     b.Navigation("InitiatedByUser");
                 });
@@ -518,6 +669,52 @@ namespace BuildWise.Api.Migrations
                     b.Navigation("ReceivedByUser");
                 });
 
+            modelBuilder.Entity("BuildWise.Api.Models.Entities.DeliveryEvidence", b =>
+                {
+                    b.HasOne("BuildWise.Api.Models.Entities.Delivery", "Delivery")
+                        .WithMany("Evidence")
+                        .HasForeignKey("DeliveryId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("BuildWise.Api.Models.Entities.DeliveryItem", "DeliveryItem")
+                        .WithMany()
+                        .HasForeignKey("DeliveryItemId");
+
+                    b.HasOne("BuildWise.Api.Models.Entities.User", "UploadedByUser")
+                        .WithMany()
+                        .HasForeignKey("UploadedByUserId");
+
+                    b.Navigation("Delivery");
+
+                    b.Navigation("DeliveryItem");
+
+                    b.Navigation("UploadedByUser");
+                });
+
+            modelBuilder.Entity("BuildWise.Api.Models.Entities.DeliveryIssue", b =>
+                {
+                    b.HasOne("BuildWise.Api.Models.Entities.Delivery", "Delivery")
+                        .WithMany("Issues")
+                        .HasForeignKey("DeliveryId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("BuildWise.Api.Models.Entities.DeliveryItem", "DeliveryItem")
+                        .WithMany()
+                        .HasForeignKey("DeliveryItemId");
+
+                    b.HasOne("BuildWise.Api.Models.Entities.User", "ReportedByUser")
+                        .WithMany()
+                        .HasForeignKey("ReportedByUserId");
+
+                    b.Navigation("Delivery");
+
+                    b.Navigation("DeliveryItem");
+
+                    b.Navigation("ReportedByUser");
+                });
+
             modelBuilder.Entity("BuildWise.Api.Models.Entities.DeliveryItem", b =>
                 {
                     b.HasOne("BuildWise.Api.Models.Entities.Delivery", "Delivery")
@@ -535,6 +732,17 @@ namespace BuildWise.Api.Migrations
                     b.Navigation("Delivery");
 
                     b.Navigation("PurchaseOrderItem");
+                });
+
+            modelBuilder.Entity("BuildWise.Api.Models.Entities.DeliverySchedule", b =>
+                {
+                    b.HasOne("BuildWise.Api.Models.Entities.PurchaseOrder", "PurchaseOrder")
+                        .WithMany()
+                        .HasForeignKey("PurchaseOrderId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("PurchaseOrder");
                 });
 
             modelBuilder.Entity("BuildWise.Api.Models.Entities.PurchaseOrder", b =>
@@ -582,6 +790,10 @@ namespace BuildWise.Api.Migrations
 
             modelBuilder.Entity("BuildWise.Api.Models.Entities.Delivery", b =>
                 {
+                    b.Navigation("Evidence");
+
+                    b.Navigation("Issues");
+
                     b.Navigation("Items");
                 });
 

@@ -418,4 +418,21 @@ public class DeliveriesController : ControllerBase
             return StatusCode(500, $"An error occurred during evaluation: {ex.Message}");
         }
     }
+
+    [HttpPost("{id}/risk-analysis")]
+    public async Task<IActionResult> AnalyzeDeliveryRisk(int id, [FromQuery] int? userId)
+    {
+        try
+        {
+            var delivery = await _dbContext.Deliveries.FindAsync(id);
+            if (delivery == null) return NotFound("Delivery not found.");
+
+            var assessment = await _riskAgentService.EvaluateDeliveryRiskAsync(delivery.PurchaseOrderId, userId, id);
+            return Ok(assessment);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, ex.Message);
+        }
+    }
 }

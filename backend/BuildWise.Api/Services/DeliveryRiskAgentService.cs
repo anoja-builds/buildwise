@@ -22,38 +22,54 @@ public class DeliveryRiskAgentService
         _httpClient = new HttpClient();
     }
 
-    public async Task<DeliveryRiskAssessment> EvaluateDeliveryRiskAsync(int purchaseOrderId, int? userId = null)
+    public async Task<DeliveryRiskAssessment> EvaluateDeliveryRiskAsync(int purchaseOrderId, int? userId = null, int? deliveryId = null)
     {
-        var purchaseOrder = await _dbContext.PurchaseOrders
-            .Include(po => po.Supplier)
-            .Include(po => po.Project)
-            .Include(po => po.Items)
-                .ThenInclude(poi => poi.Material)
-            .FirstOrDefaultAsync(po => po.Id == purchaseOrderId);
+        // 1. Initialize Agentic Workflow
+        var workflow = await CreateWorkflowRecord(purchaseOrderId, userId, deliveryId);
 
-        if (purchaseOrder == null)
+        try
         {
-            throw new ArgumentException("Purchase order not found.");
+            // 2. Controlled Tool: Get System Data
+            var step1 = await StartStep(workflow.Id, "Data Retrieval", "Retrieve PO, Supplier, and Historical Performance Data", 1);
+            var systemData = await GetSystemDataTool(purchaseOrderId);
+            await CompleteStep(step1, systemData);
+
+            // 3. Risk Reasoning (Factual Calculation + AI Interpretation)
+            var step2 = await StartStep(workflow.Id, "Risk Analysis", "Reasoning over retrieved data to determine risk level", 2);
+            var assessment = await PerformRiskAnalysis(systemData);
+            await CompleteStep(step2, assessment);
+
+            // 4. Output Validation
+            var step3 = await StartStep(workflow.Id, "Result Validation", "Validate structured output and scoring consistency", 3);
+            var validationResult = ValidateAssessment(assessment);
+            await CompleteStep(step3, validationResult);
+
+            // 5. Finalize Workflow
+            workflow.Status = WorkflowStatus.Completed;
+            workflow.FinalOutcome = $"Risk Assessment Completed: {assessment.RiskLevel} (Score: {assessment.RiskScore})";
+            workflow.CompletedAt = DateTime.UtcNow;
+            await _dbContext.SaveChangesAsync();
+
+            return assessment;
         }
+        catch (Exception ex)
+        {
+            workflow.Status = WorkflowStatus.Failed;
+            workflow.FinalOutcome = $"Workflow Failed: {ex.Message}";
+            workflow.CompletedAt = DateTime.UtcNow;
+            await _dbContext.SaveChangesAsync();
+            throw;
+        }
+    }
 
-        // 1. Gather historical metrics for this supplier
-        var totalDeliveries = await _dbContext.Deliveries
-            .CountAsync(d => d.PurchaseOrder!.SupplierId == purchaseOrder.SupplierId);
-
-        var discrepancyDeliveries = await _dbContext.Deliveries
-            .CountAsync(d => d.PurchaseOrder!.SupplierId == purchaseOrder.SupplierId && 
-                             d.Status == DeliveryStatus.DiscrepancyReported);
-
-        double historicalDiscrepancyRate = totalDeliveries > 0 
-            ? (double)discrepancyDeliveries / totalDeliveries 
-            : 0.0;
-
-        // 2. Create the Agentic Workflow audit record
+    private async Task<AgentWorkflow> CreateWorkflowRecord(int poId, int? userId, int? deliveryId)
+    {
         var workflow = new AgentWorkflow
         {
-            PurchaseOrderId = purchaseOrder.Id,
+            PurchaseOrderId = poId,
+            DeliveryId = deliveryId,
             InitiatedByUserId = userId,
-            Objective = $"Evaluate delivery risk for Purchase Order #{purchaseOrder.Id} (Supplier: {purchaseOrder.Supplier?.Name})",
+            Objective = $"Determine delivery risk for Purchase Order #{poId}",
             Status = WorkflowStatus.Running,
             ApprovalStatus = AgentApprovalStatus.Pending,
             StartedAt = DateTime.UtcNow,
@@ -63,13 +79,17 @@ public class DeliveryRiskAgentService
 
         _dbContext.AgentWorkflows.Add(workflow);
         await _dbContext.SaveChangesAsync();
+        return workflow;
+    }
 
+    private async Task<AgentWorkflowStep> StartStep(int workflowId, string role, string name, int order)
+    {
         var step = new AgentWorkflowStep
         {
-            AgentWorkflowId = workflow.Id,
-            AgentRole = "Delivery Risk Agent",
-            StepName = "Analyze Promised Dates vs Required Dates and Supplier History",
-            StepOrder = 1,
+            AgentWorkflowId = workflowId,
+            AgentRole = role,
+            StepName = name,
+            StepOrder = order,
             Status = WorkflowStepStatus.Running,
             StartedAt = DateTime.UtcNow,
             CreatedAt = DateTime.UtcNow,
@@ -78,180 +98,155 @@ public class DeliveryRiskAgentService
 
         _dbContext.AgentWorkflowSteps.Add(step);
         await _dbContext.SaveChangesAsync();
+        return step;
+    }
 
-        // 3. Prepare data for the evaluation
-        var promisedDate = purchaseOrder.ExpectedDeliveryDate ?? DateTime.UtcNow.AddDays(3);
-        var requiredDate = purchaseOrder.OrderDate.AddDays(5); // Simulate required date as order date + 5 days if not otherwise set
-        var daysDifference = (promisedDate - requiredDate).Days;
-        
-        var promptData = new
+    private async Task CompleteStep(AgentWorkflowStep step, object result)
+    {
+        step.Status = WorkflowStepStatus.Completed;
+        step.CompletedAt = DateTime.UtcNow;
+        step.StructuredResultJson = JsonSerializer.Serialize(result);
+        await _dbContext.SaveChangesAsync();
+    }
+
+    // Controlled Tool 1: Data Retrieval
+    private async Task<dynamic> GetSystemDataTool(int poId)
+    {
+        var po = await _dbContext.PurchaseOrders
+            .Include(p => p.Supplier)
+            .Include(p => p.Items)
+                .ThenInclude(i => i.Material)
+            .FirstOrDefaultAsync(p => p.Id == poId)
+            ?? throw new ArgumentException($"Purchase order {poId} not found.");
+
+        var history = await _dbContext.Deliveries
+            .Where(d => d.PurchaseOrder!.SupplierId == po.SupplierId && d.Status != DeliveryStatus.Scheduled)
+            .ToListAsync();
+
+        var totalDeliveries = history.Count;
+        var lateDeliveries = history.Count(d => d.ActualArrivalDate > po.ExpectedDeliveryDate);
+        var discrepancyDeliveries = history.Count(d => d.Status == DeliveryStatus.DiscrepancyReported);
+
+        return new
         {
-            PurchaseOrderId = purchaseOrder.Id,
-            SupplierName = purchaseOrder.Supplier?.Name ?? "Unknown Supplier",
-            SupplierStatus = purchaseOrder.Supplier?.Status.ToString() ?? "Active",
-            PromisedDeliveryDate = promisedDate.ToString("yyyy-MM-dd"),
-            RequiredDeliveryDate = requiredDate.ToString("yyyy-MM-dd"),
-            DaysDifference = daysDifference,
+            PurchaseOrderId = po.Id,
+            SupplierId = po.SupplierId,
+            SupplierName = po.Supplier?.Name ?? "Unknown",
+            SupplierStatus = po.Supplier?.Status.ToString() ?? "Active",
+            RequiredDate = po.OrderDate.AddDays(5), // Business logic for required date
+            PromisedDate = po.ExpectedDeliveryDate ?? DateTime.UtcNow.AddDays(3),
             TotalPastDeliveries = totalDeliveries,
-            DiscrepancyDeliveries = discrepancyDeliveries,
-            DiscrepancyRate = historicalDiscrepancyRate,
-            Items = purchaseOrder.Items.Select(i => new { MaterialName = i.Material?.Name, Quantity = i.OrderedQuantity })
+            LateDeliveriesCount = lateDeliveries,
+            DiscrepancyDeliveriesCount = discrepancyDeliveries,
+            OnTimeRate = totalDeliveries > 0 ? (double)(totalDeliveries - lateDeliveries) / totalDeliveries : 1.0,
+            DiscrepancyRate = totalDeliveries > 0 ? (double)discrepancyDeliveries / totalDeliveries : 0.0,
+            ItemSummary = po.Items.Select(i => i.Material?.Name).ToList()
         };
+    }
 
-        DeliveryRiskAssessment assessment;
+    private async Task<DeliveryRiskAssessment> PerformRiskAnalysis(dynamic data)
+    {
+        // Perform factual calculations in backend
+        int delayDays = (data.PromisedDate - data.RequiredDate).Days;
+        double onTimeRatePercent = data.OnTimeRate * 100;
+
         string? apiKey = _configuration["Gemini:ApiKey"] ?? Environment.GetEnvironmentVariable("GEMINI_API_KEY");
 
         if (string.IsNullOrEmpty(apiKey))
         {
-            // Graceful Fallback: Rule-based evaluation
-            assessment = PerformRuleBasedRiskAssessment(promptData);
-            step.StructuredResultJson = JsonSerializer.Serialize(assessment);
-            step.ValidationResultJson = JsonSerializer.Serialize(new { Valid = true, Source = "RuleBasedFallback" });
-            step.Status = WorkflowStepStatus.Completed;
-            step.CompletedAt = DateTime.UtcNow;
-            
-            workflow.Status = WorkflowStatus.Completed;
-            workflow.FinalOutcome = $"Rule-based assessment completed. Risk: {assessment.RiskLevel}";
-            workflow.CompletedAt = DateTime.UtcNow;
-            
-            await _dbContext.SaveChangesAsync();
-            return assessment;
+            return PerformRuleBasedAssessment(data, delayDays, onTimeRatePercent);
         }
 
         try
         {
-            // Call Gemini API
-            var systemInstruction = "You are a 'Delivery Risk Agent' for BuildSupply LK, a construction materials procurement system. " +
-                                     "Your task is to analyze if a supplier quotation/purchase order creates delivery risk. " +
-                                     "You must evaluate: " +
-                                     "1. Promised delivery date vs project required date. " +
-                                     "2. Historical delivery performance (discrepancy rates). " +
-                                     "You must return ONLY a structured JSON response matching the schema: " +
-                                     "{\"riskLevel\": \"Low\"|\"Medium\"|\"High\", \"justification\": \"string explanation\", \"warnings\": [\"string warnings\"]}. " +
-                                     "Do not include any markdown format tags like ```json or ```. Output raw JSON string.";
+            var systemInstruction = "You are a 'Delivery Risk Agent'. Your objective is to interpret supplier delivery data. " +
+                "Evaluate risk based on delay days (Promised Date - Required Date) and historical performance (On-Time Rate). " +
+                "Output ONLY a valid JSON object matching this schema: " +
+                "{\"riskLevel\": \"Low\"|\"Medium\"|\"High\", \"riskScore\": 0-100, \"reasons\": [\"string\"], \"warnings\": [\"string\"], \"recommendation\": \"string\"}.";
 
-            var userPrompt = $"Analyze this delivery risk data:\n{JsonSerializer.Serialize(promptData, new JsonSerializerOptions { WriteIndented = true })}";
+            var analysisPrompt = new
+            {
+                Supplier = data.SupplierName,
+                DelayDays = delayDays,
+                HistoricalOnTimeRate = $"{onTimeRatePercent:F1}%",
+                HistoricalDiscrepancies = data.DiscrepancyDeliveriesCount,
+                ItemCount = data.ItemSummary.Count
+            };
 
             var requestBody = new
             {
-                contents = new[]
-                {
-                    new
-                    {
-                        parts = new[]
-                        {
-                            new { text = $"{systemInstruction}\n\nUser Input Data:\n{userPrompt}" }
-                        }
-                    }
-                },
-                generationConfig = new
-                {
-                    responseMimeType = "application/json"
-                }
+                contents = new[] { new { parts = new[] { new { text = $"{systemInstruction}\n\nData for Analysis:\n{JsonSerializer.Serialize(analysisPrompt)}" } } } },
+                generationConfig = new { responseMimeType = "application/json" }
             };
 
-            var url = $"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={apiKey}";
-            var response = await _httpClient.PostAsync(
-                url, 
-                new StringContent(JsonSerializer.Serialize(requestBody), Encoding.UTF8, "application/json"));
+            var url = $"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={apiKey}";
+            var response = await _httpClient.PostAsync(url, new StringContent(JsonSerializer.Serialize(requestBody), Encoding.UTF8, "application/json"));
 
             if (response.IsSuccessStatusCode)
             {
-                var responseContent = await response.Content.ReadAsStringAsync();
-                using var doc = JsonDocument.Parse(responseContent);
-                var textResult = doc.RootElement
-                    .GetProperty("candidates")[0]
-                    .GetProperty("content")
-                    .GetProperty("parts")[0]
-                    .GetProperty("text")
-                    .GetString();
+                var content = await response.Content.ReadAsStringAsync();
+                using var doc = JsonDocument.Parse(content);
+                var text = doc.RootElement.GetProperty("candidates")[0].GetProperty("content").GetProperty("parts")[0].GetProperty("text").GetString();
 
-                // Parse the inner JSON returned by Gemini
-                assessment = JsonSerializer.Deserialize<DeliveryRiskAssessment>(textResult!, new JsonSerializerOptions
-                {
-                    PropertyNameCaseInsensitive = true
-                }) ?? PerformRuleBasedRiskAssessment(promptData);
+                var assessment = JsonSerializer.Deserialize<DeliveryRiskAssessment>(text!, new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
 
-                step.StructuredResultJson = JsonSerializer.Serialize(assessment);
-                step.ValidationResultJson = JsonSerializer.Serialize(new { Valid = true, Source = "GeminiApi" });
-                step.Status = WorkflowStepStatus.Completed;
+                // Enrich with factual values from backend
+                assessment.DelayDays = delayDays;
+                assessment.OnTimeRate = (decimal)onTimeRatePercent;
+                return assessment;
             }
-            else
-            {
-                throw new Exception($"Gemini API returned status code: {response.StatusCode}");
-            }
+
+            return PerformRuleBasedAssessment(data, delayDays, onTimeRatePercent);
         }
-        catch (Exception ex)
+        catch
         {
-            // Fallback in case of API failure
-            assessment = PerformRuleBasedRiskAssessment(promptData);
-            step.StructuredResultJson = JsonSerializer.Serialize(assessment);
-            step.ValidationResultJson = JsonSerializer.Serialize(new { Valid = true, Source = "ErrorFallback" });
-            step.ErrorMessage = ex.Message;
-            step.Status = WorkflowStepStatus.Completed;
+            return PerformRuleBasedAssessment(data, delayDays, onTimeRatePercent);
+        }
+    }
+
+    private DeliveryRiskAssessment PerformRuleBasedAssessment(dynamic data, int delayDays, double onTimeRate)
+    {
+        var assessment = new DeliveryRiskAssessment { DelayDays = delayDays, OnTimeRate = (decimal)onTimeRate };
+
+        if (delayDays > 2 || onTimeRate < 70)
+        {
+            assessment.RiskLevel = "High";
+            assessment.RiskScore = 85;
+            assessment.Reasons.Add(delayDays > 0 ? $"Committed delivery is {delayDays} days late." : "Supplier has poor historical on-time performance.");
+            assessment.Recommendation = "Flag for manual procurement review.";
+        }
+        else if (delayDays > 0 || onTimeRate < 90)
+        {
+            assessment.RiskLevel = "Medium";
+            assessment.RiskScore = 50;
+            assessment.Reasons.Add("Slight delay or minor historical issues detected.");
+            assessment.Recommendation = "Monitor delivery closely.";
+        }
+        else
+        {
+            assessment.RiskLevel = "Low";
+            assessment.RiskScore = 15;
+            assessment.Reasons.Add("Supplier has strong history and satisfies required date.");
+            assessment.Recommendation = "Proceed with standard receiving workflow.";
         }
 
-        step.CompletedAt = DateTime.UtcNow;
-        workflow.Status = WorkflowStatus.Completed;
-        workflow.FinalOutcome = $"Gemini assessment completed. Risk: {assessment.RiskLevel}";
-        workflow.CompletedAt = DateTime.UtcNow;
-
-        await _dbContext.SaveChangesAsync();
         return assessment;
     }
 
-    private DeliveryRiskAssessment PerformRuleBasedRiskAssessment(dynamic data)
+    private object ValidateAssessment(DeliveryRiskAssessment assessment)
     {
-        string riskLevel = "Low";
-        var warnings = new List<string>();
-        var justification = new StringBuilder();
-
-        justification.Append($"Analyzed delivery for supplier '{data.SupplierName}'. ");
-
-        if (data.SupplierStatus == "Suspended")
-        {
-            riskLevel = "High";
-            warnings.Add("Supplier status is currently Suspended.");
-            justification.Append("Supplier is suspended, creating an automatic high delivery risk. ");
-        }
-
-        if (data.DaysDifference > 0)
-        {
-            riskLevel = "High";
-            warnings.Add($"Promised date is {data.DaysDifference} days after the project required date.");
-            justification.Append($"The supplier cannot satisfy the required date (Promised: {data.PromisedDeliveryDate}, Required: {data.RequiredDeliveryDate}). ");
-        }
-        else if (data.DaysDifference == 0)
-        {
-            riskLevel = "Medium";
-            warnings.Add("Delivery is scheduled on the exact day required, leaving zero room for delay buffers.");
-            justification.Append("Delivery is scheduled exactly on the required date. ");
-        }
-
-        if (data.DiscrepancyRate > 0.2)
-        {
-            if (riskLevel != "High") riskLevel = "Medium";
-            warnings.Add($"Supplier has a high past discrepancy rate of {(data.DiscrepancyRate * 100):F1}% across {data.TotalPastDeliveries} deliveries.");
-            justification.Append($"Supplier shows history of delivery issues: {data.DiscrepancyDeliveries} of {data.TotalPastDeliveries} past shipments were flagged with discrepancies. ");
-        }
-
-        if (warnings.Count == 0)
-        {
-            justification.Append("Supplier exhibits strong on-time history and promised date satisfies required date. Risk is determined to be Low.");
-        }
-
-        return new DeliveryRiskAssessment
-        {
-            RiskLevel = riskLevel,
-            Justification = justification.ToString(),
-            Warnings = warnings
-        };
+        bool isValid = !string.IsNullOrEmpty(assessment.RiskLevel) && assessment.RiskScore >= 0 && assessment.RiskScore <= 100;
+        return new { Valid = isValid, Timestamp = DateTime.UtcNow };
     }
 }
 
 public class DeliveryRiskAssessment
 {
     public string RiskLevel { get; set; } = "Low";
-    public string Justification { get; set; } = string.Empty;
+    public int RiskScore { get; set; }
+    public int DelayDays { get; set; }
+    public decimal OnTimeRate { get; set; }
+    public List<string> Reasons { get; set; } = new();
     public List<string> Warnings { get; set; } = new();
+    public string Recommendation { get; set; } = string.Empty;
 }
