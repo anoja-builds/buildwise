@@ -17,6 +17,13 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
 builder.Services.AddScoped<DeliveryRiskAgentService>();
 builder.Services.AddScoped<QualityInspectionService>();
 builder.Services.AddScoped<NonConformanceService>();
+builder.Services.AddScoped<QualityRiskEvidenceService>();
+builder.Services.AddScoped<QualityRiskRecommendationValidator>();
+builder.Services.AddScoped<QualityRiskAgentService>();
+builder.Services.AddHttpClient<QualityRiskAgentClient>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(100);
+}).RemoveAllLoggers();
 
 builder.Services.AddControllers();
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
