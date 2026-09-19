@@ -48,7 +48,15 @@ public class QuotationAgentClient
             var response = await _http.PostAsJsonAsync("/analyze", payload, cts.Token);
             if (response.IsSuccessStatusCode)
             {
-                var result = await response.Content.ReadFromJsonAsync<AgentRecommendationDto>(cancellationToken: cts.Token);
+                // The Python agent emits snake_case (recommended_quotation_id, ranked_alternatives, ...)
+                // while this DTO is PascalCase, so the response must be read with a snake_case naming
+                // policy or every member binds to null. Scoped to this read only — the request payload
+                // and the REST contract exposed to React remain unchanged.
+                var agentJsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web)
+                {
+                    PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower
+                };
+                var result = await response.Content.ReadFromJsonAsync<AgentRecommendationDto>(agentJsonOptions, cts.Token);
                 if (result != null)
                 {
                     _logger.LogInformation("Agent analysis received from external microservice for request #{RequestId}", materialRequestId);
