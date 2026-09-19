@@ -10,7 +10,8 @@ def test_health_endpoint():
     response = client.get("/health")
     assert response.status_code == 200
     data = response.json()
-    assert data["status"] == "ok"
+    assert data["status"] == "healthy"
+    assert data["service"] == "quotation_agent"
     assert "filter_eligible" in data["allowed_tools"]
 
 def test_scenario_cement_example():
@@ -178,6 +179,65 @@ def test_analyze_endpoint_uses_llm_rationale_when_available():
     data = response.json()
     assert data["recommended_quotation_id"] == 101
     assert data["rationale"] == "Mocked end-to-end rationale for Supplier A."
+
+
+def test_invalid_quotation_is_not_ranked_or_recommended():
+    """Regression: an expired/invalid quotation must be excluded from ranking
+    entirely — not merely warned about — so it can never take the top spot."""
+    payload = {
+        "material_request_id": 42,
+        "requested_quantities": {"1": 100.0, "2": 50.0},
+        "quotations": [
+            {
+                # Cheapest with full coverage, but expired -> must NOT win.
+                "quotation_id": 104, "supplier_id": 13, "supplier_name": "Delta Co",
+                "supplier_status": "Active", "quantity_offered": {"1": 100.0, "2": 50.0},
+                "unit_prices": {"1": 13.0, "2": 7.0}, "total_amount": 1500.0, "valid": False
+            },
+            {
+                "quotation_id": 101, "supplier_id": 10, "supplier_name": "Acme Supplies",
+                "supplier_status": "Active", "quantity_offered": {"1": 100.0, "2": 50.0},
+                "unit_prices": {"1": 12.0, "2": 8.0}, "total_amount": 1600.0, "valid": True
+            }
+        ]
+    }
+
+    response = client.post("/analyze", json=payload)
+    assert response.status_code == 200
+    data = response.json()
+
+    assert data["recommended_quotation_id"] == 101
+    assert 104 not in [alt["quotation_id"] for alt in data["ranked_alternatives"]]
+    assert any("104" in warning for warning in data["warnings"])
+
+
+def test_fallback_does_not_resurrect_ineligible_suppliers():
+    """Regression: when every quotation is ineligible, the agent must report
+    'no eligible quotations' rather than falling back to suspended/inactive ones."""
+    payload = {
+        "material_request_id": 7,
+        "requested_quantities": {"1": 100.0},
+        "quotations": [
+            {
+                "quotation_id": 201, "supplier_id": 20, "supplier_name": "Suspended One",
+                "supplier_status": "Suspended", "quantity_offered": {"1": 100.0},
+                "unit_prices": {"1": 9.0}, "total_amount": 900.0, "valid": True
+            },
+            {
+                "quotation_id": 202, "supplier_id": 21, "supplier_name": "Inactive Two",
+                "supplier_status": "Inactive", "quantity_offered": {"1": 100.0},
+                "unit_prices": {"1": 8.0}, "total_amount": 800.0, "valid": True
+            }
+        ]
+    }
+
+    response = client.post("/analyze", json=payload)
+    assert response.status_code == 200
+    data = response.json()
+
+    assert data["recommended_quotation_id"] is None
+    assert data["ranked_alternatives"] == []
+    assert "no eligible quotations" in data["rationale"].lower()
 
 
 if __name__ == "__main__":

@@ -99,8 +99,8 @@ def filter_eligible(quotations: List[QuotationInput], requested_quantities: Dict
 
         if not q.valid:
             warnings.append(f"Quotation #{q.quotation_id} from '{clean_name}' excluded: quotation marked invalid/expired.")
-            # Continue or allow evaluation if fallback is needed; here we mark coverage accurately
-            
+            continue
+
         # Robust dictionary key lookup for quantity matching
         covers_all = True
         if requested_quantities:
@@ -175,7 +175,8 @@ def generate_llm_rationale(
 @app.get("/health")
 def health():
     return {
-        "status": "ok",
+        "status": "healthy",
+        "service": "quotation_agent",
         "agent": "QuotationSupplierAnalysisAgent",
         "allowed_tools": list(ALLOWED_TOOLS),
         "llm_rationale_enabled": _anthropic_client is not None
@@ -189,12 +190,18 @@ def analyze(req: AnalyzeRequest, timeout_s: float = 10.0):
         if "filter_eligible" not in ALLOWED_TOOLS or "rank_by_total" not in ALLOWED_TOOLS:
             raise HTTPException(status_code=500, detail="Security policy violation: required tool not in allow-list.")
 
-        # If no explicit filter applies, fall back to evaluating all submitted quotations
+        # Apply the hard eligibility filter: Active supplier AND valid quotation.
         eligible, warnings = filter_eligible(req.quotations, req.requested_quantities)
         
-        # Fallback handling: if filter_eligible removed everything, evaluate all provided quotes
+        # Resilient fallback: only re-evaluate quotations that still satisfy the hard
+        # eligibility rules (Active supplier AND valid quotation). Suspended/inactive
+        # suppliers and expired quotations are never resurrected here.
         if not eligible and req.quotations:
-            eligible = [(q, True, sanitize_text(q.supplier_name)) for q in req.quotations]
+            eligible = [
+                (q, True, sanitize_text(q.supplier_name))
+                for q in req.quotations
+                if q.supplier_status == "Active" and q.valid
+            ]
 
         ranked = rank_by_total(eligible)
 
