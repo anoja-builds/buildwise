@@ -2,7 +2,10 @@
 
 Supplier, Quotation & Procurement Management. Companion to
 [component2_spec.md](component2_spec.md), [component2_build_guide.md](component2_build_guide.md)
-and the team's `BuildWise_Scenario.pdf` / `BuildWise_ERD.dbml`.
+and the team's `BuildWise_Scenario.pdf` / `BuildWise_ERD.dbml`. See also
+[ADR-001](adr/0001-quotation-analysis-agent-and-workflow-state.md) (agent runtime and
+workflow-state decisions), the [AI usage log and reflection](reports/component2_ai_usage_log_and_reflection.md),
+and the [Component 3 handoff](handoff/component2_to_component3_handoff.md).
 
 ## 1. Prerequisites
 
@@ -48,7 +51,7 @@ or environment variables for anything beyond your own machine:
 |---|---|---|
 | `Jwt:Key` | Signs every login token (shared by React + Flutter) | dev-only placeholder in `appsettings.json` |
 | `Smtp:Host` / `Port` / `Username` / `Password` | Sends the "recommendation awaiting approval" and "PO created" notification emails | empty — logs instead of sending when unset |
-| `AgentService:Url` | Where the Python agent microservice lives | `http://127.0.0.1:8000` |
+| `AgentService:Url` | Where the Python agent microservice lives | `http://127.0.0.1:8001` |
 | `ANTHROPIC_API_KEY` (env var, read by `agent_service`) | Enables the agent's real LLM-generated rationale | unset — falls back to the deterministic template rationale |
 
 Example for local dev (never commit real secrets):
@@ -85,10 +88,11 @@ dotnet run
 cd backend/agent_service
 python -m venv .venv && .venv\Scripts\activate   # or source .venv/bin/activate on macOS/Linux
 pip install -r requirements.txt
-uvicorn quotation_agent:app --port 8000
+uvicorn quotation_agent:app --port 8001
 ```
 
-`BuildWise.Api` calls this service at `AgentService:Url` with a 12s timeout.
+`BuildWise.Api` calls this service at `AgentService:Url` (`http://127.0.0.1:8001`)
+with a 10s timeout.
 If it isn't running, `QuotationAgentClient` falls back to a deterministic
 rule-based recommendation so the workflow still completes. The deterministic
 `filter_eligible`/`rank_by_total` tools always decide the winner; if you set
@@ -159,8 +163,10 @@ pip install -r requirements.txt
 pytest test_quotation_agent.py -v
 ```
 
-7 tests, including the LLM rationale path (mocked — no API key or network
-needed to run these).
+9 tests, including the LLM rationale path (mocked — no API key or network
+needed to run these) and two regressions for the eligibility/fallback fixes in
+`38bbca9` (`test_invalid_quotation_is_not_ranked_or_recommended`,
+`test_fallback_does_not_resurrect_ineligible_suppliers`).
 
 **Web (React):**
 

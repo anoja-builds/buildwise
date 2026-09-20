@@ -1,0 +1,48 @@
+# Component 2 — AI usage log and reflection
+
+**Component:** Supplier, Quotation & Procurement Management (SE3090 group assignment)
+**Author / branch:** Component 2 owner — `feature/supplier-procurement` (commits `abdc6d5`, `38bbca9`, `6161ecc`)
+**Period covered:** 2026-09-17 → 2026-09-20
+**AI tools used:** Cline (VS Code agent) running a hosted coding model; no other AI tool was used for this component.
+
+> How to read this log: every row below is reconstructed from this branch's git history and the agent session, and each claim is tied to a command that can be re-run. Where a human edit is not evidenced by history it is **not** claimed here — add your own hand-edits to the "what I changed" column before submission (the spec penalises back-filled logs that overstate AI activity).
+
+## 1. AI usage log
+
+| # | Date | Where it was used | What the tool produced | What I changed / decided | How I verified it |
+|---|---|---|---|---|---|
+| 1 | 2026-09-17 → 18 | `backend/BuildWise.Api`, `backend/BuildWise.Api.Tests`, `web/buildwise-web`, CI | EF Core entities + configurations for `suppliers`, `quotations`, `quotation_items`, `purchase_orders`, `purchase_order_items` and the shared `agent_*` tables, migrations, DTOs, `ProcurementValidationService`, `ProcurementWorkflowService`, controllers, React procurement screens, Flutter read-only status, four CI jobs | Kept the deterministic C# rule service as the **gate** and the agent strictly advisory; rejected "let the LLM pick the winner"; shipped as `abdc6d5` | `dotnet test` → 15 passed; scenario replay asserts Supplier A wins 250 bags / 525,000 with B (Suspended) excluded and C (partial) warned; `pytest` and `npm test` suites both green; `npm run build` clean |
+| 2 | 2026-09-19 | `backend/agent_service/quotation_agent.py`, tests | `continue` for invalid/expired quotations in `filter_eligible`, stricter fallback gating (Active **and** valid), `/health` contract widened, plus two regression tests | Accepted after tracing that an expired quotation could otherwise still be ranked and recommended; shipped as `38bbca9` | `pytest test_quotation_agent.py` → 9 passed, including `test_invalid_quotation_is_not_ranked_or_recommended` and `test_fallback_does_not_resurrect_ineligible_suppliers` |
+| 3 | 2026-09-19 | `backend/BuildWise.Api/Services/QuotationAgentClient.cs` | Diagnosis of workflows failing schema validation + a two-line fix: read the agent response with `JsonNamingPolicy.SnakeCaseLower` | Limited the change to the inbound read so the request payload and the camelCase contract consumed by React stay unchanged; shipped as `6161ecc` | End-to-end: `POST /api/material-requests/1/procurement-workflow` → `AwaitingApproval`, manager Approve → PO created with the expected items and total; before the fix every workflow returned "recommended_quotation_id is missing or non-positive" |
+| 4 | 2026-09-19 | Investigation of a reported "HTTP 400 when a purchase order is created" | A proposed root cause (notifications not wrapped in try-catch; endpoint not returning `Ok(...)`) | **Rejected.** Re-reading the controller showed both were already implemented, and the identical request reproduced as **200 OK** with a correct PO payload, so no code was changed and the claim was withdrawn | Delete-PO → reset-quotations → resend the byte-identical body → `STATUS=200`, PO persisted with `totalAmount: 525000.00`; dev ports left clean afterwards |
+| 5 | 2026-09-19 → 20 | Documentation | `docs/adr/0001-quotation-analysis-agent-and-workflow-state.md`, this log/reflection, `docs/handoff/component2_to_component3_handoff.md`, and corrections to three stale facts in `docs/component2_setup_guide.md` (agent port `8000` → `8001`, agent timeout "12s" → 10s, pytest "7 tests" → 9) | Reviewed every claim against the code before writing it: `appsettings.json`, `QuotationAgentClient`, both test suites and the spec sections cited in the ADR | `dotnet test` 15/15, `pytest` 9/9, `npm test` 15/15; grep of `AgentService:Url` → `http://127.0.0.1:8001` and of the agent client timeout → `TimeSpan.FromSeconds(10)` |
+
+**Prompt/usage notes.** The agent was used in short, verifiable steps (one concern per session: schema, eligibility, documentation), with the repo as the only source of truth — each AI claim was checked against a file, a test run, or an HTTP response. Generated code was reviewed against spec §5 rule by rule before merging; no generated secret, credential or connection string was committed.
+
+---
+
+## 2. Reflection (one page)
+
+### What the AI tools did well
+
+They were strongest exactly where the work was structural and repetitive. Turning spec §5–§7 into a layered backend — entities, EF Core configurations, migrations, DTOs, a validation service, a workflow service, controllers with role attributes, pagination and search — took a fraction of the time it would have taken by hand, and the shape it produced was consistent enough that the *human* work became reviewing rules rather than typing code. Two decisions in particular aged well: writing `ProcurementValidationService` before the controller that depends on it, so every rule in §5 is unit-testable in isolation; and seeding the assignment's own cement scenario as real data (`DbSeeder`) so the scenario replay test asserts the marking-relevant example end-to-end instead of a synthetic fixture. The tool was also good at the unglamorous parts that are easy to skip under deadline: prompt-injection sanitisation of supplier names, an allow-list for agent tools, idempotency guards, wrapping notification dispatch in try-catch, and CI jobs for all four stacks.
+
+### Where the AI tools failed
+
+- **The deserialization bug (the significant one).** The Python agent emits snake_case JSON (`recommended_quotation_id`, `ranked_alternatives`), while `AgentRecommendationDto` is PascalCase with no `JsonPropertyName` mapping — so every field bound to `null`, schema validation rejected the payload, and **no purchase order could ever be created**, even though the agent was returning a perfectly valid recommendation. The unit tests missed it because none of them crossed the language boundary, and the in-process fallback path (used when the agent is down) happened to produce an object whose names bound correctly, so the defect only appeared with the real microservice running. Fixed in `6161ecc`.
+- **A rule implemented as a warning instead of a gate.** Expired/invalid quotations were appended to `warnings` but still entered the ranked list, so an expired quotation could be awarded the top spot — the opposite of §5's "excluded". The AI produced the "detect and report" half of the rule and stopped short of the "remove" half. Fixed in `38bbca9`.
+- **A degraded path that was more permissive than the primary path.** The resilient fallback could resurrect suspended or inactive suppliers. A fallback must be *at least as strict* as the path it replaces; that is now covered by a regression test.
+- **Confident diagnosis without evidence.** Asked to fix an "HTTP 400 on purchase-order creation", the tool proposed a root cause and two code changes (missing try-catch, wrong return type) that were **already implemented**. The request actually reproduced as `200 OK`, so the "fixes" would have added dead code and buried a real, still-unexplained cause. Earlier in the process the same pattern appeared as an unverified claim that the component was "100% complete" before any test, endpoint or commit had been checked; the correct response was to run the checks and correct the record rather than agree.
+- **Documentation drift.** The setup guide still described the agent on port `8000` with a 12-second timeout and "7" Python tests after the code had moved to `8001`, 10 seconds and 9 tests. Docs written alongside AI-generated code go stale silently; they need the same verification as code.
+
+### What I learned
+
+1. **AI is fastest at structure and weakest at seams.** The failures clustered at boundaries — JSON casing across languages, database versus in-memory provider behaviour, role attributes on new endpoints, background notifications that must not fail the transaction. That is where review effort belongs.
+2. **A warning is not an enforcement.** Any rule the spec calls a gate needs a `continue`, a `throw`, or a test that fails without it; "we log a warning" is how a non-deterministic vendor award slips through.
+3. **Deterministic core, advisory AI, human approval** is the pattern that survives review — and it is what makes the system testable at all. The model's only job here is explaining a decision that code already made.
+4. **Claims need evidence.** A commit hash, a test count and a response body are evidence; a plausible explanation is not. Verifying cost minutes; shipping an unverified fix costs the audit trail.
+5. **Keep workflow state where it can be audited**, i.e. in PostgreSQL rows (`agent_workflows`, `agent_workflow_steps`, `agent_approvals`) rather than in memory or in logs — it is what makes a paused-for-approval process survivable and the ADR defensible.
+
+### What I would do differently
+
+Write the cross-language contract test first (agent response JSON → `AgentRecommendationDto`) and give the agent service CI a job before building the UI, so the boundary is exercised from day one. Then treat every secondary path — fallback, notifications, degraded mode — as a second system with its own tests, because that is where the two agent defects hid.
