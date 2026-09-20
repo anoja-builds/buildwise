@@ -1,7 +1,7 @@
 # Component 2 → Component 3 handoff — Delivery & Material Receiving
 
 **From:** Component 2 (Supplier, Quotation & Procurement Management) · **To:** Component 3 (Delivery & Material Receiving)
-**Branch:** `feature/supplier-procurement` · **Latest commit:** `6161ecc` · **Date:** 2026-09-20
+**Branch:** `feature/supplier-procurement` · **Latest code commit:** `6161ecc` · **Date:** 2026-09-20
 **Status:** purchase-order tables and read API are complete and verified end-to-end, so Component 3 can start building delivery workflows against them now.
 
 ## 1. What is ready for you
