@@ -91,8 +91,9 @@ pip install -r requirements.txt
 uvicorn quotation_agent:app --port 8001
 ```
 
-`BuildWise.Api` calls this service at `AgentService:Url` (`http://127.0.0.1:8001`)
-with a 10s timeout.
+`BuildWise.Api` calls this service at `AgentService:Url` (`http://127.0.0.1:8001`).
+The shared `HttpClient` allows 12s, and each `/analyze` call is budgeted at 10s
+(`QuotationAgentClient` cancels after 10 seconds).
 If it isn't running, `QuotationAgentClient` falls back to a deterministic
 rule-based recommendation so the workflow still completes. The deterministic
 `filter_eligible`/`rank_by_total` tools always decide the winner; if you set
@@ -213,3 +214,34 @@ and pull request to `main`.
    workflow and confirm the Approve/Reject/Request Revision buttons are
    hidden (role gating — spec §1, and the assignment's own example test:
    "Approval panel only renders action buttons for Manager role").
+
+---
+
+## 10. One-command start / stop / check (Windows PowerShell)
+
+Four scripts under `scripts\` wrap everything in §§4–6, so you don't have to keep three terminals straight:
+
+| Script | What it does |
+|---|---|
+| `scripts\start-dev.ps1` | Optionally builds `BuildWise.Api`, then starts the API (`:5078`), the agent service (`:8001`) and the Vite dev server (`:5173`) in the background, and finishes by printing the status table. `-NoBuild` skips the build; `-TimeoutSeconds 90` waits longer. |
+| `scripts\check-services.ps1` | The status check: TCP ports, agent `/health`, API `/swagger/v1/swagger.json` + login + `/api/auth/me`, Vite `GET /`, and a real query against the `buildwise` database. Exit code **0 = all up**, `1 = something is down` (with the reason). `-WaitSeconds 90` polls until ready; `-Json` emits machine-readable output. |
+| `scripts\smoke-test.ps1` | Proves the stack actually *works*: login, seeded suppliers, purchase-order + line items, and the agent's cement-scenario decision (recommends Active/full-coverage, excludes Suspended and expired, warns on partial coverage) with pass/fail assertions. `-WorkflowId 1` also reads a workflow's audit trail. Exit code 0 = all assertions passed. |
+| `scripts\stop-dev.ps1` | Stops the three background services by recorded PID and by port. PostgreSQL is left running (it is a Windows service). |
+
+Typical loop:
+
+```powershell
+.\scripts\start-dev.ps1                          # build + start API, agent, web, then show status
+.\scripts\check-services.ps1                     # is it running? (exit code 0 = all four up)
+.\scripts\check-services.ps1 -WaitSeconds 90     # poll every 2s until ready
+.\scripts\smoke-test.ps1 -WorkflowId 1           # is it working? (end-to-end assertions)
+.\scripts\stop-dev.ps1                           # stop API, agent and web
+```
+
+Notes:
+
+- Logs are written to `logs\` (git-ignored) — `api.out.log`, `agent.err.log`, `web.out.log`, … — and PIDs to `logs\dev-pids.json`. When a service is reported DOWN, read its log first.
+- Already-running ports are left alone, so running `start-dev.ps1` twice is harmless.
+- If your execution policy blocks unsigned scripts, invoke them explicitly:
+  `powershell -ExecutionPolicy Bypass -File .\scripts\check-services.ps1`.
+- Verified on this machine: `check-services.ps1` → 4/4 UP, `smoke-test.ps1` → 12/12 assertions (PO #2: Supplier A, 250 bags @ 2,100 = 525,000).

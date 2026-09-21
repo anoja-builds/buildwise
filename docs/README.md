@@ -12,6 +12,15 @@ Everything for **Component 2 — Supplier, Quotation & Procurement Management** 
 | [handoff/component2_to_component3_handoff.md](handoff/component2_to_component3_handoff.md) | Handoff to Component 3 (Delivery & Material Receiving): the `purchase_orders` contract, read API, and the rules for consuming it. |
 | [BuildWise_ERD.dbml](BuildWise_ERD.dbml) · [BuildWise_ERD.pdf](BuildWise_ERD.pdf) · [BuildWise_Scenario.pdf](BuildWise_Scenario.pdf) | Team-shared ERD schema, ERD diagram, and the assignment scenario all four components build against. |
 
+## Run / check scripts (Windows PowerShell)
+
+| Script | What it does |
+|---|---|
+| [`scripts\start-dev.ps1`](../scripts/start-dev.ps1) | Builds (optional) and starts the API, the Python agent service and the Vite web server in the background; logs to `logs\`, then calls the checker. |
+| [`scripts\check-services.ps1`](../scripts/check-services.ps1) | Reports whether each of the four services is up (ports + real HTTP calls + a database query). Exit code 0 = all up. |
+| [`scripts\smoke-test.ps1`](../scripts/smoke-test.ps1) | Proves the stack *works*: login, suppliers, purchase orders and the agent's cement-scenario decision, with pass/fail assertions. |
+| [`scripts\stop-dev.ps1`](../scripts/stop-dev.ps1) | Stops the three background services (leaves PostgreSQL running). |
+
 Test suites referenced throughout the docs (all green on `feature/supplier-procurement` @ `6161ecc`):
 
 | Suite | Command | Count |
