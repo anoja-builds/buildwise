@@ -315,7 +315,7 @@ public class ProcurementWorkflowService
 
         return new ProcurementWorkflowDetailsDto(
             workflow.Id,
-            workflow.MaterialRequestId,
+            workflow.MaterialRequestId ?? 0,
             workflow.Objective,
             workflow.Status.ToString(),
             workflow.ApprovalStatus.ToString(),
@@ -441,11 +441,16 @@ public class ProcurementWorkflowService
         PurchaseOrder po;
         try
         {
-            // 3. Create Purchase Order & Items
+            // 3. Create Purchase Order & Items.
+            // The supplier is carried both ways: via the winning quotation (C2
+            // read path) and directly (C3 read path, non-nullable downstream,
+            // incl. DeliveryRiskAgentService) — set both here. Project stays
+            // null (C3 backfills it on delivery flows if needed).
             var today = DateOnly.FromDateTime(DateTime.UtcNow);
             po = new PurchaseOrder
             {
                 QuotationId = winnerQuotation.Id,
+                SupplierId = winnerQuotation.SupplierId,
                 OrderDate = today,
                 ExpectedDeliveryDate = today.AddDays(7),
                 Status = PurchaseOrderStatus.Created,
@@ -491,7 +496,7 @@ public class ProcurementWorkflowService
         _logger.LogInformation("Purchase Order #{PoId} created for quotation #{QuotationId} (Request #{RequestId})",
             po.Id, winnerQuotation.Id, workflow.MaterialRequestId);
 
-        await NotifyRequesterOfPurchaseOrderAsync(workflow.MaterialRequestId, po, winnerQuotation);
+        await NotifyRequesterOfPurchaseOrderAsync(workflow.MaterialRequestId ?? 0, po, winnerQuotation);
 
         return po;
     }

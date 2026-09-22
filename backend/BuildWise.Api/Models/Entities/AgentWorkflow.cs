@@ -5,10 +5,17 @@ namespace BuildWise.Api.Models.Entities;
 
 public class AgentWorkflow : BaseEntity
 {
-    public int MaterialRequestId { get; set; }
-    public MaterialRequest MaterialRequest { get; set; } = null!;
+    public int? MaterialRequestId { get; set; }
+    public MaterialRequest? MaterialRequest { get; set; }
+
+    public int? PurchaseOrderId { get; set; }
+
+    public int? DeliveryId { get; set; }
+
+    public Delivery? Delivery { get; set; }
 
     public int InitiatedByUserId { get; set; }
+    public User? InitiatedByUser { get; set; }
 
     public string Objective { get; set; } = string.Empty;
 

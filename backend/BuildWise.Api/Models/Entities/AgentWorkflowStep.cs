@@ -1,13 +1,13 @@
+﻿using BuildWise.Api.Models.Common;
 using BuildWise.Api.Models.Enums;
 
 namespace BuildWise.Api.Models.Entities;
 
-public class AgentWorkflowStep
+public class AgentWorkflowStep : BaseEntity
 {
-    public int Id { get; set; }
-
     public int AgentWorkflowId { get; set; }
-    public AgentWorkflow AgentWorkflow { get; set; } = null!;
+
+    public AgentWorkflow? AgentWorkflow { get; set; }
 
     public string AgentRole { get; set; } = string.Empty;
 
@@ -26,6 +26,20 @@ public class AgentWorkflowStep
     /// Stored as JSON string (mirrors ERD jsonb column)
     /// </summary>
     public string? ValidationResult { get; set; }
+
+    /// <summary>C3 alias for <see cref="StructuredResult"/>.</summary>
+    public string? StructuredResultJson
+    {
+        get => StructuredResult;
+        set => StructuredResult = value;
+    }
+
+    /// <summary>C3 alias for <see cref="ValidationResult"/>.</summary>
+    public string? ValidationResultJson
+    {
+        get => ValidationResult;
+        set => ValidationResult = value;
+    }
 
     public string? ErrorMessage { get; set; }
 

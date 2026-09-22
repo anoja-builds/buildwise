@@ -142,12 +142,18 @@ public class PurchaseOrdersController : ControllerBase
 
     private static PurchaseOrderDto MapToPurchaseOrderDto(PurchaseOrder po)
     {
+        // C2 POs carry the supplier via the winning quotation; C3 POs carry it
+        // directly (SupplierId). Prefer the direct link, fall back to quotation.
+        var supplierId = po.SupplierId ?? po.Quotation?.SupplierId ?? 0;
+        var supplierName = po.Supplier?.Name
+            ?? po.Quotation?.Supplier?.Name
+            ?? $"Supplier #{supplierId}";
         return new PurchaseOrderDto(
             po.Id,
-            po.QuotationId,
+            po.QuotationId ?? 0,
             po.Quotation?.MaterialRequestId ?? 0,
-            po.Quotation?.SupplierId ?? 0,
-            po.Quotation?.Supplier?.Name ?? $"Supplier #{po.Quotation?.SupplierId}",
+            supplierId,
+            supplierName,
             po.OrderDate,
             po.ExpectedDeliveryDate,
             po.Status.ToString(),
@@ -157,8 +163,11 @@ public class PurchaseOrdersController : ControllerBase
             po.Items.Select(i => new PurchaseOrderItemDto(
                 i.Id,
                 i.QuotationItemId,
-                i.QuotationItem?.MaterialRequestItem?.Material?.Name ?? $"Item #{i.QuotationItemId}",
-                i.QuotationItem?.MaterialRequestItem?.Material?.Unit ?? "Units",
+                i.MaterialId,
+                i.QuotationItem?.MaterialRequestItem?.Material?.Name
+                    ?? i.Material?.Name
+                    ?? $"Item #{i.QuotationItemId ?? i.MaterialId ?? i.Id}",
+                i.QuotationItem?.MaterialRequestItem?.Material?.Unit ?? i.Material?.Unit ?? "Units",
                 i.OrderedQuantity,
                 i.UnitPrice,
                 i.OrderedQuantity * i.UnitPrice

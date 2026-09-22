@@ -1,4 +1,4 @@
-using BuildWise.Api.Models.Entities;
+﻿using BuildWise.Api.Models.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
@@ -34,5 +34,9 @@ public class AgentWorkflowStepConfiguration : IEntityTypeConfiguration<AgentWork
         builder.HasIndex(s => s.Status);
         builder.HasIndex(s => new { s.AgentWorkflowId, s.StepOrder })
             .IsUnique();
+
+        // C3-facing aliases share the same columns - not mapped separately.
+        builder.Ignore(s => s.StructuredResultJson);
+        builder.Ignore(s => s.ValidationResultJson);
     }
 }

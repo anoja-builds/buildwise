@@ -2,7 +2,8 @@ namespace BuildWise.Api.DTOs;
 
 public record PurchaseOrderItemDto(
     int Id,
-    int QuotationItemId,
+    int? QuotationItemId,
+    int? MaterialId,
     string MaterialName,
     string Unit,
     decimal OrderedQuantity,

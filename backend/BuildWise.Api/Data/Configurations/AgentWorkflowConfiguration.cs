@@ -1,4 +1,4 @@
-using BuildWise.Api.Models.Entities;
+﻿using BuildWise.Api.Models.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
@@ -25,9 +25,18 @@ public class AgentWorkflowConfiguration : IEntityTypeConfiguration<AgentWorkflow
             .HasMaxLength(50)
             .IsRequired();
 
+        // C2: optional link to the source material request.
         builder.HasOne(w => w.MaterialRequest)
             .WithMany(mr => mr.Workflows)
             .HasForeignKey(w => w.MaterialRequestId)
+            .IsRequired(false)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        // C3: optional link to the initiating user.
+        builder.HasOne(w => w.InitiatedByUser)
+            .WithMany()
+            .HasForeignKey(w => w.InitiatedByUserId)
+            .IsRequired(false)
             .OnDelete(DeleteBehavior.Restrict);
 
         builder.HasIndex(w => w.MaterialRequestId);

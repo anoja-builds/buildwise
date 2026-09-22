@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using System.Text.Json.Serialization;
 using BuildWise.Api.Data;
 using BuildWise.Api.Middleware;
@@ -25,14 +25,13 @@ builder.Services.AddControllers()
         options.JsonSerializerOptions.ReferenceHandler = ReferenceHandler.IgnoreCycles;
     });
 
-// Register Component 2 Services
+// Component 2 services: deterministic validation, agent client, workflow orchestration.
 builder.Services.AddScoped<ProcurementValidationService>();
 
 builder.Services.AddHttpClient<QuotationAgentClient>(client =>
 {
     // Keep this default in step with appsettings.json ("AgentService:Url"), the agent
-    // service's uvicorn port and the setup guide — a mismatched default would silently
-    // skip the agent and fall back to in-process analysis instead of calling it.
+    // service uvicorn port and the setup guide.
     var agentUrl = builder.Configuration["AgentService:Url"] ?? "http://127.0.0.1:8001";
     client.BaseAddress = new Uri(agentUrl);
     client.Timeout = TimeSpan.FromSeconds(12);
@@ -42,7 +41,10 @@ builder.Services.AddScoped<ProcurementWorkflowService>();
 
 builder.Services.AddScoped<IEmailService, SmtpEmailService>();
 
-// Shared authentication (Core, used by every component's controllers, React and Flutter)
+// Component 3 service: delivery risk analysis over confirmed purchase orders.
+builder.Services.AddScoped<DeliveryRiskAgentService>();
+
+// Shared authentication (Core, used by every component controllers, React and Flutter)
 builder.Services.AddSingleton<JwtTokenService>();
 builder.Services.AddScoped<AuthService>();
 
@@ -73,7 +75,7 @@ builder.Services.AddAuthentication(options =>
 
 builder.Services.AddAuthorization();
 
-// CORS for React web client
+// CORS: permissive dev policy (covers React on localhost:5173 and Flutter/Chrome).
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowAll", policy =>
@@ -88,7 +90,7 @@ builder.Services.AddCors(options =>
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
-    c.SwaggerDoc("v1", new() { Title = "BuildWise API", Version = "v1", Description = "Supplier, Quotation & Procurement Management, and shared authentication" });
+    c.SwaggerDoc("v1", new() { Title = "BuildWise API", Version = "v1", Description = "Supplier, Quotation & Procurement Management, Delivery & Receiving, and shared authentication" });
 
     c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
     {
@@ -97,7 +99,7 @@ builder.Services.AddSwaggerGen(c =>
         Scheme = "Bearer",
         BearerFormat = "JWT",
         In = ParameterLocation.Header,
-        Description = "Paste the JWT returned by /api/auth/login (no 'Bearer ' prefix needed here)."
+        Description = "Paste the JWT returned by /api/auth/login (no Bearer prefix needed here)."
     });
     c.AddSecurityRequirement(new OpenApiSecurityRequirement
     {
@@ -116,13 +118,21 @@ if (app.Environment.IsDevelopment())
     app.UseSwagger();
     app.UseSwaggerUI(c =>
     {
-        c.SwaggerEndpoint("/swagger/v1/swagger.json", "BuildWise Component 2 v1");
+        c.SwaggerEndpoint("/swagger/v1/swagger.json", "BuildWise API v1");
     });
 
     using var seedScope = app.Services.CreateScope();
-    var seedDb = seedScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-    await seedDb.Database.MigrateAsync();
-    await DbSeeder.SeedAsync(seedDb);
+    try
+    {
+        var seedDb = seedScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        await seedDb.Database.MigrateAsync();
+        await DbSeeder.SeedAsync(seedDb);
+    }
+    catch (Exception ex)
+    {
+        var logger = seedScope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+        logger.LogError(ex, "An error occurred while seeding the database.");
+    }
 }
 
 app.UseMiddleware<ExceptionHandlingMiddleware>();

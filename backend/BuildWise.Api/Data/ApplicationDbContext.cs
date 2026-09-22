@@ -1,4 +1,4 @@
-using BuildWise.Api.Models.Entities;
+﻿using BuildWise.Api.Models.Entities;
 using Microsoft.EntityFrameworkCore;
 
 namespace BuildWise.Api.Data;
@@ -34,6 +34,16 @@ public class ApplicationDbContext : DbContext
     public DbSet<PurchaseOrder> PurchaseOrders => Set<PurchaseOrder>();
 
     public DbSet<PurchaseOrderItem> PurchaseOrderItems => Set<PurchaseOrderItem>();
+
+    public DbSet<Delivery> Deliveries => Set<Delivery>();
+
+    public DbSet<DeliveryItem> DeliveryItems => Set<DeliveryItem>();
+
+    public DbSet<DeliverySchedule> DeliverySchedules => Set<DeliverySchedule>();
+
+    public DbSet<DeliveryIssue> DeliveryIssues => Set<DeliveryIssue>();
+
+    public DbSet<DeliveryEvidence> DeliveryEvidences => Set<DeliveryEvidence>();
 
     public DbSet<AgentWorkflow> AgentWorkflows => Set<AgentWorkflow>();
 
