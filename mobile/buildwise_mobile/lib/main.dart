@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'common/screens/screens.dart';
 import 'core/theme/app_theme.dart';
+import 'features/quality/screens/pending_inspections_screen.dart';
 
 void main() => runApp(const BuildWiseApp());
 
@@ -38,6 +39,18 @@ class _CommonUiPreviewState extends State<CommonUiPreview> {
     appBar: AppBar(
       title: const Text('BuildWise'),
       actions: [
+        TextButton.icon(
+          style: TextButton.styleFrom(
+            foregroundColor: Theme.of(context).colorScheme.onPrimary,
+          ),
+          icon: const Icon(Icons.fact_check_outlined),
+          label: const Text('Quality'),
+          onPressed: () => Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => const PendingInspectionsScreen(),
+            ),
+          ),
+        ),
         IconButton(
           onPressed: () {},
           tooltip: 'Notifications',
