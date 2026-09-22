@@ -9,6 +9,9 @@ namespace BuildWise.Api.Services;
 
 public class ProcurementWorkflowService
 {
+    /// <summary>agent_workflow_steps.agent_role for the tool-using analysis step (spec §6).</summary>
+    private const string AnalysisAgentRole = "QuotationSupplierAnalysisAgent";
+
     private readonly ApplicationDbContext _db;
     private readonly QuotationAgentClient _agentClient;
     private readonly ProcurementValidationService _validationService;
@@ -117,7 +120,7 @@ public class ProcurementWorkflowService
         var analysisStep = new AgentWorkflowStep
         {
             AgentWorkflowId = workflow.Id,
-            AgentRole = "QuotationSupplierAnalysisAgent",
+            AgentRole = AnalysisAgentRole,
             StepName = "Filter & rank eligible quotations (tool use)",
             StepOrder = 2,
             Status = WorkflowStepStatus.Running,
@@ -278,11 +281,12 @@ public class ProcurementWorkflowService
         AgentRecommendationDto? recommendation = null;
         ProcurementValidationResultDto? validation = null;
 
-        // Recommendation and validation now live on distinct agent steps
-        // (analysis vs. validation), so look each up from whichever step
-        // actually carries it rather than assuming the single last step does.
+        // Recommendation and validation live on distinct agent steps (analysis vs.
+        // validation), so each is read from behind its own guard: the recommendation only
+        // from the analysis agent's step (never the planning step's plan JSON), and null
+        // when that step failed schema validation.
         var recommendationStep = workflow.Steps
-            .Where(s => s.StructuredResult != null)
+            .Where(s => s.AgentRole == AnalysisAgentRole && s.StructuredResult != null)
             .OrderByDescending(s => s.StepOrder)
             .FirstOrDefault();
         if (recommendationStep?.StructuredResult != null)

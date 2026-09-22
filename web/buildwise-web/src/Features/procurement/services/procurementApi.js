@@ -81,10 +81,17 @@ async function request(path, { method = 'GET', body, mockFallback } = {}) {
       body: body ? JSON.stringify(body) : undefined
     })
 
-    if (res.status === 401) {
-      authApi.clearSession()
-      window.dispatchEvent(new CustomEvent('buildwise:unauthorized'))
-      throw new Error('Your session has expired. Please sign in again.')
+        if (res.status === 401) {
+      if (session?.token) {
+        // Authenticated request whose token was rejected — the real session-expired flow.
+        authApi.clearSession()
+        window.dispatchEvent(new CustomEvent('buildwise:unauthorized'))
+        throw new Error('Your session has expired. Please sign in again.')
+      }
+      // Unauthenticated caller (e.g. vitest, or a fresh demo tab) hitting an API
+      // that requires auth. Treat this like a network failure so the mock
+      // fallback engages instead of surfacing a 401 to the user.
+      throw new TypeError('Failed to fetch')
     }
 
     if (!res.ok) {

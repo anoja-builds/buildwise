@@ -25,10 +25,13 @@ $ErrorActionPreference = 'Continue'
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $pidFile  = Join-Path $repoRoot 'logs\dev-pids.json'
-$ports    = [ordered]@{
-    5078 = 'BuildWise API'
-    8001 = 'Agent service'
-    5173 = 'React web'
+
+# Keys are strings on purpose: an [ordered] dictionary indexes by position when given an
+# integer, so integer keys would resolve to $null instead of the service name.
+$ports = [ordered]@{
+    '5078' = 'BuildWise API'
+    '8001' = 'Agent service'
+    '5173' = 'React web'
 }
 
 function Write-Status {

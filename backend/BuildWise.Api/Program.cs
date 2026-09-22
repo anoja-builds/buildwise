@@ -30,7 +30,10 @@ builder.Services.AddScoped<ProcurementValidationService>();
 
 builder.Services.AddHttpClient<QuotationAgentClient>(client =>
 {
-    var agentUrl = builder.Configuration["AgentService:Url"] ?? "http://127.0.0.1:8000";
+    // Keep this default in step with appsettings.json ("AgentService:Url"), the agent
+    // service's uvicorn port and the setup guide — a mismatched default would silently
+    // skip the agent and fall back to in-process analysis instead of calling it.
+    var agentUrl = builder.Configuration["AgentService:Url"] ?? "http://127.0.0.1:8001";
     client.BaseAddress = new Uri(agentUrl);
     client.Timeout = TimeSpan.FromSeconds(12);
 });
