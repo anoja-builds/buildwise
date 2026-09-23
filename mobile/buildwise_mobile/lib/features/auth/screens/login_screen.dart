@@ -21,18 +21,21 @@ const _demoPassword = 'Passw0rd!';
 /// Shared BuildWise sign-in screen (spec §8's "Registration, login, logout,
 /// secure token storage and protected screens" requirement).
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key, required this.onSignedIn, AuthService? authService})
-    : _authService = authService;
+  const LoginScreen({
+    super.key,
+    required this.onSignedIn,
+    this.authService,
+  });
 
   final VoidCallback onSignedIn;
-  final AuthService? _authService;
+  final AuthService? authService;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  late final AuthService _authService = widget._authService ?? AuthService();
+  late final AuthService _authService = widget.authService ?? AuthService();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _submitting = false;

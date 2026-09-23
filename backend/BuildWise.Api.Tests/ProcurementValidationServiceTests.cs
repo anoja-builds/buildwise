@@ -287,4 +287,214 @@ public class ProcurementValidationServiceTests
         Assert.False(result.IsValid);
         Assert.Contains(result.Errors, e => e.Contains("already exists for material request"));
     }
+
+    // ── Additional rule-path coverage (§5.1 - §5.10) ─────────────────────────
+
+    [Fact]
+    public async Task Rejects_Unknown_Material_Request()
+    {
+        var db = TestDbFactory.CreateInMemory();
+        await TestDbFactory.SeedStandardScenarioDataAsync(db);
+
+        var service = new ProcurementValidationService(db);
+        var result = await service.ValidateRecommendationAsync(recommendedQuotationId: 1, materialRequestId: 9999);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, e => e.Contains("Material request #9999 does not exist."));
+    }
+
+    [Fact]
+    public async Task Rejects_Unknown_Quotation()
+    {
+        var db = TestDbFactory.CreateInMemory();
+        var data = await TestDbFactory.SeedStandardScenarioDataAsync(db);
+
+        var service = new ProcurementValidationService(db);
+        var result = await service.ValidateRecommendationAsync(recommendedQuotationId: 9999, materialRequestId: data.Request.Id);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, e => e.Contains("Recommended quotation #9999 does not exist."));
+    }
+
+    [Fact]
+    public async Task Rejects_Quotation_From_Different_Request()
+    {
+        var db = TestDbFactory.CreateInMemory();
+        var data = await TestDbFactory.SeedStandardScenarioDataAsync(db);
+
+        // A second approved request; the quotation is recorded against it…
+        var otherRequest = new MaterialRequest
+        {
+            ProjectId = data.Project.Id,
+            RequestedByUserId = 1,
+            RequiredDate = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(21)),
+            Reason = "Different request",
+            Status = MaterialRequestStatus.Approved,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        db.MaterialRequests.Add(otherRequest);
+        await db.SaveChangesAsync();
+
+        var supplier = new Supplier { Name = "Cross Request Supplies", Status = SupplierStatus.Active };
+        db.Suppliers.Add(supplier);
+        await db.SaveChangesAsync();
+
+        var quotation = new Quotation
+        {
+            MaterialRequestId = otherRequest.Id,
+            SupplierId = supplier.Id,
+            QuotationDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            ValidUntil = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(30)),
+            TotalAmount = 525000m,
+            Items = new List<QuotationItem>
+            {
+                new() { MaterialRequestItemId = data.RequestItem.Id, Quantity = 250m, UnitPrice = 2100m }
+            }
+        };
+        db.Quotations.Add(quotation);
+        await db.SaveChangesAsync();
+
+        // …but the recommendation claims it belongs to the original request.
+        var service = new ProcurementValidationService(db);
+        var result = await service.ValidateRecommendationAsync(quotation.Id, data.Request.Id);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, e => e.Contains($"belongs to request #{otherRequest.Id}, not #{data.Request.Id}"));
+    }
+
+    [Fact]
+    public async Task Rejects_Line_Item_Reference_Outside_Request()
+    {
+        var db = TestDbFactory.CreateInMemory();
+        var data = await TestDbFactory.SeedStandardScenarioDataAsync(db);
+
+        // A foreign request item that does NOT belong to the recommended request.
+        var otherRequest = new MaterialRequest
+        {
+            ProjectId = data.Project.Id,
+            RequestedByUserId = 1,
+            RequiredDate = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(21)),
+            Reason = "Foreign item holder",
+            Status = MaterialRequestStatus.Approved,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        db.MaterialRequests.Add(otherRequest);
+        await db.SaveChangesAsync();
+
+        var foreignItem = new MaterialRequestItem
+        {
+            MaterialRequestId = otherRequest.Id,
+            MaterialId = data.Material.Id,
+            RequestedQuantity = 100.0m
+        };
+        db.MaterialRequestItems.Add(foreignItem);
+        await db.SaveChangesAsync();
+
+        var supplier = new Supplier { Name = "Line Item Supplies", Status = SupplierStatus.Active };
+        db.Suppliers.Add(supplier);
+        await db.SaveChangesAsync();
+
+        // Quotation item references the foreign request item -> Rule 4 violation.
+        var quotation = new Quotation
+        {
+            MaterialRequestId = data.Request.Id,
+            SupplierId = supplier.Id,
+            QuotationDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            ValidUntil = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(30)),
+            TotalAmount = 210000m,
+            Items = new List<QuotationItem>
+            {
+                new() { MaterialRequestItemId = foreignItem.Id, Quantity = 250m, UnitPrice = 2100m }
+            }
+        };
+        db.Quotations.Add(quotation);
+        await db.SaveChangesAsync();
+
+        var service = new ProcurementValidationService(db);
+        var result = await service.ValidateRecommendationAsync(quotation.Id, data.Request.Id);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, e => e.Contains("which does not belong to request"));
+    }
+
+    [Fact]
+    public async Task Rejects_Inactive_Supplier()
+    {
+        var db = TestDbFactory.CreateInMemory();
+        var data = await TestDbFactory.SeedStandardScenarioDataAsync(db);
+
+        var supplier = new Supplier { Name = "Zeta Cement", Status = SupplierStatus.Inactive };
+        db.Suppliers.Add(supplier);
+        await db.SaveChangesAsync();
+
+        var quotation = new Quotation
+        {
+            MaterialRequestId = data.Request.Id,
+            SupplierId = supplier.Id,
+            QuotationDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            ValidUntil = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(30)),
+            TotalAmount = 525000m,
+            Items = new List<QuotationItem>
+            {
+                new() { MaterialRequestItemId = data.RequestItem.Id, Quantity = 250m, UnitPrice = 2100m }
+            }
+        };
+        db.Quotations.Add(quotation);
+        await db.SaveChangesAsync();
+
+        var service = new ProcurementValidationService(db);
+        var result = await service.ValidateRecommendationAsync(quotation.Id, data.Request.Id);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, e => e.Contains("is Inactive. Only Active suppliers are eligible."));
+    }
+
+    [Fact]
+    public async Task PO_Creation_Blocked_For_Unknown_Workflow()
+    {
+        var db = TestDbFactory.CreateInMemory();
+        await TestDbFactory.SeedStandardScenarioDataAsync(db);
+
+        var service = new ProcurementValidationService(db);
+        var result = await service.ValidatePurchaseOrderCreationAsync(workflowId: 9999);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, e => e.Contains("Workflow #9999 does not exist."));
+    }
+
+    [Fact]
+    public async Task PO_Creation_Blocked_When_Request_Not_Approved()
+    {
+        var db = TestDbFactory.CreateInMemory();
+        var data = await TestDbFactory.SeedStandardScenarioDataAsync(db);
+
+        // The request regressed to Draft even though the manager approved.
+        data.Request.Status = MaterialRequestStatus.Draft;
+        await db.SaveChangesAsync();
+
+        var workflow = new AgentWorkflow
+        {
+            MaterialRequestId = data.Request.Id,
+            InitiatedByUserId = 1,
+            Objective = "Test",
+            Status = WorkflowStatus.AwaitingApproval,
+            ApprovalStatus = AgentApprovalStatus.Approved
+        };
+        workflow.Approvals.Add(new AgentApproval
+        {
+            ReviewedByUserId = 2,
+            Decision = AgentApprovalStatus.Approved,
+            DecisionDate = DateTime.UtcNow
+        });
+        db.AgentWorkflows.Add(workflow);
+        await db.SaveChangesAsync();
+
+        var service = new ProcurementValidationService(db);
+        var result = await service.ValidatePurchaseOrderCreationAsync(workflow.Id);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, e => e.Contains("is not in Approved state"));
+    }
 }

@@ -16,14 +16,13 @@ class MaterialRequestProcurementView extends StatefulWidget {
   const MaterialRequestProcurementView({
     super.key,
     required this.materialRequestId,
-    ProcurementStatusService? service,
-    NotificationService? notificationService,
-  }) : _service = service,
-       _notificationService = notificationService;
+    this.service,
+    this.notificationService,
+  });
 
   final int materialRequestId;
-  final ProcurementStatusService? _service;
-  final NotificationService? _notificationService;
+  final ProcurementStatusService? service;
+  final NotificationService? notificationService;
 
   @override
   State<MaterialRequestProcurementView> createState() =>
@@ -33,9 +32,9 @@ class MaterialRequestProcurementView extends StatefulWidget {
 class _MaterialRequestProcurementViewState
     extends State<MaterialRequestProcurementView> {
   late final ProcurementStatusService _service =
-      widget._service ?? ProcurementStatusService();
+      widget.service ?? ProcurementStatusService();
   late final NotificationService _notifications =
-      widget._notificationService ?? NotificationService.instance;
+      widget.notificationService ?? NotificationService.instance;
   late Future<ProcurementStatusInfo> _future;
   ProcurementStatus? _lastNotifiedStatus;
 
