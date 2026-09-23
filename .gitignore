@@ -63,3 +63,6 @@ __pycache__/
 # Claude/Kilo agent tool configs (not part of project deliverable)
 .claude/
 .kilo/agents/
+
+# Local dev helper scripts (not part of project deliverable)
+scripts/
