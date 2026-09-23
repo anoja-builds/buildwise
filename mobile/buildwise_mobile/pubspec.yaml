@@ -36,6 +36,15 @@ dependencies:
   cupertino_icons: ^1.0.8
   http: ^1.6.0
 
+  
+
+  # Secure on-device storage for the JWT issued by BuildWise.Api.
+  flutter_secure_storage: ^9.2.2
+
+  # Local push-style notifications for procurement status changes
+  # (spec §9.2's device feature) — no Firebase project required.
+  flutter_local_notifications: ^17.2.3
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

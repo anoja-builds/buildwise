@@ -10,29 +10,31 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 void main() {
-  http.Response deliveries({int status = 4, String? reference = 'DEL-007'}) =>
-      http.Response(
-        jsonEncode([
+  http.Response deliveries({
+    Object status = 4,
+    String? reference = 'DEL-007',
+  }) => http.Response(
+    jsonEncode([
+      {
+        'deliveryId': 7,
+        'deliveryReference': reference,
+        'status': status,
+        'items': [
           {
-            'deliveryId': 7,
-            'deliveryReference': reference,
-            'status': status,
-            'items': [
-              {
-                'deliveryItemId': 9,
-                'purchaseOrderItemId': 2,
-                'receivedQuantity': 10,
-              },
-              {
-                'deliveryItemId': 10,
-                'purchaseOrderItemId': 3,
-                'receivedQuantity': 2.25,
-              },
-            ],
+            'deliveryItemId': 9,
+            'purchaseOrderItemId': 2,
+            'receivedQuantity': 10,
           },
-        ]),
-        200,
-      );
+          {
+            'deliveryItemId': 10,
+            'purchaseOrderItemId': 3,
+            'receivedQuantity': 2.25,
+          },
+        ],
+      },
+    ]),
+    200,
+  );
 
   Future<void> open(
     WidgetTester tester,
@@ -51,6 +53,21 @@ void main() {
         ),
       ),
     );
+  }
+
+  for (final entry in {
+    'Received': 'Received',
+    'DiscrepancyReported': 'Discrepancy Reported',
+    'FutureStatus': 'Unknown status (FutureStatus)',
+  }.entries) {
+    testWidgets('renders merged API string status ${entry.key}', (
+      tester,
+    ) async {
+      await open(tester, (_) async => deliveries(status: entry.key));
+      await tester.pumpAndSettle();
+      expect(find.text(entry.value), findsOneWidget);
+      expect(find.text('DEL-007'), findsOneWidget);
+    });
   }
 
   testWidgets('shows loading until the request completes', (tester) async {

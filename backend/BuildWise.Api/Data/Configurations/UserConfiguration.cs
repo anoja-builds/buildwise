@@ -1,4 +1,4 @@
-using BuildWise.Api.Models.Entities;
+﻿using BuildWise.Api.Models.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
@@ -19,6 +19,12 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
         builder.Property(u => u.Email)
             .HasMaxLength(255)
             .IsRequired();
+
+        builder.Property(u => u.PasswordHash)
+            .IsRequired();
+
+        builder.Property(u => u.IsActive)
+            .HasDefaultValue(true);
 
         builder.HasIndex(u => u.Email)
             .IsUnique();

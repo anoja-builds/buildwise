@@ -6,6 +6,7 @@ namespace BuildWise.Api.Models.Entities;
 public class AgentWorkflow : BaseEntity
 {
     public int? MaterialRequestId { get; set; }
+    public MaterialRequest? MaterialRequest { get; set; }
 
     public int? PurchaseOrderId { get; set; }
 
@@ -13,8 +14,7 @@ public class AgentWorkflow : BaseEntity
 
     public Delivery? Delivery { get; set; }
 
-    public int? InitiatedByUserId { get; set; }
-
+    public int InitiatedByUserId { get; set; }
     public User? InitiatedByUser { get; set; }
 
     public string Objective { get; set; } = string.Empty;
@@ -30,4 +30,6 @@ public class AgentWorkflow : BaseEntity
     public DateTime? CompletedAt { get; set; }
 
     public ICollection<AgentWorkflowStep> Steps { get; set; } = new List<AgentWorkflowStep>();
+
+    public ICollection<AgentApproval> Approvals { get; set; } = new List<AgentApproval>();
 }

@@ -1,4 +1,4 @@
-using BuildWise.Api.Models.Entities;
+﻿using BuildWise.Api.Models.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
@@ -25,9 +25,23 @@ public class PurchaseOrderItemConfiguration : IEntityTypeConfiguration<PurchaseO
             .HasForeignKey(poi => poi.PurchaseOrderId)
             .OnDelete(DeleteBehavior.Cascade);
 
+        // C2: optional link back to the source quotation line.
+        builder.HasOne(poi => poi.QuotationItem)
+            .WithOne(qi => qi.PurchaseOrderItem)
+            .HasForeignKey<PurchaseOrderItem>(poi => poi.QuotationItemId)
+            .IsRequired(false)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        // C3: optional direct material link.
         builder.HasOne(poi => poi.Material)
             .WithMany()
             .HasForeignKey(poi => poi.MaterialId)
+            .IsRequired(false)
             .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasIndex(poi => new { poi.PurchaseOrderId, poi.QuotationItemId })
+            .IsUnique();
+
+        builder.HasIndex(poi => poi.MaterialId);
     }
 }

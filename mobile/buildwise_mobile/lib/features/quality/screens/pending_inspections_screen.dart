@@ -64,14 +64,14 @@ class _PendingInspectionsScreenState extends State<PendingInspectionsScreen> {
   }
 
   // Presentation only: never filter eligibility here. The API owns that rule.
-  String _statusLabel(int status) => switch (status) {
-    0 => 'Scheduled',
-    1 => 'In Transit',
-    2 => 'Arrived',
-    3 => 'Receiving In Progress',
-    4 => 'Received',
-    5 => 'Partially Received',
-    6 => 'Discrepancy Reported',
+  String _statusLabel(Object status) => switch (status) {
+    0 || 'Scheduled' => 'Scheduled',
+    1 || 'InTransit' => 'In Transit',
+    2 || 'Arrived' => 'Arrived',
+    3 || 'ReceivingInProgress' => 'Receiving In Progress',
+    4 || 'Received' => 'Received',
+    5 || 'PartiallyReceived' => 'Partially Received',
+    6 || 'DiscrepancyReported' => 'Discrepancy Reported',
     _ => 'Unknown status ($status)',
   };
 

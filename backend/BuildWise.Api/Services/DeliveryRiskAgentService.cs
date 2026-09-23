@@ -52,7 +52,7 @@ public class DeliveryRiskAgentService
         var workflow = new AgentWorkflow
         {
             PurchaseOrderId = purchaseOrder.Id,
-            InitiatedByUserId = userId,
+            InitiatedByUserId = userId ?? 1,
             Objective = $"Evaluate delivery risk for Purchase Order #{purchaseOrder.Id} (Supplier: {purchaseOrder.Supplier?.Name})",
             Status = WorkflowStatus.Running,
             ApprovalStatus = AgentApprovalStatus.Pending,
@@ -80,8 +80,10 @@ public class DeliveryRiskAgentService
         await _dbContext.SaveChangesAsync();
 
         // 3. Prepare data for the evaluation
-        var promisedDate = purchaseOrder.ExpectedDeliveryDate ?? DateTime.UtcNow.AddDays(3);
-        var requiredDate = purchaseOrder.OrderDate.AddDays(5); // Simulate required date as order date + 5 days if not otherwise set
+        var promisedDate = purchaseOrder.ExpectedDeliveryDate.HasValue
+            ? purchaseOrder.ExpectedDeliveryDate.Value.ToDateTime(TimeOnly.MinValue)
+            : DateTime.UtcNow.AddDays(3);
+        var requiredDate = purchaseOrder.OrderDate.ToDateTime(TimeOnly.MinValue).AddDays(5); // Simulate required date as order date + 5 days if not otherwise set
         var daysDifference = (promisedDate - requiredDate).Days;
         
         var promptData = new

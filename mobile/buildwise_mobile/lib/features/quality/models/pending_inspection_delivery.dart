@@ -1,5 +1,5 @@
-/// Matches PendingInspectionDeliveryDto; ASP.NET currently serializes enums
-/// as integers. Status is kept as the server value, not inferred on the client.
+/// Matches PendingInspectionDeliveryDto. The shared API emits enum names;
+/// integer values remain supported for compatibility with earlier responses.
 class PendingInspectionDelivery {
   const PendingInspectionDelivery({
     required this.deliveryId,
@@ -10,15 +10,18 @@ class PendingInspectionDelivery {
 
   final int deliveryId;
   final String? deliveryReference;
-  final int status;
+  final Object status;
   final List<InspectionDeliveryItem> items;
 
   factory PendingInspectionDelivery.fromJson(Map<String, dynamic> json) {
     if (json case {
       'deliveryId': int deliveryId,
-      'status': int status,
+      'status': Object status,
       'items': List<dynamic> items,
     }) {
+      if (status is! int && status is! String) {
+        throw const FormatException('Invalid delivery status.');
+      }
       final reference = json['deliveryReference'];
       if (reference != null && reference is! String) {
         throw const FormatException('Invalid delivery reference.');

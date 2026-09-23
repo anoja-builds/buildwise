@@ -126,7 +126,7 @@ void main() {
     'not json',
     '{}',
     '[null]',
-    '[{"deliveryId":1,"status":"Received","items":[]}]',
+    '[{"deliveryId":1,"status":true,"items":[]}]',
     '[{"deliveryId":1,"status":4,"items":[{"deliveryItemId":2,"purchaseOrderItemId":3,"receivedQuantity":"10"}]}]',
   ]) {
     test('rejects malformed API response: $body', () async {
