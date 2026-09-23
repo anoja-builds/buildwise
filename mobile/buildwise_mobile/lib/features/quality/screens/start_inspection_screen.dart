@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../core/widgets/widgets.dart' as shared;
 import '../models/pending_inspection_delivery.dart';
 import '../services/quality_api_service.dart';
+import 'inspection_record_screen.dart';
 
 class StartInspectionScreen extends StatefulWidget {
   const StartInspectionScreen({
@@ -115,6 +116,25 @@ class _StartInspectionScreenState extends State<StartInspectionScreen> {
                   tone: shared.StatusTone.info,
                 ),
                 const SizedBox(height: 16),
+                shared.AppButton(
+                  label: 'Record inspection items',
+                  onPressed: () async {
+                    final completed = await Navigator.push<bool>(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => InspectionRecordScreen(
+                          inspectionId: created['id'] as int,
+                          service: widget.service,
+                        ),
+                      ),
+                    );
+                    if (completed == true && context.mounted) {
+                      Navigator.pop(context);
+                    }
+                  },
+                  expand: true,
+                ),
+                const SizedBox(height: 8),
                 shared.AppButton(
                   label: 'Back to pending inspections',
                   onPressed: () => Navigator.pop(context),

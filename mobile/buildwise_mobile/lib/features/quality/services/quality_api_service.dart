@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 
 import '../../../core/api/api_client.dart';
 import '../models/pending_inspection_delivery.dart';
+import '../models/inspection_record.dart';
 
 class QualityApiException implements Exception {
   const QualityApiException(this.message, {this.statusCode});
@@ -51,6 +52,30 @@ class QualityApiService {
 
   Future<Map<String, dynamic>> getInspection(int id) =>
       _request(() => _apiClient.get('/inspections/$id'), 200, _inspection);
+
+  Future<InspectionRecord> getInspectionRecord(int id) => _request(
+    () => _apiClient.get('/inspections/$id'),
+    200,
+    (json) => InspectionRecord.fromJson(_inspection(json)),
+  );
+
+  Future<InspectionRecord> completeInspection(
+    int id, {
+    required String overallDecision,
+    required List<InspectionItemSubmission> items,
+    String? notes,
+  }) => _request(
+    () => _apiClient.post(
+      '/inspections/$id/complete',
+      body: {
+        'overallDecision': overallDecision,
+        'notes': notes,
+        'items': items.map((item) => item.toJson()).toList(),
+      },
+    ),
+    200,
+    (json) => InspectionRecord.fromJson(_inspection(json)),
+  );
 
   Future<Map<String, dynamic>> analyseInspection(int inspectionId) => _request(
     () => _apiClient.post(

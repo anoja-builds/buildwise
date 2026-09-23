@@ -157,6 +157,49 @@ void main() {
     'overallDecision': null,
   });
 
+  testWidgets(
+    'created inspection opens item recording through shared service',
+    (tester) async {
+      var detailGets = 0;
+      await open(tester, (request) async {
+        if (request.method == 'POST') return http.Response(created, 201);
+        if (request.url.path.endsWith('/inspections/12')) {
+          detailGets++;
+          expect(request.headers['Authorization'], 'Bearer test-jwt');
+          return http.Response(
+            jsonEncode({
+              ...jsonDecode(created) as Map<String, dynamic>,
+              'deliveryReference': 'DEL-007',
+              'deliveryItems': [
+                {
+                  'deliveryItemId': 9,
+                  'purchaseOrderItemId': 2,
+                  'receivedQuantity': 10,
+                  'damagedQuantity': 2,
+                },
+              ],
+            }),
+            200,
+          );
+        }
+        return deliveries();
+      });
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Start Inspection'));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Confirm Start Inspection'));
+      await tester.tap(find.text('Confirm Start Inspection'));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Record inspection items'));
+      await tester.tap(find.text('Record inspection items'));
+      await tester.pumpAndSettle();
+      expect(find.text('Inspection #12'), findsOneWidget);
+      expect(find.text('Received: 10.00'), findsOneWidget);
+      expect(find.text('Damaged: 2.00'), findsOneWidget);
+      expect(detailGets, 1);
+    },
+  );
+
   for (final notes in ['', '  Initial delivery check  ']) {
     testWidgets(
       'starts with optional notes and refreshes pending list: $notes',

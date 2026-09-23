@@ -148,6 +148,25 @@ public class QualityAuthorizationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Inspection_detail_exposes_delivery_quantities_without_creating_inspection_items()
+    {
+        SignIn("QualityInspector");
+        using var scope = _host.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var inspection = await db.Inspections.SingleAsync();
+        db.DeliveryItems.Add(new DeliveryItem { DeliveryId = inspection.DeliveryId,
+            PurchaseOrderItemId = 11, ReceivedQuantity = 240, DamagedQuantity = 5 });
+        await db.SaveChangesAsync();
+        var response = await _client.GetFromJsonAsync<BuildWise.Api.Models.Dtos.QualityInspectionResponseDto>("/api/inspections/1");
+        Assert.NotNull(response);
+        var item = Assert.Single(response.DeliveryItems);
+        Assert.Equal(240, item.ReceivedQuantity);
+        Assert.Equal(5, item.DamagedQuantity);
+        Assert.Equal(11, item.PurchaseOrderItemId);
+        Assert.Empty(response.Items);
+    }
+
+    [Fact]
     public async Task Workflow_records_JWT_actor_not_original_inspector_or_spoofed_body()
     {
         SignIn("QualityInspector");

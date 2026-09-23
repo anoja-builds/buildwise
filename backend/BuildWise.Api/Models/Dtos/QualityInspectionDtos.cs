@@ -54,10 +54,13 @@ public class InspectionDeliveryItemDto
     public int DeliveryItemId { get; set; }
     public int PurchaseOrderItemId { get; set; }
     public decimal ReceivedQuantity { get; set; }
+    public decimal DamagedQuantity { get; set; }
 }
 
 public class QualityInspectionResponseDto
 {
+    public string? DeliveryReference { get; set; }
+    public List<InspectionDeliveryItemDto> DeliveryItems { get; set; } = new();
     public int Id { get; set; }
     public int DeliveryId { get; set; }
     public int InspectorUserId { get; set; }
