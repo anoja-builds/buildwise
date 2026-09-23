@@ -13,12 +13,17 @@ public class QualityRiskAgentService(ApplicationDbContext db, QualityRiskEvidenc
 {
     public const string AgentRole = "Quality Risk & Non-Conformance Agent";
 
-    public async Task<QualityRiskWorkflowResponse> AnalyseAsync(int inspectionId, CancellationToken ct)
+    public async Task<QualityRiskWorkflowResponse> AnalyseAsync(int inspectionId, int actingUserId, CancellationToken ct)
     {
+        if (actingUserId <= 0)
+            throw new QualityRiskException(401, "A valid authenticated user is required.");
+        if (!await db.Users.AnyAsync(u => u.Id == actingUserId && u.IsActive, ct))
+            throw new QualityRiskException(403, "An active user is required to initiate quality analysis.");
         var subject = await evidenceService.GetSubjectAsync(inspectionId, ct);
         var workflow = new AgentWorkflow
         {
             DeliveryId = subject.DeliveryId,
+            InitiatedByUserId = actingUserId,
             Objective = $"Analyse quality risk for completed Inspection #{inspectionId} and provide advisory NCR/corrective-action recommendations.",
             Status = WorkflowStatus.Running,
             ApprovalStatus = AgentApprovalStatus.Pending,

@@ -1,10 +1,12 @@
 using BuildWise.Api.Models.Dtos;
 using BuildWise.Api.Services;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
 
 namespace BuildWise.Api.Controllers;
 
 [ApiController]
+[Authorize(Roles = "QualityInspector,Administrator")]
 [Route("api/[controller]")]
 public class NonConformancesController : ControllerBase
 {

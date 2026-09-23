@@ -1,9 +1,12 @@
 using BuildWise.Api.Services;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
+using System.Security.Claims;
 
 namespace BuildWise.Api.Controllers;
 
 [ApiController]
+[Authorize(Roles = "QualityInspector,Administrator")]
 [Route("api/quality-risk-agent")]
 public class QualityRiskAgentController(QualityRiskAgentService service) : ControllerBase
 {
@@ -12,7 +15,9 @@ public class QualityRiskAgentController(QualityRiskAgentService service) : Contr
     {
         try
         {
-            var result = await service.AnalyseAsync(inspectionId, ct);
+            if (!int.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId) || userId <= 0)
+                return Unauthorized();
+            var result = await service.AnalyseAsync(inspectionId, userId, ct);
             return StatusCode(result.Status == "Failed" ? 502 : 200, result);
         }
         catch (QualityRiskException ex) { return Problem(statusCode: ex.StatusCode, detail: ex.Message); }

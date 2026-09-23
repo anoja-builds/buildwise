@@ -1,10 +1,13 @@
 using BuildWise.Api.Models.Dtos;
 using BuildWise.Api.Services;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
+using System.Security.Claims;
 
 namespace BuildWise.Api.Controllers;
 
 [ApiController]
+[Authorize(Roles = "QualityInspector,Administrator")]
 [Route("api/[controller]")]
 public class InspectionsController : ControllerBase
 {
@@ -24,7 +27,9 @@ public class InspectionsController : ControllerBase
     [HttpPost]
     public Task<IActionResult> StartInspection([FromBody] StartInspectionDto dto) => ExecuteAsync(async () =>
     {
-        var inspection = await _service.StartInspectionAsync(dto);
+        if (!int.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId) || userId <= 0)
+            return Unauthorized();
+        var inspection = await _service.StartInspectionAsync(dto, userId);
         return CreatedAtAction(nameof(GetInspectionById), new { id = inspection.Id }, inspection);
     });
 

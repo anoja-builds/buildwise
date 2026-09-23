@@ -8,10 +8,6 @@ public class StartInspectionDto
     [Range(1, int.MaxValue)]
     public int DeliveryId { get; set; }
 
-    // Temporary caller-supplied identity; replace with the shared JWT user claim later.
-    [Range(1, int.MaxValue)]
-    public int InspectorUserId { get; set; }
-
     public string? Notes { get; set; }
 }
 

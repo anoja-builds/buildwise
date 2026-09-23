@@ -40,10 +40,18 @@ public class QualityInspectionService
             }).ToListAsync();
     }
 
-    public async Task<QualityInspectionResponseDto> StartInspectionAsync(StartInspectionDto dto)
+    public async Task<QualityInspectionResponseDto> StartInspectionAsync(StartInspectionDto dto, int actingUserId)
     {
-        if (dto.DeliveryId <= 0 || dto.InspectorUserId <= 0)
-            throw Invalid("DeliveryId and InspectorUserId must be positive.");
+        if (actingUserId <= 0)
+            throw new QualityInspectionException(401, "A valid authenticated user is required.");
+        if (dto.DeliveryId <= 0)
+            throw Invalid("DeliveryId must be positive.");
+
+        // The controller supplies this ID from the validated JWT, never the body.
+        var inspector = await _dbContext.Users.AsNoTracking()
+            .SingleOrDefaultAsync(u => u.Id == actingUserId);
+        if (inspector == null || !inspector.IsActive)
+            throw new QualityInspectionException(403, "An active inspector user is required.");
 
         await using var transaction = await _dbContext.Database.BeginTransactionAsync();
         // Serialize starts for this delivery across requests and application instances.
@@ -57,13 +65,6 @@ public class QualityInspectionService
         if (!await _dbContext.DeliveryItems.AnyAsync(di => di.DeliveryId == delivery.Id && di.ReceivedQuantity > 0))
             throw Invalid("Delivery must contain at least one item with positive received quantity.");
 
-        // Identity lookup is isolated here until shared JWT authentication is integrated.
-        var inspector = await _dbContext.Users.AsNoTracking()
-            .SingleOrDefaultAsync(u => u.Id == dto.InspectorUserId);
-        if (inspector == null)
-            throw Missing("Inspector user not found.");
-        if (!inspector.IsActive)
-            throw Invalid("Inspector user must be active.");
         if (await _dbContext.Inspections.AnyAsync(i => i.DeliveryId == delivery.Id
             && i.Status == InspectionStatus.UnderInspection))
             throw Conflict("This delivery already has an active inspection.");
