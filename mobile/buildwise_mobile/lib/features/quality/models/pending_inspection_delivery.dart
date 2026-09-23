@@ -13,6 +13,22 @@ class PendingInspectionDelivery {
   final Object status;
   final List<InspectionDeliveryItem> items;
 
+  String get displayReference => deliveryReference?.trim().isNotEmpty == true
+      ? deliveryReference!.trim()
+      : 'Delivery #$deliveryId';
+
+  // Display labels only; eligibility is decided by ASP.NET.
+  String get statusLabel => switch (status) {
+    0 || 'Scheduled' => 'Scheduled',
+    1 || 'InTransit' => 'In Transit',
+    2 || 'Arrived' => 'Arrived',
+    3 || 'ReceivingInProgress' => 'Receiving In Progress',
+    4 || 'Received' => 'Received',
+    5 || 'PartiallyReceived' => 'Partially Received',
+    6 || 'DiscrepancyReported' => 'Discrepancy Reported',
+    _ => 'Unknown status ($status)',
+  };
+
   factory PendingInspectionDelivery.fromJson(Map<String, dynamic> json) {
     if (json case {
       'deliveryId': int deliveryId,

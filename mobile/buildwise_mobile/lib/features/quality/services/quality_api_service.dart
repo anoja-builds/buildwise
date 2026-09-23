@@ -129,6 +129,17 @@ class QualityApiService {
     try {
       final problem = jsonDecode(utf8.decode(response.bodyBytes));
       if (problem is Map<String, dynamic>) {
+        // ASP.NET automatic DTO validation returns field messages in errors.
+        final errors = problem['errors'];
+        if (errors is Map<String, dynamic>) {
+          final messages = errors.values
+              .whereType<List>()
+              .expand((value) => value)
+              .whereType<String>()
+              .where((value) => value.trim().isNotEmpty)
+              .toList();
+          if (messages.isNotEmpty) return messages.join('\n');
+        }
         // Analysis failures return a workflow response with HTTP 502.
         for (final field in ['detail', 'title', 'finalOutcome']) {
           final message = problem[field];

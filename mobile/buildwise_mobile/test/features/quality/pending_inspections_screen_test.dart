@@ -119,9 +119,7 @@ void main() {
     await tester.pumpAndSettle();
   });
 
-  testWidgets('renders delivery and selection placeholder without POST', (
-    tester,
-  ) async {
+  testWidgets('opens creation form and cancels without POST', (tester) async {
     final methods = <String>[];
     await open(tester, (request) async {
       methods.add(request.method);
@@ -136,15 +134,172 @@ void main() {
     expect(find.text('Item #10: received 2.25'), findsOneWidget);
     await tester.tap(find.text('Start Inspection'));
     await tester.pumpAndSettle();
-    expect(find.text('Delivery selected'), findsOneWidget);
-    expect(
-      find.textContaining('No inspection has been started.'),
-      findsOneWidget,
-    );
+    expect(find.text('Notes (optional)'), findsOneWidget);
+    expect(find.text('Confirm Start Inspection'), findsOneWidget);
     expect(methods, ['GET']);
-    await tester.tap(find.text('Back to deliveries'));
+    await tester.ensureVisible(find.text('Cancel'));
+    await tester.tap(find.text('Cancel'));
     await tester.pumpAndSettle();
     expect(find.text('DEL-007'), findsOneWidget);
+    expect(methods, ['GET', 'GET']);
+  });
+
+  final created = jsonEncode({
+    'id': 12,
+    'deliveryId': 7,
+    'inspectorUserId': 42,
+    'status': 'UnderInspection',
+    'items': [],
+    'notes': null,
+    'inspectionDate': '2026-09-23T00:00:00Z',
+    'createdAt': '2026-09-23T00:00:00Z',
+    'updatedAt': '2026-09-23T00:00:00Z',
+    'overallDecision': null,
+  });
+
+  for (final notes in ['', '  Initial delivery check  ']) {
+    testWidgets(
+      'starts with optional notes and refreshes pending list: $notes',
+      (tester) async {
+        var posts = 0;
+        var gets = 0;
+        await open(tester, (request) async {
+          if (request.method == 'GET') {
+            gets++;
+            return posts == 0 ? deliveries() : http.Response('[]', 200);
+          }
+          posts++;
+          expect(request.url.path, '/api/inspections');
+          expect(request.headers['Authorization'], 'Bearer test-jwt');
+          expect(jsonDecode(request.body), {
+            'deliveryId': 7,
+            if (notes.isNotEmpty) 'notes': notes.trim(),
+          });
+          return http.Response(created, 201);
+        });
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Start Inspection'));
+        await tester.pumpAndSettle();
+        expect(find.textContaining('Item #9 (order item #2)'), findsOneWidget);
+        expect(
+          find.byType(TextField),
+          findsOneWidget,
+        ); // No inspector identity input.
+        await tester.enterText(find.byType(TextField), notes);
+        await tester.ensureVisible(find.text('Confirm Start Inspection'));
+        await tester.tap(find.text('Confirm Start Inspection'));
+        await tester.pumpAndSettle();
+        expect(
+          find.text('Inspection #12 started successfully.'),
+          findsOneWidget,
+        );
+        expect(find.text('Under Inspection'), findsOneWidget);
+        expect(find.text('Confirm Start Inspection'), findsNothing);
+        await tester.ensureVisible(find.text('Back to pending inspections'));
+        await tester.tap(find.text('Back to pending inspections'));
+        await tester.pumpAndSettle();
+        expect(find.text('No deliveries ready for inspection'), findsOneWidget);
+        expect(posts, 1);
+        expect(gets, 2);
+      },
+    );
+  }
+
+  testWidgets(
+    'submission disables duplicates and back navigation until response',
+    (tester) async {
+      final response = Completer<http.Response>();
+      var posts = 0;
+      await open(tester, (request) async {
+        if (request.method == 'GET') return deliveries();
+        posts++;
+        return response.future;
+      });
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Start Inspection'));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Confirm Start Inspection'));
+      await tester.tap(find.text('Confirm Start Inspection'));
+      await tester.pump();
+      expect(find.byType(LinearProgressIndicator), findsOneWidget);
+      await tester.tap(find.text('Starting...'));
+      await tester.pump();
+      expect(posts, 1);
+      expect(tester.widget<TextField>(find.byType(TextField)).readOnly, isTrue);
+      await tester.binding.handlePopRoute();
+      await tester.pump();
+      expect(find.text('Starting...'), findsOneWidget);
+      response.complete(http.Response(created, 201));
+      await tester.pumpAndSettle();
+      expect(find.text('Inspection #12 started successfully.'), findsOneWidget);
+    },
+  );
+
+  for (final failure in [
+    (
+      400,
+      '{"title":"Validation failed","errors":{"DeliveryId":["DeliveryId must be positive."]}}',
+      'DeliveryId must be positive.',
+    ),
+    (
+      409,
+      '{"detail":"This delivery already has an active inspection."}',
+      'This delivery already has an active inspection.',
+    ),
+    (401, '', 'sign in again'),
+    (403, '', 'permission'),
+    (201, '{}', 'invalid response'),
+    (
+      500,
+      '{"detail":"Unable to start inspection."}',
+      'Unable to start inspection.',
+    ),
+  ]) {
+    testWidgets('start displays ${failure.$1} error and preserves notes', (
+      tester,
+    ) async {
+      await open(
+        tester,
+        (request) async => request.method == 'GET'
+            ? deliveries()
+            : http.Response(failure.$2, failure.$1),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Start Inspection'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), 'Retain these notes');
+      await tester.ensureVisible(find.text('Confirm Start Inspection'));
+      await tester.tap(find.text('Confirm Start Inspection'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining(failure.$3), findsOneWidget);
+      expect(find.text('Retain these notes'), findsOneWidget);
+      expect(find.text('Confirm Start Inspection'), findsOneWidget);
+      expect(find.textContaining('started successfully'), findsNothing);
+    });
+  }
+
+  testWidgets('network failure allows explicit retry', (tester) async {
+    var posts = 0;
+    await open(tester, (request) async {
+      if (request.method == 'GET') return deliveries();
+      if (++posts == 1) throw http.ClientException('offline');
+      return http.Response(created, 201);
+    });
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Start Inspection'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Confirm Start Inspection'));
+    await tester.tap(find.text('Confirm Start Inspection'));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Unable to connect to the BuildWise API.'),
+      findsOneWidget,
+    );
+    await tester.ensureVisible(find.text('Confirm Start Inspection'));
+    await tester.tap(find.text('Confirm Start Inspection'));
+    await tester.pumpAndSettle();
+    expect(posts, 2);
+    expect(find.text('Inspection #12 started successfully.'), findsOneWidget);
   });
 
   testWidgets('empty response shows empty state', (tester) async {

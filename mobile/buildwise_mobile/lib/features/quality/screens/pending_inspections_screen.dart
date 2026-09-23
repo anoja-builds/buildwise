@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../core/widgets/widgets.dart' as shared;
 import '../models/pending_inspection_delivery.dart';
 import '../services/quality_api_service.dart';
+import 'start_inspection_screen.dart';
 
 class PendingInspectionsScreen extends StatefulWidget {
   const PendingInspectionsScreen({super.key, this.service});
@@ -63,41 +64,15 @@ class _PendingInspectionsScreenState extends State<PendingInspectionsScreen> {
     super.dispose();
   }
 
-  // Presentation only: never filter eligibility here. The API owns that rule.
-  String _statusLabel(Object status) => switch (status) {
-    0 || 'Scheduled' => 'Scheduled',
-    1 || 'InTransit' => 'In Transit',
-    2 || 'Arrived' => 'Arrived',
-    3 || 'ReceivingInProgress' => 'Receiving In Progress',
-    4 || 'Received' => 'Received',
-    5 || 'PartiallyReceived' => 'Partially Received',
-    6 || 'DiscrepancyReported' => 'Discrepancy Reported',
-    _ => 'Unknown status ($status)',
-  };
-
-  String _reference(PendingInspectionDelivery delivery) {
-    final reference = delivery.deliveryReference?.trim();
-    return reference == null || reference.isEmpty
-        ? 'Delivery #${delivery.deliveryId}'
-        : reference;
-  }
-
-  void _selectDelivery(PendingInspectionDelivery delivery) {
-    showDialog<void>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delivery selected'),
-        content: Text(
-          '${_reference(delivery)} is selected. Inspection entry will be available in a later step. No inspection has been started.',
-        ),
-        actions: [
-          shared.AppButton(
-            label: 'Back to deliveries',
-            onPressed: () => Navigator.pop(context),
-          ),
-        ],
+  Future<void> _selectDelivery(PendingInspectionDelivery delivery) async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) =>
+            StartInspectionScreen(delivery: delivery, service: _service!),
       ),
     );
+    // Refresh even after cancellation: another inspector may have started it.
+    if (mounted) await _load();
   }
 
   @override
@@ -147,11 +122,11 @@ class _PendingInspectionsScreenState extends State<PendingInspectionsScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                _reference(delivery),
+                delivery.displayReference,
                 style: Theme.of(context).textTheme.titleMedium,
               ),
               const SizedBox(height: 8),
-              shared.StatusChip(label: _statusLabel(delivery.status)),
+              shared.StatusChip(label: delivery.statusLabel),
               const SizedBox(height: 8),
               Text(
                 '${delivery.items.length} ${delivery.items.length == 1 ? 'item' : 'items'}',

@@ -45,6 +45,32 @@ void main() {
     return QualityApiService(apiClient: ApiClient(client: client));
   }
 
+  test('start exposes ASP.NET field-validation errors', () async {
+    final api = service(
+      (_) async => http.Response(
+        jsonEncode({
+          'title': 'One or more validation errors occurred.',
+          'errors': {
+            'DeliveryId': ['DeliveryId must be positive.'],
+          },
+        }),
+        400,
+      ),
+    );
+    await expectLater(
+      api.startInspection(deliveryId: 0),
+      throwsA(
+        isA<QualityApiException>()
+            .having((e) => e.statusCode, 'status', 400)
+            .having(
+              (e) => e.message,
+              'message',
+              'DeliveryId must be positive.',
+            ),
+      ),
+    );
+  });
+
   final inspection = {
     'id': 12,
     'deliveryId': 7,
