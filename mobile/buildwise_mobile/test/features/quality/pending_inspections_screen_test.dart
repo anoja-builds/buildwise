@@ -1,6 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:buildwise_mobile/core/api/api_client.dart';
+import 'package:flutter/services.dart';
+
 import 'package:buildwise_mobile/core/theme/app_theme.dart';
 import 'package:buildwise_mobile/features/quality/screens/pending_inspections_screen.dart';
 import 'package:buildwise_mobile/features/quality/services/quality_api_service.dart';
@@ -10,6 +13,18 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 void main() {
+  const storage = MethodChannel('plugins.it_nomads.com/flutter_secure_storage');
+  setUp(() {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+          storage,
+          (call) async => call.method == 'read' ? 'test-jwt' : null,
+        );
+  });
+  tearDown(() {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(storage, null);
+  });
   http.Response deliveries({
     Object status = 4,
     String? reference = 'DEL-007',
@@ -46,10 +61,7 @@ void main() {
       MaterialApp(
         theme: AppTheme.light,
         home: PendingInspectionsScreen(
-          service: QualityApiService(
-            baseUrl: 'https://buildwise.example/api/',
-            client: client,
-          ),
+          service: QualityApiService(apiClient: ApiClient(client: client)),
         ),
       ),
     );
@@ -69,6 +81,34 @@ void main() {
       expect(find.text('DEL-007'), findsOneWidget);
     });
   }
+
+  for (final entry in {401: 'sign in again', 403: 'permission'}.entries) {
+    testWidgets('displays HTTP ${entry.key} access error', (tester) async {
+      await open(tester, (_) async => http.Response('', entry.key));
+      await tester.pumpAndSettle();
+      expect(find.textContaining(entry.value), findsOneWidget);
+      expect(find.text('No deliveries ready for inspection'), findsNothing);
+      expect(find.text('Try again'), findsOneWidget);
+    });
+  }
+
+  testWidgets('network failure displays connection error', (tester) async {
+    await open(tester, (_) async => throw http.ClientException('offline'));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Unable to connect to the BuildWise API.'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('invalid response displays parsing error', (tester) async {
+    await open(tester, (_) async => http.Response('{}', 200));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('The BuildWise API returned an invalid response.'),
+      findsOneWidget,
+    );
+  });
 
   testWidgets('shows loading until the request completes', (tester) async {
     final response = Completer<http.Response>();

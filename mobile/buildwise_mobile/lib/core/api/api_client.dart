@@ -17,10 +17,17 @@ const String apiBaseUrl = String.fromEnvironment(
 class ApiClient {
   ApiClient({FlutterSecureStorage? storage, http.Client? client})
     : _storage = storage ?? const FlutterSecureStorage(),
-      _client = client ?? http.Client();
+      _client = client ?? http.Client(),
+      _ownsClient = client == null;
 
   final FlutterSecureStorage _storage;
   final http.Client _client;
+  final bool _ownsClient;
+
+  Uri _uri(String path) => Uri.parse(
+    '${apiBaseUrl.replaceFirst(RegExp(r'/+$'), '')}/'
+    '${path.replaceFirst(RegExp(r'^/+'), '')}',
+  );
 
   static const _tokenKey = 'buildwise.jwt';
   static const _userKey = 'buildwise.user';
@@ -56,18 +63,27 @@ class ApiClient {
   Future<http.Response> get(String path) async {
     final headers = await _authHeaders();
     return _client
-        .get(Uri.parse('$apiBaseUrl$path'), headers: headers)
+        .get(_uri(path), headers: headers)
         .timeout(const Duration(seconds: 10));
   }
 
-  Future<http.Response> post(String path, {Map<String, dynamic>? body}) async {
+  Future<http.Response> post(
+    String path, {
+    Map<String, dynamic>? body,
+    Duration timeout = const Duration(seconds: 10),
+  }) async {
     final headers = await _authHeaders(json: true);
     return _client
         .post(
-          Uri.parse('$apiBaseUrl$path'),
+          _uri(path),
           headers: headers,
           body: body == null ? null : jsonEncode(body),
         )
-        .timeout(const Duration(seconds: 10));
+        .timeout(timeout);
+  }
+
+  /// An injected HTTP client remains owned by its caller.
+  void close() {
+    if (_ownsClient) _client.close();
   }
 }
