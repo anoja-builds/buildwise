@@ -66,3 +66,6 @@ __pycache__/
 
 # Local dev helper scripts (not part of project deliverable)
 scripts/
+
+# Local dev convenience scripts (not part of project deliverable)
+scripts/
