@@ -1,26 +1,52 @@
 import { useState } from 'react'
 import AppLayout from './layouts/AppLayout'
-import DashboardBase from './pages/common/DashboardBase'
-import ListBase from './pages/common/ListBase'
-import FormBase from './pages/common/FormBase'
-import DetailBase from './pages/common/DetailBase'
-import UIStates from './pages/common/UIStates'
+import MaterialRequestsPage from './Features/MaterialRequests/pages/MaterialRequestsPage'
 import DeliveryDashboard from './Features/deliveries/pages/DeliveryDashboard'
+import ProcurementApp from './Features/procurement/pages/ProcurementApp'
+import QualityApp from './Features/quality/QualityApp'
+import ComingSoon from './pages/common/ComingSoon'
+import LoginPage from './auth/LoginPage'
+import { useAuth } from './auth/AuthContext'
 import './pages/common/common.css'
 
-const screens = { Dashboard: DashboardBase, Deliveries: DeliveryDashboard, List: ListBase, Form: FormBase, Detail: DetailBase, 'UI States': UIStates }
+const PROCUREMENT_ITEMS = new Set(['Suppliers', 'Quotations', 'Procurement', 'Purchase Orders'])
+
+const SECTION_FOR_ITEM = {
+  Suppliers: 'Suppliers',
+  Quotations: 'Approved Requests',
+  Procurement: 'Dashboard',
+  'Purchase Orders': 'Purchase Orders',
+}
 
 export default function App() {
-  const [screen, setScreen] = useState('Dashboard')
-  const Screen = screens[screen]
-  
-  const handleNavigate = (item) => {
-    if (screens[item]) {
-      setScreen(item);
-    } else if (item === 'Dashboard') {
-      setScreen('Dashboard');
-    }
-  };
+  const { isAuthenticated, user, logout } = useAuth()
+  const [nav, setNav] = useState({ screen: 'Dashboard', section: 'Dashboard', supplierId: null, requestId: null, orderId: null })
 
-  return <AppLayout breadcrumb={`Common UI / ${screen}`} activeItem={screen} onNavigate={handleNavigate}><div className="preview-tabs" aria-label="Common screen previews">{Object.keys(screens).map((name) => <button type="button" key={name} className={`preview-tab ${screen === name ? 'preview-tab--active' : ''}`} onClick={() => setScreen(name)}>{name}</button>)}</div><Screen/></AppLayout>
+  if (!isAuthenticated) return <LoginPage />
+
+  const navigate = (item) => setNav({ screen: item, section: SECTION_FOR_ITEM[item] ?? 'Dashboard', supplierId: null, requestId: null, orderId: null })
+  const patchNav = (p) => setNav((cur) => ({ ...cur, ...p }))
+
+  const renderScreen = () => {
+    switch (nav.screen) {
+      case 'Material Requests':
+        return <MaterialRequestsPage />
+      case 'Deliveries':
+        return <DeliveryDashboard />
+      case 'Quality Inspections':
+      case 'Non-Conformances':
+        return <QualityApp section={nav.screen} />
+      default:
+        if (PROCUREMENT_ITEMS.has(nav.screen) || nav.screen === 'Dashboard') {
+          return <ProcurementApp section={nav.section} supplierId={nav.supplierId} requestId={nav.requestId} orderId={nav.orderId} onNavigate={patchNav} />
+        }
+        return <ComingSoon title={nav.screen} />
+    }
+  }
+
+  return (
+    <AppLayout breadcrumb={`BuildWise / ${nav.screen}`} activeItem={nav.screen} user={user} onLogout={logout} onNavigate={navigate}>
+      {renderScreen()}
+    </AppLayout>
+  )
 }

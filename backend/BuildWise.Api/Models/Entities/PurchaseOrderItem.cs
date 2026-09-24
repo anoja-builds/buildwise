@@ -8,7 +8,10 @@ public class PurchaseOrderItem : BaseEntity
 
     public PurchaseOrder? PurchaseOrder { get; set; }
 
-    public int MaterialId { get; set; }
+    public int? QuotationItemId { get; set; }
+    public QuotationItem? QuotationItem { get; set; }
+
+    public int? MaterialId { get; set; }
 
     public Material? Material { get; set; }
 
