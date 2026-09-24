@@ -1,11 +1,18 @@
+
 import 'package:flutter/material.dart';
 
 import 'common/screens/screens.dart';
 import 'core/theme/app_theme.dart';
+
+// Shared authentication
 import 'features/auth/screens/login_screen.dart';
 import 'features/auth/services/auth_service.dart';
+
+// Procurement
 import 'features/procurement/screens/procurement_home_screen.dart';
 
+// Quality Inspection
+import 'features/quality/screens/pending_inspections_screen.dart';
 void main() => runApp(const BuildWiseApp());
 
 class BuildWiseApp extends StatelessWidget {
@@ -37,8 +44,18 @@ class _AuthGateState extends State<AuthGate> {
     _signedInFuture = _authService.isSignedIn();
   }
 
-  void _handleSignedIn() => setState(() => _signedInFuture = Future.value(true));
-  void _handleSignedOut() => setState(() => _signedInFuture = Future.value(false));
+
+void _handleSignedIn() {
+  setState(() {
+    _signedInFuture = Future.value(true);
+  });
+}
+
+void _handleSignedOut() {
+  setState(() {
+    _signedInFuture = Future.value(false);
+  });
+}
 
   @override
   Widget build(BuildContext context) => FutureBuilder<bool>(
@@ -86,6 +103,18 @@ class _MainAppShellState extends State<MainAppShell> {
     appBar: AppBar(
       title: const Text('BuildWise'),
       actions: [
+        TextButton.icon(
+          style: TextButton.styleFrom(
+            foregroundColor: Theme.of(context).colorScheme.onPrimary,
+          ),
+          icon: const Icon(Icons.fact_check_outlined),
+          label: const Text('Quality'),
+          onPressed: () => Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => const PendingInspectionsScreen(),
+            ),
+          ),
+        ),
         IconButton(
           onPressed: () {},
           tooltip: 'Notifications',

@@ -45,6 +45,12 @@ public class ApplicationDbContext : DbContext
 
     public DbSet<DeliveryEvidence> DeliveryEvidences => Set<DeliveryEvidence>();
 
+    public DbSet<Inspection> Inspections => Set<Inspection>();
+
+    public DbSet<InspectionItem> InspectionItems => Set<InspectionItem>();
+
+    public DbSet<NonConformance> NonConformances => Set<NonConformance>();
+
     public DbSet<AgentWorkflow> AgentWorkflows => Set<AgentWorkflow>();
 
     public DbSet<AgentWorkflowStep> AgentWorkflowSteps => Set<AgentWorkflowStep>();

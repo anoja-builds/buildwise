@@ -43,6 +43,15 @@ builder.Services.AddScoped<IEmailService, SmtpEmailService>();
 
 // Component 3 service: delivery risk analysis over confirmed purchase orders.
 builder.Services.AddScoped<DeliveryRiskAgentService>();
+builder.Services.AddScoped<QualityInspectionService>();
+builder.Services.AddScoped<NonConformanceService>();
+builder.Services.AddScoped<QualityRiskEvidenceService>();
+builder.Services.AddScoped<QualityRiskRecommendationValidator>();
+builder.Services.AddScoped<QualityRiskAgentService>();
+builder.Services.AddHttpClient<QualityRiskAgentClient>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(100);
+}).RemoveAllLoggers();
 
 // Shared authentication (Core, used by every component controllers, React and Flutter)
 builder.Services.AddSingleton<JwtTokenService>();
