@@ -44,8 +44,18 @@ class _AuthGateState extends State<AuthGate> {
     _signedInFuture = _authService.isSignedIn();
   }
 
-  void _handleSignedIn() => setState(() => _signedInFuture = Future.value(true));
-  void _handleSignedOut() => setState(() => _signedInFuture = Future.value(false));
+
+void _handleSignedIn() {
+  setState(() {
+    _signedInFuture = Future.value(true);
+  });
+}
+
+void _handleSignedOut() {
+  setState(() {
+    _signedInFuture = Future.value(false);
+  });
+}
 
   @override
   Widget build(BuildContext context) => FutureBuilder<bool>(

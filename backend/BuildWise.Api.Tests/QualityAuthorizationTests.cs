@@ -166,6 +166,33 @@ public class QualityAuthorizationTests : IAsyncLifetime
         Assert.Empty(response.Items);
     }
 
+    [Theory]
+    [InlineData(DeliveryStatus.Received)]
+    [InlineData(DeliveryStatus.DiscrepancyReported)]
+    public async Task Pending_deliveries_excludes_completed_but_keeps_uninspected_deliveries(DeliveryStatus status)
+    {
+        SignIn("QualityInspector");
+        using var scope = _host.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var completed = await db.Inspections.Include(i => i.Delivery).SingleAsync();
+        completed.Delivery!.Status = status;
+        // Positive quantities ensure exclusion is caused by the inspection, not eligibility.
+        db.DeliveryItems.Add(new DeliveryItem { DeliveryId = completed.DeliveryId,
+            PurchaseOrderItemId = 11, ReceivedQuantity = 10 });
+        var available = new Delivery { Status = status,
+            PurchaseOrderId = completed.Delivery.PurchaseOrderId,
+            Items = [new DeliveryItem { PurchaseOrderItemId = 12, ReceivedQuantity = 10 }] };
+        db.Deliveries.Add(available);
+        await db.SaveChangesAsync();
+
+        using var response = await _client.GetAsync("/api/inspections/pending-deliveries");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var pending = await response.Content.ReadFromJsonAsync<List<BuildWise.Api.Models.Dtos.PendingInspectionDeliveryDto>>();
+        Assert.NotNull(pending);
+        Assert.DoesNotContain(pending, d => d.DeliveryId == completed.DeliveryId);
+        Assert.Equal(available.Id, Assert.Single(pending).DeliveryId);
+    }
+
     [Fact]
     public async Task Workflow_records_JWT_actor_not_original_inspector_or_spoofed_body()
     {
