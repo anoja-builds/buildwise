@@ -2,6 +2,8 @@ import { useState } from 'react'
 import AppLayout from './layouts/AppLayout'
 import MaterialRequestsPage from './Features/MaterialRequests/pages/MaterialRequestsPage'
 import DeliveryDashboard from './Features/deliveries/pages/DeliveryDashboard'
+import SupplierManagementPage from './Features/procurement/pages/SupplierManagementPage'
+import QuotationComparisonPage from './Features/procurement/pages/QuotationComparisonPage'
 import ProcurementApp from './Features/procurement/pages/ProcurementApp'
 import QualityApp from './Features/quality/QualityApp'
 import ComingSoon from './pages/common/ComingSoon'
@@ -33,6 +35,10 @@ export default function App() {
         return <MaterialRequestsPage />
       case 'Deliveries':
         return <DeliveryDashboard />
+      case 'Suppliers':
+        return <SupplierManagementPage />
+      case 'Quotations':
+        return <QuotationComparisonPage />
       case 'Quality Inspections':
       case 'Non-Conformances':
         return <QualityApp section={nav.screen} />

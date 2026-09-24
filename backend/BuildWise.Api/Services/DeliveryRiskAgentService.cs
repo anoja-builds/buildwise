@@ -68,7 +68,7 @@ public class DeliveryRiskAgentService
         {
             PurchaseOrderId = poId,
             DeliveryId = deliveryId,
-            InitiatedByUserId = userId,
+            InitiatedByUserId = userId ?? 1,
             Objective = $"Determine delivery risk for Purchase Order #{poId}",
             Status = WorkflowStatus.Running,
             ApprovalStatus = AgentApprovalStatus.Pending,
@@ -124,7 +124,8 @@ public class DeliveryRiskAgentService
             .ToListAsync();
 
         var totalDeliveries = history.Count;
-        var lateDeliveries = history.Count(d => d.ActualArrivalDate > po.ExpectedDeliveryDate);
+        var poExpectedDate = po.ExpectedDeliveryDate.HasValue ? po.ExpectedDeliveryDate.Value.ToDateTime(TimeOnly.MinValue) : DateTime.UtcNow.AddDays(3);
+        var lateDeliveries = history.Count(d => d.ActualArrivalDate > poExpectedDate);
         var discrepancyDeliveries = history.Count(d => d.Status == DeliveryStatus.DiscrepancyReported);
 
         return new
@@ -133,8 +134,8 @@ public class DeliveryRiskAgentService
             SupplierId = po.SupplierId,
             SupplierName = po.Supplier?.Name ?? "Unknown",
             SupplierStatus = po.Supplier?.Status.ToString() ?? "Active",
-            RequiredDate = po.OrderDate.AddDays(5), // Business logic for required date
-            PromisedDate = po.ExpectedDeliveryDate ?? DateTime.UtcNow.AddDays(3),
+            RequiredDate = po.OrderDate.ToDateTime(TimeOnly.MinValue).AddDays(5),
+            PromisedDate = poExpectedDate,
             TotalPastDeliveries = totalDeliveries,
             LateDeliveriesCount = lateDeliveries,
             DiscrepancyDeliveriesCount = discrepancyDeliveries,
