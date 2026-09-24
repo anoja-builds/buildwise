@@ -19,6 +19,18 @@ public class QualityInspectionService
         _dbContext = dbContext;
     }
 
+    public Task<List<InspectionHistoryDto>> GetHistoryAsync() =>
+        _dbContext.Inspections.AsNoTracking()
+            .OrderByDescending(i => i.InspectionDate).ThenByDescending(i => i.Id)
+            .Select(i => new InspectionHistoryDto
+            {
+                Id = i.Id, DeliveryId = i.DeliveryId,
+                DeliveryReference = i.Delivery == null ? null : i.Delivery.DeliveryReference,
+                InspectorUserId = i.InspectorUserId,
+                InspectorName = i.Inspector == null ? null : i.Inspector.FullName,
+                InspectionDate = i.InspectionDate, Status = i.Status, OverallDecision = i.OverallDecision
+            }).ToListAsync();
+
     public async Task<List<PendingInspectionDeliveryDto>> GetPendingDeliveriesAsync()
     {
         return await _dbContext.Deliveries.AsNoTracking()
@@ -121,6 +133,8 @@ public class QualityInspectionService
     private async Task<QualityInspectionResponseDto> ToResponseAsync(Inspection inspection)
     {
         var response = ToResponse(inspection);
+        response.InspectorName = await _dbContext.Users.AsNoTracking()
+            .Where(u => u.Id == inspection.InspectorUserId).Select(u => u.FullName).SingleOrDefaultAsync();
         response.DeliveryReference = await _dbContext.Deliveries.AsNoTracking()
             .Where(d => d.Id == inspection.DeliveryId).Select(d => d.DeliveryReference).SingleAsync();
         response.DeliveryItems = await _dbContext.DeliveryItems.AsNoTracking()

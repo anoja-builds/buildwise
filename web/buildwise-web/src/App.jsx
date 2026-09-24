@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import AppLayout from './layouts/AppLayout'
 import ProcurementApp from './Features/procurement/pages/ProcurementApp'
+import QualityApp from './Features/quality/QualityApp'
 import ComingSoon from './pages/common/ComingSoon'
 import LoginPage from './auth/LoginPage'
 import { useAuth } from './auth/AuthContext'
@@ -45,7 +46,9 @@ export default function App() {
     <AppLayout breadcrumb={`BuildWise / ${nav.screen}`} activeItem={nav.screen} user={user} onLogout={logout} onNavigate={navigate}>
       {PROCUREMENT_ITEMS.has(nav.screen)
         ? <ProcurementApp section={nav.section} supplierId={nav.supplierId} requestId={nav.requestId} orderId={nav.orderId} onNavigate={patchNav} />
-        : <ComingSoon title={nav.screen} />}
+        : ['Quality Inspections', 'Non-Conformances'].includes(nav.screen)
+          ? <QualityApp section={nav.screen} />
+          : <ComingSoon title={nav.screen} />}
     </AppLayout>
   )
 }

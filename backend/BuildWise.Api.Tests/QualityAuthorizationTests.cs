@@ -142,9 +142,57 @@ public class QualityAuthorizationTests : IAsyncLifetime
     public async Task Allowed_roles_can_read_quality_data(string role)
     {
         SignIn(role);
+        Assert.Equal(HttpStatusCode.OK, (await _client.GetAsync("/api/inspections")).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await _client.GetAsync("/api/inspections/pending-deliveries")).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await _client.GetAsync("/api/inspections/1")).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await _client.GetAsync("/api/non-conformances")).StatusCode);
+    }
+
+    [Theory]
+    [InlineData("", HttpStatusCode.Unauthorized)]
+    [InlineData("ProcurementOfficer", HttpStatusCode.Forbidden)]
+    [InlineData("ReceivingOfficer", HttpStatusCode.Forbidden)]
+    public async Task History_requires_quality_role(string role, HttpStatusCode expected)
+    {
+        if (role.Length > 0) SignIn(role);
+        Assert.Equal(expected, (await _client.GetAsync("/api/inspections")).StatusCode);
+    }
+
+    [Fact]
+    public async Task History_returns_newest_first_with_delivery_and_inspector_without_writes()
+    {
+        SignIn("QualityInspector");
+        using var scope = _host.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var first = await db.Inspections.Include(i => i.Delivery).SingleAsync();
+        first.InspectionDate = DateTime.UtcNow.AddDays(-1);
+        first.Delivery!.DeliveryReference = "DEL-240";
+        db.Inspections.Add(new Inspection { InspectorUserId = 7, DeliveryId = first.DeliveryId,
+            InspectionDate = DateTime.UtcNow, Status = InspectionStatus.UnderInspection });
+        await db.SaveChangesAsync();
+        var rows = await _client.GetFromJsonAsync<List<BuildWise.Api.Models.Dtos.InspectionHistoryDto>>("/api/inspections");
+        Assert.Equal(2, rows!.Count);
+        Assert.Equal("Acting inspector", rows[0].InspectorName);
+        Assert.Equal("DEL-240", rows[0].DeliveryReference);
+        Assert.Null(rows[0].OverallDecision);
+        Assert.Equal(1, rows[1].Id);
+        Assert.Equal(InspectionDecision.Accepted, rows[1].OverallDecision);
+        Assert.Equal(2, await db.Inspections.CountAsync());
+        Assert.Empty(await db.InspectionItems.ToListAsync());
+        var detail = await _client.GetFromJsonAsync<BuildWise.Api.Models.Dtos.QualityInspectionResponseDto>("/api/inspections/1");
+        Assert.Equal("Original inspector", detail!.InspectorName);
+    }
+
+    [Fact]
+    public async Task History_returns_empty_array_when_no_inspections_exist()
+    {
+        SignIn("Administrator");
+        using var scope = _host.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        db.Inspections.RemoveRange(db.Inspections);
+        await db.SaveChangesAsync();
+        var rows = await _client.GetFromJsonAsync<List<BuildWise.Api.Models.Dtos.InspectionHistoryDto>>("/api/inspections");
+        Assert.Empty(rows!);
     }
 
     [Fact]

@@ -59,6 +59,7 @@ public class InspectionDeliveryItemDto
 
 public class QualityInspectionResponseDto
 {
+    public string? InspectorName { get; set; }
     public string? DeliveryReference { get; set; }
     public List<InspectionDeliveryItemDto> DeliveryItems { get; set; } = new();
     public int Id { get; set; }
@@ -71,6 +72,18 @@ public class QualityInspectionResponseDto
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
     public List<QualityInspectionItemResponseDto> Items { get; set; } = new();
+}
+
+public class InspectionHistoryDto
+{
+    public int Id { get; set; }
+    public int DeliveryId { get; set; }
+    public string? DeliveryReference { get; set; }
+    public int InspectorUserId { get; set; }
+    public string? InspectorName { get; set; }
+    public DateTime InspectionDate { get; set; }
+    public InspectionStatus Status { get; set; }
+    public InspectionDecision? OverallDecision { get; set; }
 }
 
 public class QualityInspectionItemResponseDto

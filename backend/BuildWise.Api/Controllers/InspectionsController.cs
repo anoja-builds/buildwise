@@ -20,6 +20,10 @@ public class InspectionsController : ControllerBase
         _logger = logger;
     }
 
+    [HttpGet]
+    public Task<IActionResult> GetHistory() => ExecuteAsync(async () =>
+        Ok(await _service.GetHistoryAsync()));
+
     [HttpGet("pending-deliveries")]
     public Task<IActionResult> GetPendingDeliveries() => ExecuteAsync(async () =>
         Ok(await _service.GetPendingDeliveriesAsync()));

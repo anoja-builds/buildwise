@@ -12,11 +12,13 @@ public class QualityRiskEvidenceService(ApplicationDbContext db)
     {
         var inspection = await db.Inspections.AsNoTracking()
             .Include(i => i.Delivery)!.ThenInclude(d => d!.PurchaseOrder)!.ThenInclude(po => po!.Supplier)
+            .Include(i => i.Delivery)!.ThenInclude(d => d!.PurchaseOrder)!.ThenInclude(po => po!.Quotation).ThenInclude(q => q!.Supplier)
             .SingleOrDefaultAsync(i => i.Id == id, ct)
             ?? throw new QualityRiskException(404, "Inspection not found.");
         if (inspection.Status != InspectionStatus.Completed || !inspection.OverallDecision.HasValue)
             throw new QualityRiskException(409, "Quality analysis requires a completed inspection with a decision.");
-        if (inspection.Delivery?.PurchaseOrder?.Supplier == null)
+        var order = inspection.Delivery?.PurchaseOrder;
+        if ((order?.QuotationId != null ? order.Quotation?.Supplier : order?.Supplier) == null)
             throw new QualityRiskException(400, "Inspection supplier provenance is incomplete.");
         return inspection;
     }
@@ -25,9 +27,14 @@ public class QualityRiskEvidenceService(ApplicationDbContext db)
     {
         var inspection = await GetSubjectAsync(id, ct);
         var delivery = inspection.Delivery!;
-        var supplier = delivery.PurchaseOrder!.Supplier!;
+        var order = delivery.PurchaseOrder!;
+        // Quotation relationships are authoritative for current procurement records.
+        // Direct fields support legacy delivery records only when no quotation link exists.
+        var supplier = (order.QuotationId != null ? order.Quotation?.Supplier : order.Supplier)!;
         var rows = await db.InspectionItems.AsNoTracking().Where(i => i.InspectionId == id)
             .Include(i => i.DeliveryItem)!.ThenInclude(di => di!.PurchaseOrderItem)!.ThenInclude(poi => poi!.Material)
+            .Include(i => i.DeliveryItem)!.ThenInclude(di => di!.PurchaseOrderItem)!.ThenInclude(poi => poi!.QuotationItem)
+                .ThenInclude(qi => qi!.MaterialRequestItem).ThenInclude(ri => ri.Material)
             .OrderBy(i => i.Id).Take(101).ToListAsync(ct);
         if (rows.Count is 0 or > 100 || rows.Select(i => i.DeliveryItemId).Distinct().Count() != rows.Count)
             throw new QualityRiskException(400, "Inspection must contain 1 to 100 distinct valid items for analysis.");
@@ -47,7 +54,9 @@ public class QualityRiskEvidenceService(ApplicationDbContext db)
                 || di.DamagedQuantity > di.ReceivedQuantity || di.ReceivedQuantity > 9999999999.99m
                 || decimal.Round(a, 2) != a || decimal.Round(r, 2) != r)
                 throw new QualityRiskException(400, "Inspection contains invalid quantity evidence.");
-            var material = di.PurchaseOrderItem?.Material;
+            var purchaseItem = di.PurchaseOrderItem;
+            var material = purchaseItem?.QuotationItemId != null
+                ? purchaseItem.QuotationItem?.MaterialRequestItem?.Material : purchaseItem?.Material;
             items.Add(new(row.Id, di.Id, material?.Id, Clip(material?.Name, 200), Clip(material?.Unit, 50),
                 di.ReceivedQuantity, di.DamagedQuantity, a, r, r / (a + r), (a + r) / di.ReceivedQuantity,
                 Clip(row.Condition, 100), Clip(row.Remarks, 2000)));
@@ -68,24 +77,28 @@ public class QualityRiskEvidenceService(ApplicationDbContext db)
         var cutoff = inspection.UpdatedAt;
         var history = await db.Inspections.AsNoTracking()
             .Where(i => i.Id != id && i.Status == InspectionStatus.Completed && i.OverallDecision != null
-                && i.UpdatedAt < cutoff && i.Delivery!.PurchaseOrder!.SupplierId == supplier.Id)
+                && i.UpdatedAt < cutoff && (i.Delivery!.PurchaseOrder!.QuotationId != null
+                    ? i.Delivery.PurchaseOrder.Quotation!.SupplierId : i.Delivery.PurchaseOrder.SupplierId) == supplier.Id)
             .OrderByDescending(i => i.UpdatedAt).ThenByDescending(i => i.Id).Take(20)
             .Select(i => new QualityHistoryEvidence(i.Id, i.DeliveryId, i.InspectionDate,
                 i.OverallDecision!.Value.ToString(), i.Items.Count, i.Items.Count(x => x.RejectedQuantity > 0)))
             .ToListAsync(ct);
         var ncrQuery = db.NonConformances.AsNoTracking().Where(n => n.CreatedAt < cutoff
-            && n.InspectionItem!.Inspection!.Delivery!.PurchaseOrder!.SupplierId == supplier.Id);
+            && (n.InspectionItem!.Inspection!.Delivery!.PurchaseOrder!.QuotationId != null
+                ? n.InspectionItem.Inspection.Delivery.PurchaseOrder.Quotation!.SupplierId
+                : n.InspectionItem.Inspection.Delivery.PurchaseOrder.SupplierId) == supplier.Id);
         var count = await ncrQuery.CountAsync(ct);
         var ncrRows = await ncrQuery.OrderByDescending(n => n.CreatedAt).ThenByDescending(n => n.Id).Take(50).ToListAsync(ct);
         var ncrs = ncrRows.Select(n => new QualityNcrEvidence(n.Id, n.InspectionItemId,
             n.Severity.ToString(), n.Status.ToString(), Clip(n.IssueDescription, 2000)!, Clip(n.CorrectiveAction, 2000))).ToList();
         var discrepancyRows = await db.Deliveries.AsNoTracking()
-            .Where(d => d.PurchaseOrder!.SupplierId == supplier.Id && d.Status == DeliveryStatus.DiscrepancyReported
+            .Where(d => (d.PurchaseOrder!.QuotationId != null ? d.PurchaseOrder.Quotation!.SupplierId : d.PurchaseOrder.SupplierId) == supplier.Id && d.Status == DeliveryStatus.DiscrepancyReported
                 && d.CreatedAt <= collectedAt)
             .OrderByDescending(d => d.CreatedAt).ThenByDescending(d => d.Id).Take(21)
             .Select(d => new QualityDiscrepancyEvidence(d.Id, d.Status.ToString())).ToListAsync(ct);
         var issueRows = await db.DeliveryIssues.AsNoTracking()
-            .Where(x => x.Delivery!.PurchaseOrder!.SupplierId == supplier.Id && x.ReportedAt <= collectedAt)
+            .Where(x => (x.Delivery!.PurchaseOrder!.QuotationId != null
+                ? x.Delivery.PurchaseOrder.Quotation!.SupplierId : x.Delivery.PurchaseOrder.SupplierId) == supplier.Id && x.ReportedAt <= collectedAt)
             .OrderByDescending(x => x.ReportedAt).ThenByDescending(x => x.Id).Take(21).ToListAsync(ct);
         var issues = issueRows.Take(20).Select(x => new QualityIssueEvidence(x.Id, x.DeliveryId,
             x.IssueType.ToString(), x.Severity.ToString(), Clip(x.Description, 2000)!)).ToList();

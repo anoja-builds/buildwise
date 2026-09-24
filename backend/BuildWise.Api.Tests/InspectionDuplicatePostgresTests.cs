@@ -77,6 +77,7 @@ public class InspectionDuplicatePostgresTests : IAsyncLifetime
                 {
                     services.AddDbContext<ApplicationDbContext>(options => options.UseNpgsql(_connection));
                     services.AddScoped<QualityInspectionService>();
+                    services.AddScoped<NonConformanceService>();
                     services.AddControllers().AddApplicationPart(typeof(InspectionsController).Assembly);
                     services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer(options =>
                     {
@@ -131,6 +132,68 @@ public class InspectionDuplicatePostgresTests : IAsyncLifetime
 
     private Task<HttpResponseMessage> Start(int deliveryId) =>
         _client.PostAsJsonAsync("/api/inspections", new StartInspectionDto { DeliveryId = deliveryId });
+
+    [InspectionPostgresTheory]
+    [InlineData(DeliveryStatus.Received)]
+    [InlineData(DeliveryStatus.DiscrepancyReported)]
+    public async Task History_NCR_lifecycle_and_quotation_evidence_use_real_PostgreSQL(DeliveryStatus status)
+    {
+        var delivery = await SeedDelivery(status);
+        await using (var db = CreateDb())
+        {
+            var scenario = await TestDbFactory.SeedStandardScenarioDataAsync(db);
+            var quotation = new Quotation { MaterialRequestId = scenario.Request.Id,
+                Supplier = new Supplier { Name = "Canonical supplier" },
+                Items = [new QuotationItem { MaterialRequestItemId = scenario.RequestItem.Id, Quantity = 10 }] };
+            db.Quotations.Add(quotation);
+            await db.SaveChangesAsync();
+            var order = await db.PurchaseOrders.Include(o => o.Items).SingleAsync();
+            order.QuotationId = quotation.Id;
+            order.Items.Single().QuotationItemId = quotation.Items.Single().Id;
+            await db.SaveChangesAsync();
+        }
+        using var started = await Start(delivery.Id);
+        Assert.Equal(HttpStatusCode.Created, started.StatusCode);
+        var inspection = (await started.Content.ReadFromJsonAsync<QualityInspectionResponseDto>())!;
+        using var completed = await _client.PostAsJsonAsync($"/api/inspections/{inspection.Id}/complete",
+            new CompleteInspectionDto { OverallDecision = InspectionDecision.PartiallyAccepted,
+                Items = [new CompleteInspectionItemDto { DeliveryItemId = delivery.Items.Single().Id,
+                    AcceptedQuantity = 8, RejectedQuantity = 2, Condition = "Damaged" }] });
+        Assert.Equal(HttpStatusCode.OK, completed.StatusCode);
+        var detail = (await completed.Content.ReadFromJsonAsync<QualityInspectionResponseDto>())!;
+        var history = (await _client.GetFromJsonAsync<List<InspectionHistoryDto>>("/api/inspections"))!;
+        Assert.Equal(inspection.Id, Assert.Single(history).Id);
+        Assert.Equal("Test inspector", history[0].InspectorName);
+        Assert.Equal(InspectionDecision.PartiallyAccepted, history[0].OverallDecision);
+        await using (var db = CreateDb())
+        {
+            var evidence = await new QualityRiskEvidenceService(db).CollectAsync(inspection.Id, default);
+            Assert.Equal("Canonical supplier", evidence.SupplierName);
+            Assert.Equal("Portland Composite Cement (50kg)", Assert.Single(evidence.Items).MaterialName);
+            Assert.Empty(evidence.History);
+        }
+        using var created = await _client.PostAsJsonAsync("/api/non-conformances", new CreateNonConformanceDto {
+            InspectionItemId = detail.Items.Single().Id, IssueDescription = "Damaged material", Severity = NonConformanceSeverity.High });
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var ncr = (await created.Content.ReadFromJsonAsync<NonConformanceResponseDto>())!;
+        Assert.Equal(NonConformanceStatus.Open, ncr.Status);
+        Assert.Equal(HttpStatusCode.BadRequest, (await _client.PostAsync($"/api/non-conformances/{ncr.Id}/resolve", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await _client.PostAsync($"/api/non-conformances/{ncr.Id}/close", null)).StatusCode);
+        using var edited = await _client.PatchAsJsonAsync($"/api/non-conformances/{ncr.Id}/corrective-action",
+            new UpdateCorrectiveActionDto { CorrectiveAction = "Replace rejected material" });
+        Assert.Equal(HttpStatusCode.OK, edited.StatusCode);
+        Assert.Equal(NonConformanceStatus.CorrectiveActionRequired, (await edited.Content.ReadFromJsonAsync<NonConformanceResponseDto>())!.Status);
+        Assert.Equal(HttpStatusCode.OK, (await _client.PostAsync($"/api/non-conformances/{ncr.Id}/resolve", null)).StatusCode);
+        var resolved = (await _client.GetFromJsonAsync<NonConformanceResponseDto>($"/api/non-conformances/{ncr.Id}"))!;
+        Assert.NotNull(resolved.ResolvedAt);
+        Assert.Equal(HttpStatusCode.OK, (await _client.PostAsync($"/api/non-conformances/{ncr.Id}/close", null)).StatusCode);
+        var closed = (await _client.GetFromJsonAsync<NonConformanceResponseDto>($"/api/non-conformances/{ncr.Id}"))!;
+        Assert.Equal(NonConformanceStatus.Closed, closed.Status);
+        Assert.Equal(resolved.ResolvedAt, closed.ResolvedAt);
+        Assert.Equal(HttpStatusCode.Conflict, (await _client.PatchAsJsonAsync($"/api/non-conformances/{ncr.Id}/corrective-action",
+            new UpdateCorrectiveActionDto { CorrectiveAction = "Too late" })).StatusCode);
+        Assert.Equal(ncr.Id, Assert.Single((await _client.GetFromJsonAsync<List<NonConformanceResponseDto>>("/api/non-conformances"))!).Id);
+    }
 
     [InspectionPostgresTheory]
     [InlineData(DeliveryStatus.Received)]
