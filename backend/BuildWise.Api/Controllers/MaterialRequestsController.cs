@@ -1,45 +1,38 @@
 using BuildWise.Api.Data;
-using BuildWise.Api.DTOs;
+using BuildWise.Api.Models.Dtos;
+using BuildWise.Api.Models.Entities;
 using BuildWise.Api.Models.Enums;
-using Microsoft.AspNetCore.Authorization;
+using BuildWise.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
 namespace BuildWise.Api.Controllers;
 
-/// <summary>
-/// Read-only access to material requests for Component 2 (owned by Component 1).
-/// Supports the "Approved Requests Queue" and Quotation Entry screens while
-/// Component 1's own API surface is being developed in parallel.
-/// </summary>
 [ApiController]
-[Route("api/material-requests")]
-[Authorize(Roles = "ProcurementOfficer,ProcurementManager,Administrator,SiteEngineer,ProjectManager")]
+[Route("api/[controller]")]
 public class MaterialRequestsController : ControllerBase
 {
-    private readonly ApplicationDbContext _db;
+    private readonly ApplicationDbContext _dbContext;
+    private readonly ProcurementPlanningAgentService _planningAgentService;
 
-    public MaterialRequestsController(ApplicationDbContext db)
+    public MaterialRequestsController(
+        ApplicationDbContext dbContext,
+        ProcurementPlanningAgentService planningAgentService)
     {
-        _db = db;
+        _dbContext = dbContext;
+        _planningAgentService = planningAgentService;
     }
 
-    /// <summary>
-    /// List material requests, optionally filtered by status (defaults to Approved,
-    /// the only status Component 2 can act on per spec §3).
-    /// </summary>
     [HttpGet]
-    public async Task<ActionResult<IEnumerable<MaterialRequestSummaryDto>>> GetAll(
-        [FromQuery] string? status = "Approved",
-        [FromQuery] int? projectId = null)
+    public async Task<IActionResult> GetRequests([FromQuery] string? status, [FromQuery] int? projectId)
     {
-        var query = _db.MaterialRequests
+        var query = _dbContext.MaterialRequests
             .Include(r => r.Project)
             .Include(r => r.Items)
-            .Include(r => r.Quotations)
+                .ThenInclude(i => i.Material)
             .AsQueryable();
 
-        if (!string.IsNullOrWhiteSpace(status) && Enum.TryParse<MaterialRequestStatus>(status, true, out var parsedStatus))
+        if (!string.IsNullOrEmpty(status) && Enum.TryParse<MaterialRequestStatus>(status, true, out var parsedStatus))
         {
             query = query.Where(r => r.Status == parsedStatus);
         }
@@ -49,100 +42,163 @@ public class MaterialRequestsController : ControllerBase
             query = query.Where(r => r.ProjectId == projectId.Value);
         }
 
-        var requests = await query
-            .OrderByDescending(r => r.RequiredDate)
-            .Select(r => new MaterialRequestSummaryDto(
-                r.Id,
-                r.ProjectId,
-                r.Project.Name,
-                r.RequiredDate,
-                r.Reason,
-                r.Status.ToString(),
-                r.Items.Count,
-                r.Quotations.Count
-            ))
-            .ToListAsync();
+        var requests = await query.OrderByDescending(r => r.CreatedAt).ToListAsync();
 
-        return Ok(requests);
-    }
-
-    /// <summary>
-    /// Get a single material request with its line items, for quoting against.
-    /// </summary>
-    [HttpGet("{id:int}")]
-    public async Task<ActionResult<MaterialRequestDetailDto>> GetById(int id)
-    {
-        var request = await _db.MaterialRequests
-            .Include(r => r.Project)
-            .Include(r => r.Items)
-            .ThenInclude(i => i.Material)
-            .FirstOrDefaultAsync(r => r.Id == id);
-
-        if (request is null)
-            return NotFound($"Material request #{id} not found.");
-
-        var detail = new MaterialRequestDetailDto(
-            request.Id,
-            request.ProjectId,
-            request.Project.Name,
-            request.RequiredDate,
-            request.Reason,
-            request.Status.ToString(),
-            request.Items.Select(i => new MaterialRequestItemSummaryDto(
+        var result = requests.Select(r => new
+        {
+            r.Id,
+            r.ProjectId,
+            ProjectName = r.Project?.Name,
+            r.RequestedByUserId,
+            r.RequiredDate,
+            r.Reason,
+            Status = r.Status.ToString(),
+            r.CreatedAt,
+            ItemsCount = r.Items.Count,
+            Items = r.Items.Select(i => new
+            {
                 i.Id,
                 i.MaterialId,
-                i.Material?.Name ?? $"Material #{i.MaterialId}",
-                i.Material?.Unit ?? "Units",
-                i.RequestedQuantity,
+                MaterialName = i.Material?.Name,
+                Quantity = i.RequestedQuantity,
+                MaterialUnit = i.Material?.Unit,
                 i.Notes
-            )).ToList()
-        );
+            })
+        });
 
-        return Ok(detail);
+        return Ok(result);
     }
 
-    /// <summary>
-    /// Read-only, role-scoped procurement status for the Site Engineer's Flutter view (spec §9).
-    /// Deliberately excludes supplier names, prices, and quotation detail — only the
-    /// three states the mobile app is allowed to show: quotations in progress,
-    /// awaiting manager approval, or purchase order created.
-    /// </summary>
-    [HttpGet("{id:int}/procurement-status")]
-    public async Task<ActionResult<ProcurementStatusDto>> GetProcurementStatus(int id)
+    [HttpGet("{id}")]
+    public async Task<IActionResult> GetRequestById(int id)
     {
-        var requestExists = await _db.MaterialRequests.AnyAsync(r => r.Id == id);
-        if (!requestExists)
-            return NotFound($"Material request #{id} not found.");
+        var r = await _dbContext.MaterialRequests
+            .Include(r => r.Project)
+            .Include(r => r.Items)
+                .ThenInclude(i => i.Material)
+            .FirstOrDefaultAsync(req => req.Id == id);
 
-        var purchaseOrder = await _db.PurchaseOrders
-            .Where(po => po.Quotation.MaterialRequestId == id && po.Status != PurchaseOrderStatus.Cancelled)
-            .OrderByDescending(po => po.CreatedAt)
-            .FirstOrDefaultAsync();
+        if (r == null) return NotFound("Material Request not found.");
 
-        if (purchaseOrder is not null)
+        var result = new
         {
-            return Ok(new ProcurementStatusDto(id, "PurchaseOrderCreated", purchaseOrder.Id, purchaseOrder.Status.ToString()));
-        }
-
-        var latestWorkflow = await _db.AgentWorkflows
-            .Where(w => w.MaterialRequestId == id)
-            .OrderByDescending(w => w.CreatedAt)
-            .FirstOrDefaultAsync();
-
-        if (latestWorkflow is null)
-        {
-            return Ok(new ProcurementStatusDto(id, "NotStarted", null, null));
-        }
-
-        var status = latestWorkflow.Status switch
-        {
-            WorkflowStatus.AwaitingApproval => "AwaitingApproval",
-            WorkflowStatus.Failed => "QuotationsInProgress",
-            WorkflowStatus.Completed when latestWorkflow.ApprovalStatus == AgentApprovalStatus.Rejected => "Rejected",
-            WorkflowStatus.Completed => "AwaitingApproval",
-            _ => "QuotationsInProgress"
+            r.Id,
+            r.ProjectId,
+            ProjectName = r.Project?.Name,
+            r.RequestedByUserId,
+            r.RequiredDate,
+            r.Reason,
+            Status = r.Status.ToString(),
+            r.CreatedAt,
+            Items = r.Items.Select(i => new
+            {
+                i.Id,
+                i.MaterialId,
+                MaterialName = i.Material?.Name,
+                Quantity = i.RequestedQuantity,
+                MaterialUnit = i.Material?.Unit,
+                i.Notes
+            })
         };
 
-        return Ok(new ProcurementStatusDto(id, status, null, null));
+        return Ok(result);
+    }
+
+    [HttpPost]
+    public async Task<IActionResult> CreateRequest([FromBody] CreateMaterialRequestDto dto)
+    {
+        var project = await _dbContext.Projects.FindAsync(dto.ProjectId);
+        if (project == null) return BadRequest("Invalid Project ID.");
+
+        var request = new MaterialRequest
+        {
+            ProjectId = dto.ProjectId,
+            RequestedByUserId = dto.RequestedByUserId,
+            RequiredDate = DateOnly.FromDateTime(dto.RequiredDate),
+            Reason = dto.Reason,
+            Status = dto.SubmitImmediately ? MaterialRequestStatus.PendingApproval : MaterialRequestStatus.Draft,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+
+        _dbContext.MaterialRequests.Add(request);
+        await _dbContext.SaveChangesAsync();
+
+        foreach (var itemDto in dto.Items)
+        {
+            var item = new MaterialRequestItem
+            {
+                MaterialRequestId = request.Id,
+                MaterialId = itemDto.MaterialId,
+                RequestedQuantity = itemDto.Quantity,
+                Notes = itemDto.Notes
+            };
+            _dbContext.MaterialRequestItems.Add(item);
+        }
+
+        await _dbContext.SaveChangesAsync();
+
+        return CreatedAtAction(nameof(GetRequestById), new { id = request.Id }, new { request.Id, Status = request.Status.ToString() });
+    }
+
+    [HttpPost("{id}/submit")]
+    public async Task<IActionResult> SubmitRequest(int id)
+    {
+        var request = await _dbContext.MaterialRequests.FindAsync(id);
+        if (request == null) return NotFound("Material Request not found.");
+
+        if (request.Status != MaterialRequestStatus.Draft)
+        {
+            return BadRequest("Only draft requests can be submitted.");
+        }
+
+        request.Status = MaterialRequestStatus.PendingApproval;
+        request.UpdatedAt = DateTime.UtcNow;
+        await _dbContext.SaveChangesAsync();
+
+        return Ok(new { Message = "Material Request submitted successfully.", request.Id, Status = request.Status.ToString() });
+    }
+
+    [HttpPost("{id}/approve")]
+    public async Task<IActionResult> ApproveRequest(int id, [FromBody] ApproveMaterialRequestDto dto)
+    {
+        var request = await _dbContext.MaterialRequests.FindAsync(id);
+        if (request == null) return NotFound("Material Request not found.");
+
+        if (dto.Decision == ApprovalDecision.Approved)
+        {
+            request.Status = MaterialRequestStatus.Approved;
+        }
+        else if (dto.Decision == ApprovalDecision.Rejected)
+        {
+            request.Status = MaterialRequestStatus.Rejected;
+        }
+        else
+        {
+            request.Status = MaterialRequestStatus.PendingApproval;
+        }
+
+        request.UpdatedAt = DateTime.UtcNow;
+        await _dbContext.SaveChangesAsync();
+
+        return Ok(new { Message = $"Request decision recorded: {dto.Decision}", Status = request.Status.ToString() });
+    }
+
+    [HttpPost("{id}/plan")]
+    public async Task<IActionResult> RunProcurementPlanningAgent(int id, [FromQuery] int? userId)
+    {
+        try
+        {
+            var result = await _planningAgentService.EvaluateMaterialRequestPlanAsync(id, userId);
+            return Ok(result);
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, ex.Message);
+        }
     }
 }

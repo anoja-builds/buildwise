@@ -1,25 +1,23 @@
-
 import 'package:flutter/material.dart';
 
 import 'common/screens/screens.dart';
 import 'core/theme/app_theme.dart';
-
-// Shared authentication
 import 'features/auth/screens/login_screen.dart';
 import 'features/auth/services/auth_service.dart';
-
-// Procurement
+import 'features/deliveries/screens/delivery_list_screen.dart';
+import 'features/material_requests/screens/material_request_list_screen.dart';
+import 'features/procurement/screens/po_list_screen.dart';
 import 'features/procurement/screens/procurement_home_screen.dart';
-
-// Quality Inspection
 import 'features/quality/screens/pending_inspections_screen.dart';
+
 void main() => runApp(const BuildWiseApp());
 
 class BuildWiseApp extends StatelessWidget {
   const BuildWiseApp({super.key});
+
   @override
   Widget build(BuildContext context) => MaterialApp(
-    title: 'BuildWise',
+    title: 'BuildWise Mobile',
     debugShowCheckedModeBanner: false,
     theme: AppTheme.light,
     home: const AuthGate(),
@@ -27,9 +25,10 @@ class BuildWiseApp extends StatelessWidget {
 }
 
 /// Shows the sign-in screen until a JWT is present in secure storage, then
-/// hands off to the main app shell (spec §8: "protected screens").
+/// hands off to the main app shell.
 class AuthGate extends StatefulWidget {
   const AuthGate({super.key});
+
   @override
   State<AuthGate> createState() => _AuthGateState();
 }
@@ -44,18 +43,17 @@ class _AuthGateState extends State<AuthGate> {
     _signedInFuture = _authService.isSignedIn();
   }
 
+  void _handleSignedIn() {
+    setState(() {
+      _signedInFuture = Future.value(true);
+    });
+  }
 
-void _handleSignedIn() {
-  setState(() {
-    _signedInFuture = Future.value(true);
-  });
-}
-
-void _handleSignedOut() {
-  setState(() {
-    _signedInFuture = Future.value(false);
-  });
-}
+  void _handleSignedOut() {
+    setState(() {
+      _signedInFuture = Future.value(false);
+    });
+  }
 
   @override
   Widget build(BuildContext context) => FutureBuilder<bool>(
@@ -74,6 +72,7 @@ void _handleSignedOut() {
 
 class MainAppShell extends StatefulWidget {
   const MainAppShell({super.key, required this.onSignOut});
+
   final VoidCallback onSignOut;
 
   @override
@@ -86,11 +85,10 @@ class _MainAppShellState extends State<MainAppShell> {
 
   static const screens = [
     MobileHomeBaseScreen(),
-    ProcurementHomeScreen(),
-    MobileListBaseScreen(),
-    MobileFormBaseScreen(),
-    MobileDetailBaseScreen(),
-    MobileUiStatesScreen(),
+    MaterialRequestListScreen(),
+    PoListScreen(),
+    DeliveryListScreen(),
+    PendingInspectionsScreen(),
   ];
 
   Future<void> _signOut() async {
@@ -103,18 +101,6 @@ class _MainAppShellState extends State<MainAppShell> {
     appBar: AppBar(
       title: const Text('BuildWise'),
       actions: [
-        TextButton.icon(
-          style: TextButton.styleFrom(
-            foregroundColor: Theme.of(context).colorScheme.onPrimary,
-          ),
-          icon: const Icon(Icons.fact_check_outlined),
-          label: const Text('Quality'),
-          onPressed: () => Navigator.of(context).push(
-            MaterialPageRoute<void>(
-              builder: (_) => const PendingInspectionsScreen(),
-            ),
-          ),
-        ),
         IconButton(
           onPressed: () {},
           tooltip: 'Notifications',
@@ -138,29 +124,24 @@ class _MainAppShellState extends State<MainAppShell> {
           label: 'Home',
         ),
         NavigationDestination(
+          icon: Icon(Icons.assignment_outlined),
+          selectedIcon: Icon(Icons.assignment),
+          label: 'Requests',
+        ),
+        NavigationDestination(
+          icon: Icon(Icons.shopping_bag_outlined),
+          selectedIcon: Icon(Icons.shopping_bag),
+          label: 'Orders',
+        ),
+        NavigationDestination(
           icon: Icon(Icons.local_shipping_outlined),
           selectedIcon: Icon(Icons.local_shipping),
-          label: 'Procurement',
+          label: 'Deliveries',
         ),
         NavigationDestination(
-          icon: Icon(Icons.list_alt_outlined),
-          selectedIcon: Icon(Icons.list_alt),
-          label: 'List',
-        ),
-        NavigationDestination(
-          icon: Icon(Icons.edit_note_outlined),
-          selectedIcon: Icon(Icons.edit_note),
-          label: 'Form',
-        ),
-        NavigationDestination(
-          icon: Icon(Icons.description_outlined),
-          selectedIcon: Icon(Icons.description),
-          label: 'Detail',
-        ),
-        NavigationDestination(
-          icon: Icon(Icons.widgets_outlined),
-          selectedIcon: Icon(Icons.widgets),
-          label: 'States',
+          icon: Icon(Icons.fact_check_outlined),
+          selectedIcon: Icon(Icons.fact_check),
+          label: 'Quality',
         ),
       ],
     ),

@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 using System.Text.Json.Serialization;
 using BuildWise.Api.Data;
 using BuildWise.Api.Middleware;
@@ -52,6 +52,9 @@ builder.Services.AddHttpClient<QualityRiskAgentClient>(client =>
 {
     client.Timeout = TimeSpan.FromSeconds(100);
 }).RemoveAllLoggers();
+
+builder.Services.AddScoped<ProcurementPlanningAgentService>();
+builder.Services.AddScoped<SupplierEvaluationAgentService>();
 
 // Shared authentication (Core, used by every component controllers, React and Flutter)
 builder.Services.AddSingleton<JwtTokenService>();

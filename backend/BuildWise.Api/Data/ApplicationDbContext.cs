@@ -1,4 +1,4 @@
-﻿using BuildWise.Api.Models.Entities;
+using BuildWise.Api.Models.Entities;
 using Microsoft.EntityFrameworkCore;
 
 namespace BuildWise.Api.Data;
@@ -50,6 +50,14 @@ public class ApplicationDbContext : DbContext
     public DbSet<InspectionItem> InspectionItems => Set<InspectionItem>();
 
     public DbSet<NonConformance> NonConformances => Set<NonConformance>();
+
+    public DbSet<Approval> Approvals => Set<Approval>();
+
+    public DbSet<Rfq> Rfqs => Set<Rfq>();
+
+    public DbSet<RfqSupplier> RfqSuppliers => Set<RfqSupplier>();
+
+    public DbSet<ProcurementRecommendation> ProcurementRecommendations => Set<ProcurementRecommendation>();
 
     public DbSet<AgentWorkflow> AgentWorkflows => Set<AgentWorkflow>();
 
