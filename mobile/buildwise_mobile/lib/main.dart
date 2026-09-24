@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import 'common/screens/screens.dart';
 import 'core/theme/app_theme.dart';
-<<<<<<< Updated upstream
 import 'features/auth/screens/login_screen.dart';
 import 'features/auth/services/auth_service.dart';
 import 'features/deliveries/screens/delivery_list_screen.dart';
@@ -10,16 +9,12 @@ import 'features/material_requests/screens/material_request_list_screen.dart';
 import 'features/procurement/screens/po_list_screen.dart';
 import 'features/procurement/screens/procurement_home_screen.dart';
 import 'features/quality/screens/pending_inspections_screen.dart';
-=======
-import 'features/deliveries/screens/delivery_list_screen.dart';
-import 'features/material_requests/screens/material_request_list_screen.dart';
-import 'features/procurement/screens/po_list_screen.dart';
->>>>>>> Stashed changes
 
 void main() => runApp(const BuildWiseApp());
 
 class BuildWiseApp extends StatelessWidget {
   const BuildWiseApp({super.key});
+
   @override
   Widget build(BuildContext context) => MaterialApp(
     title: 'BuildWise Mobile',
@@ -33,11 +28,11 @@ class BuildWiseApp extends StatelessWidget {
 /// hands off to the main app shell.
 class AuthGate extends StatefulWidget {
   const AuthGate({super.key});
+
   @override
   State<AuthGate> createState() => _AuthGateState();
 }
 
-<<<<<<< Updated upstream
 class _AuthGateState extends State<AuthGate> {
   final _authService = AuthService();
   late Future<bool> _signedInFuture;
@@ -77,6 +72,7 @@ class _AuthGateState extends State<AuthGate> {
 
 class MainAppShell extends StatefulWidget {
   const MainAppShell({super.key, required this.onSignOut});
+
   final VoidCallback onSignOut;
 
   @override
@@ -86,20 +82,13 @@ class MainAppShell extends StatefulWidget {
 class _MainAppShellState extends State<MainAppShell> {
   int selectedIndex = 0;
   final _authService = AuthService();
-=======
-class _CommonUiPreviewState extends State<CommonUiPreview> {
-  int selectedIndex = 0;
->>>>>>> Stashed changes
 
   static const screens = [
     MobileHomeBaseScreen(),
     MaterialRequestListScreen(),
     PoListScreen(),
     DeliveryListScreen(),
-<<<<<<< Updated upstream
     PendingInspectionsScreen(),
-=======
->>>>>>> Stashed changes
   ];
 
   Future<void> _signOut() async {
@@ -109,7 +98,6 @@ class _CommonUiPreviewState extends State<CommonUiPreview> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-<<<<<<< Updated upstream
     appBar: AppBar(
       title: const Text('BuildWise'),
       actions: [
@@ -125,8 +113,6 @@ class _CommonUiPreviewState extends State<CommonUiPreview> {
         ),
       ],
     ),
-=======
->>>>>>> Stashed changes
     body: IndexedStack(index: selectedIndex, children: screens),
     bottomNavigationBar: NavigationBar(
       selectedIndex: selectedIndex,
@@ -152,14 +138,11 @@ class _CommonUiPreviewState extends State<CommonUiPreview> {
           selectedIcon: Icon(Icons.local_shipping),
           label: 'Deliveries',
         ),
-<<<<<<< Updated upstream
         NavigationDestination(
           icon: Icon(Icons.fact_check_outlined),
           selectedIcon: Icon(Icons.fact_check),
           label: 'Quality',
         ),
-=======
->>>>>>> Stashed changes
       ],
     ),
   );
