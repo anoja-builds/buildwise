@@ -7,7 +7,6 @@ import 'features/auth/services/auth_service.dart';
 import 'features/deliveries/screens/delivery_list_screen.dart';
 import 'features/material_requests/screens/material_request_list_screen.dart';
 import 'features/procurement/screens/po_list_screen.dart';
-import 'features/procurement/screens/procurement_home_screen.dart';
 import 'features/quality/screens/pending_inspections_screen.dart';
 
 void main() => runApp(const BuildWiseApp());
@@ -147,3 +146,4 @@ class _MainAppShellState extends State<MainAppShell> {
     ),
   );
 }
+
