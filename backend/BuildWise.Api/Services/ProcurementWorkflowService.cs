@@ -15,6 +15,7 @@ public class ProcurementWorkflowService
     private readonly ApplicationDbContext _db;
     private readonly QuotationAgentClient _agentClient;
     private readonly ProcurementValidationService _validationService;
+    private readonly ProcurementPlanningAgentService _planningAgent;
     private readonly IEmailService _emailService;
     private readonly ILogger<ProcurementWorkflowService> _logger;
 
@@ -22,12 +23,14 @@ public class ProcurementWorkflowService
         ApplicationDbContext db,
         QuotationAgentClient agentClient,
         ProcurementValidationService validationService,
+        ProcurementPlanningAgentService planningAgent,
         IEmailService emailService,
         ILogger<ProcurementWorkflowService> logger)
     {
         _db = db;
         _agentClient = agentClient;
         _validationService = validationService;
+        _planningAgent = planningAgent;
         _emailService = emailService;
         _logger = logger;
     }
@@ -75,20 +78,15 @@ public class ProcurementWorkflowService
         // coordinator that turns the objective into a structured, ordered plan
         // before any tool call happens — this is what a downstream agent
         // "delegates" against, satisfying spec §9.1's planning/delegation step.
-        var plan = new[]
-        {
-            "Filter eligible quotations (Active supplier, not expired) and rank by total amount.",
-            "Independently re-validate the recommendation against all deterministic business rules.",
-            "Pause for Procurement Manager approval before any purchase order can be created."
-        };
+        var planningOutput = await _planningAgent.CreatePlanAsync(new ProcurementPlanningInput(materialRequestId, workflow.Objective));
         var planningStep = new AgentWorkflowStep
         {
             AgentWorkflowId = workflow.Id,
-            AgentRole = "ProcurementPlanningAgent",
-            StepName = "Plan quotation analysis",
+            AgentRole = ProcurementPlanningAgentService.AgentRole,
+            StepName = "Create controlled procurement plan",
             StepOrder = 1,
             Status = WorkflowStepStatus.Completed,
-            StructuredResult = JsonSerializer.Serialize(new { objective = workflow.Objective, plan }, new JsonSerializerOptions { WriteIndented = true }),
+            StructuredResult = JsonSerializer.Serialize(planningOutput, new JsonSerializerOptions { WriteIndented = true }),
             StartedAt = DateTime.UtcNow,
             CompletedAt = DateTime.UtcNow
         };
@@ -101,6 +99,7 @@ public class ProcurementWorkflowService
             i => i.Id.ToString(),
             i => i.RequestedQuantity
         );
+        var supplierHistories = await BuildSupplierHistoriesAsync(quotations.Select(q => q.SupplierId).Distinct().ToList());
 
         var agentQuotations = quotations.Select(q => new AgentQuotationInput(
             quotation_id: q.Id,
@@ -109,8 +108,12 @@ public class ProcurementWorkflowService
             supplier_status: q.Supplier?.Status.ToString() ?? "Unknown",
             quantity_offered: q.Items.ToDictionary(i => i.MaterialRequestItemId.ToString(), i => i.Quantity),
             unit_prices: q.Items.ToDictionary(i => i.MaterialRequestItemId.ToString(), i => i.UnitPrice),
-            total_amount: q.TotalAmount,
-            valid: q.ValidUntil >= today
+            total_amount: q.Items.Sum(i => i.Quantity * i.UnitPrice),
+            valid: q.ValidUntil >= today,
+            promised_delivery_date: q.PromisedDeliveryDate,
+            transport_charge: q.TransportCharge,
+            payment_terms: q.PaymentTerms,
+            supplier_history: supplierHistories.GetValueOrDefault(q.SupplierId) ?? new SupplierHistoryInput()
         )).ToList();
 
         // 4. Analysis step (QuotationSupplierAnalysisAgent): the tool-using agent —
@@ -132,17 +135,36 @@ public class ProcurementWorkflowService
         try
         {
             // Call Agent Microservice
-            var recommendation = await _agentClient.AnalyzeAsync(materialRequestId, agentQuotations, requestedQuantities);
+            var recommendation = await _agentClient.AnalyzeAsync(materialRequestId, agentQuotations, requestedQuantities, request.RequiredDate);
 
             // Validate schema conformance (§5.7)
             var schemaResult = _validationService.ValidateRecommendationSchema(recommendation);
             if (!schemaResult.IsValid)
             {
+                var schemaValidationJson = JsonSerializer.Serialize(schemaResult, new JsonSerializerOptions
+                {
+                    WriteIndented = true,
+                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+                });
+                var schemaValidationStep = new AgentWorkflowStep
+                {
+                    AgentWorkflowId = workflow.Id,
+                    AgentRole = "ProcurementValidationAgent",
+                    StepName = "Validate required structured fields",
+                    StepOrder = 3,
+                    Status = WorkflowStepStatus.Completed,
+                    ValidationResult = schemaValidationJson,
+                    ErrorMessage = $"Revision required: {string.Join("; ", schemaResult.Errors)}",
+                    StartedAt = DateTime.UtcNow,
+                    CompletedAt = DateTime.UtcNow
+                };
+                _db.AgentWorkflowSteps.Add(schemaValidationStep);
                 analysisStep.Status = WorkflowStepStatus.Failed;
                 analysisStep.ErrorMessage = $"Agent schema validation failed: {string.Join("; ", schemaResult.Errors)}";
                 analysisStep.CompletedAt = DateTime.UtcNow;
-                workflow.Status = WorkflowStatus.Failed;
-                workflow.FinalOutcome = "Workflow failed due to agent output schema violation.";
+                workflow.Status = WorkflowStatus.RevisionRequired;
+                workflow.ApprovalStatus = AgentApprovalStatus.RevisionRequested;
+                workflow.FinalOutcome = "Revision required because the agent output failed the required structured-field contract.";
                 await _db.SaveChangesAsync();
 
                 return new StartProcurementWorkflowResponse(workflow.Id, workflow.Status.ToString(), analysisStep.ErrorMessage);
@@ -174,20 +196,26 @@ public class ProcurementWorkflowService
             // Deterministic Validation Gate (§5 rules)
             var validationResult = await _validationService.ValidateRecommendationAsync(
                 recommendation!.RecommendedQuotationId!.Value,
-                materialRequestId
+                materialRequestId,
+                recommendation.RecommendedSupplierId
             );
 
-            var validationResultJson = JsonSerializer.Serialize(validationResult, new JsonSerializerOptions { WriteIndented = true });
+            var validationResultJson = JsonSerializer.Serialize(validationResult, new JsonSerializerOptions
+            {
+                WriteIndented = true,
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+            });
             validationStep.ValidationResult = validationResultJson;
 
             if (!validationResult.IsValid)
             {
-                validationStep.Status = WorkflowStepStatus.Failed;
-                validationStep.ErrorMessage = $"Deterministic validation failed: {string.Join("; ", validationResult.Errors)}";
+                validationStep.Status = WorkflowStepStatus.Completed;
+                validationStep.ErrorMessage = $"Revision required: {string.Join("; ", validationResult.Errors)}";
                 validationStep.CompletedAt = DateTime.UtcNow;
 
-                workflow.Status = WorkflowStatus.Failed;
-                workflow.FinalOutcome = $"Recommendation rejected by deterministic validation: {string.Join("; ", validationResult.Errors)}";
+                workflow.Status = WorkflowStatus.RevisionRequired;
+                workflow.ApprovalStatus = AgentApprovalStatus.RevisionRequested;
+                workflow.FinalOutcome = $"Revision required by ProcurementValidationAgent: {string.Join("; ", validationResult.Errors)}";
                 await _db.SaveChangesAsync();
 
                 return new StartProcurementWorkflowResponse(workflow.Id, workflow.Status.ToString(), validationStep.ErrorMessage);
@@ -254,6 +282,41 @@ public class ProcurementWorkflowService
         }
     }
 
+    private async Task<Dictionary<int, SupplierHistoryInput>> BuildSupplierHistoriesAsync(IReadOnlyCollection<int> supplierIds)
+    {
+        if (supplierIds.Count == 0) return new Dictionary<int, SupplierHistoryInput>();
+        var supplierIdSet = supplierIds.ToHashSet();
+        var deliveries = await _db.Deliveries
+            .Where(d => d.PurchaseOrder != null && (supplierIdSet.Contains(d.PurchaseOrder.SupplierId ?? 0) || (d.PurchaseOrder.Quotation != null && supplierIdSet.Contains(d.PurchaseOrder.Quotation.SupplierId))))
+            .Include(d => d.PurchaseOrder)
+            .ThenInclude(po => po!.Quotation)
+            .Include(d => d.Items)
+            .AsNoTracking()
+            .ToListAsync();
+        var inspections = await _db.Inspections
+            .Where(i => i.Delivery!.PurchaseOrder != null && (supplierIdSet.Contains(i.Delivery.PurchaseOrder.SupplierId ?? 0) || (i.Delivery.PurchaseOrder.Quotation != null && supplierIdSet.Contains(i.Delivery.PurchaseOrder.Quotation.SupplierId))))
+            .Include(i => i.Items)
+            .AsNoTracking()
+            .ToListAsync();
+        var ncrs = await _db.NonConformances
+            .Where(n => n.SupplierId.HasValue && supplierIdSet.Contains(n.SupplierId.Value))
+            .AsNoTracking()
+            .ToListAsync();
+        return supplierIds.ToDictionary(id => id, id =>
+        {
+            var supplierDeliveries = deliveries.Where(d => (d.PurchaseOrder?.SupplierId ?? d.PurchaseOrder?.Quotation?.SupplierId) == id).ToList();
+            var supplierInspections = inspections.Where(i => (i.Delivery?.PurchaseOrder?.SupplierId ?? i.Delivery?.PurchaseOrder?.Quotation?.SupplierId) == id).ToList();
+            var onTime = supplierDeliveries.Count(d => d.PurchaseOrder?.ExpectedDeliveryDate is DateOnly expected && d.DeliveredAt.Date <= expected.ToDateTime(TimeOnly.MinValue).Date);
+            return new SupplierHistoryInput(
+                supplierDeliveries.Count, onTime,
+                supplierDeliveries.Count(d => d.Status == DeliveryStatus.DiscrepancyReported),
+                supplierInspections.Count,
+                supplierInspections.Sum(i => i.Items.Sum(x => x.RejectedQuantity)),
+                supplierInspections.Sum(i => i.Items.Sum(x => x.InspectedQuantity)),
+                ncrs.Count(n => n.SupplierId == id));
+        });
+    }
+
     public async Task<ProcurementWorkflowDetailsDto?> GetWorkflowDetailsAsync(int workflowId)
     {
         var workflow = await _db.AgentWorkflows
@@ -306,10 +369,23 @@ public class ProcurementWorkflowService
         {
             try
             {
-                var valObj = JsonSerializer.Deserialize<ProcurementValidationResult>(validationStep.ValidationResult);
+                var valObj = JsonSerializer.Deserialize<ProcurementValidationResult>(validationStep.ValidationResult, new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true
+                });
                 if (valObj != null)
-                    validation = new ProcurementValidationResultDto(valObj.IsValid, valObj.Errors);
+                    validation = new ProcurementValidationResultDto(valObj.IsValid, valObj.Errors, valObj.Warnings);
             }
+            catch { }
+        }
+
+        ProcurementPlanningOutput? planning = null;
+        var planningStep = workflow.Steps
+            .Where(s => s.AgentRole == ProcurementPlanningAgentService.AgentRole && s.StructuredResult != null)
+            .OrderBy(s => s.StepOrder).FirstOrDefault();
+        if (!string.IsNullOrWhiteSpace(planningStep?.StructuredResult))
+        {
+            try { planning = JsonSerializer.Deserialize<ProcurementPlanningOutput>(planningStep!.StructuredResult!); }
             catch { }
         }
 
@@ -320,15 +396,17 @@ public class ProcurementWorkflowService
             workflow.Status.ToString(),
             workflow.ApprovalStatus.ToString(),
             workflow.FinalOutcome,
+            workflow.PurchaseOrderId,
             recommendation,
             validation,
             stepDtos,
             workflow.CreatedAt,
-            workflow.UpdatedAt
+            workflow.UpdatedAt,
+            planning
         );
     }
 
-    public async Task<AgentApproval> RecordDecisionAsync(int workflowId, WorkflowDecisionDto dto)
+    public async Task<AgentApproval> RecordDecisionAsync(int workflowId, WorkflowDecisionDto dto, int reviewedByUserId)
     {
         var workflow = await _db.AgentWorkflows
             .Include(w => w.Steps)
@@ -356,7 +434,7 @@ public class ProcurementWorkflowService
         var approval = new AgentApproval
         {
             AgentWorkflowId = workflowId,
-            ReviewedByUserId = dto.ReviewedByUserId,
+            ReviewedByUserId = reviewedByUserId,
             Decision = decisionStatus,
             Comment = dto.Comment,
             DecisionDate = DateTime.UtcNow
@@ -368,13 +446,40 @@ public class ProcurementWorkflowService
 
         if (decisionStatus == AgentApprovalStatus.Approved)
         {
-            workflow.Status = WorkflowStatus.Completed;
-            workflow.CompletedAt = DateTime.UtcNow;
-            workflow.FinalOutcome = $"Manager Approved recommendation: {dto.Comment}";
-            await _db.SaveChangesAsync();
+            // Approval and PO creation are one business action. On PostgreSQL they
+            // therefore share one transaction: a validation/write failure must not
+            // leave an Approved workflow without its corresponding PO.
+            var useTransaction = _db.Database.IsRelational();
+            var transaction = useTransaction ? await _db.Database.BeginTransactionAsync() : null;
+            try
+            {
+                workflow.ApprovalStatus = decisionStatus;
+                workflow.UpdatedAt = DateTime.UtcNow;
+                await _db.SaveChangesAsync();
 
-            // Auto-create purchase order on Manager approval (§4.6)
-            await CreatePurchaseOrderInternalAsync(workflow);
+                var po = await CreatePurchaseOrderInternalAsync(workflow, ownsTransaction: false, notifyRequester: false);
+                workflow.PurchaseOrderId = po.Id;
+                workflow.Status = WorkflowStatus.Completed;
+                workflow.CompletedAt = DateTime.UtcNow;
+                workflow.FinalOutcome = $"Manager Approved recommendation and created Purchase Order #{po.Id}: {dto.Comment}";
+                await _db.SaveChangesAsync();
+
+                if (transaction is not null)
+                    await transaction.CommitAsync();
+
+                await NotifyRequesterOfPurchaseOrderAsync(workflow.MaterialRequestId ?? 0, po, winnerQuotation: null);
+            }
+            catch
+            {
+                if (transaction is not null)
+                    await transaction.RollbackAsync();
+                throw;
+            }
+            finally
+            {
+                if (transaction is not null)
+                    await transaction.DisposeAsync();
+            }
         }
         else if (decisionStatus == AgentApprovalStatus.Rejected)
         {
@@ -405,7 +510,10 @@ public class ProcurementWorkflowService
         return await CreatePurchaseOrderInternalAsync(workflow);
     }
 
-    private async Task<PurchaseOrder> CreatePurchaseOrderInternalAsync(AgentWorkflow workflow)
+    private async Task<PurchaseOrder> CreatePurchaseOrderInternalAsync(
+        AgentWorkflow workflow,
+        bool ownsTransaction = true,
+        bool notifyRequester = true)
     {
         // 1. Validate PO creation preconditions (§5.8 - §5.10)
         var valResult = await _validationService.ValidatePurchaseOrderCreationAsync(workflow.Id);
@@ -417,12 +525,23 @@ public class ProcurementWorkflowService
         if (lastStep is null)
             throw new InvalidOperationException("No recommendation payload found in workflow steps.");
 
-        var recommendation = JsonSerializer.Deserialize<AgentRecommendationDto>(lastStep.StructuredResult!);
+        var agentJsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web)
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower
+        };
+        var recommendation = JsonSerializer.Deserialize<AgentRecommendationDto>(lastStep.StructuredResult!, agentJsonOptions);
+        // Existing local fixtures may contain the original PascalCase C# contract.
+        // Accept both formats while keeping the live Python snake_case contract canonical.
+        if (recommendation?.RecommendedQuotationId is null)
+        {
+            recommendation = JsonSerializer.Deserialize<AgentRecommendationDto>(lastStep.StructuredResult!);
+        }
         if (recommendation?.RecommendedQuotationId is null)
             throw new InvalidOperationException("Recommended quotation ID not present in workflow result.");
 
         var winnerQuotation = await _db.Quotations
             .Include(q => q.Items)
+                .ThenInclude(qi => qi.MaterialRequestItem)
             .Include(q => q.Supplier)
             .FirstOrDefaultAsync(q => q.Id == recommendation.RecommendedQuotationId.Value);
 
@@ -436,7 +555,7 @@ public class ProcurementWorkflowService
         // (The in-memory provider used by unit tests doesn't support
         // transactions at all, so only start one against a real relational
         // database — Postgres in every real environment.)
-        var useTransaction = _db.Database.IsRelational();
+        var useTransaction = ownsTransaction && _db.Database.IsRelational();
         var transaction = useTransaction ? await _db.Database.BeginTransactionAsync() : null;
         PurchaseOrder po;
         try
@@ -453,10 +572,14 @@ public class ProcurementWorkflowService
                 SupplierId = winnerQuotation.SupplierId,
                 OrderDate = today,
                 ExpectedDeliveryDate = today.AddDays(7),
-                Status = PurchaseOrderStatus.Created,
+                Status = PurchaseOrderStatus.Confirmed,
                 TotalAmount = winnerQuotation.TotalAmount,
                 Items = winnerQuotation.Items.Select(qi => new PurchaseOrderItem
                 {
+                    // MaterialId must be carried over: Component 3 receiving
+                    // matches delivery lines against PO items by material, so a
+                    // null MaterialId makes the order undispatchable.
+                    MaterialId = qi.MaterialRequestItem.MaterialId,
                     QuotationItemId = qi.Id,
                     OrderedQuantity = qi.Quantity,
                     UnitPrice = qi.UnitPrice
@@ -496,12 +619,13 @@ public class ProcurementWorkflowService
         _logger.LogInformation("Purchase Order #{PoId} created for quotation #{QuotationId} (Request #{RequestId})",
             po.Id, winnerQuotation.Id, workflow.MaterialRequestId);
 
-        await NotifyRequesterOfPurchaseOrderAsync(workflow.MaterialRequestId ?? 0, po, winnerQuotation);
+        if (notifyRequester)
+            await NotifyRequesterOfPurchaseOrderAsync(workflow.MaterialRequestId ?? 0, po, winnerQuotation);
 
         return po;
     }
 
-    private async Task NotifyRequesterOfPurchaseOrderAsync(int materialRequestId, PurchaseOrder po, Quotation winnerQuotation)
+    private async Task NotifyRequesterOfPurchaseOrderAsync(int materialRequestId, PurchaseOrder po, Quotation? winnerQuotation)
     {
         try
         {
@@ -515,7 +639,7 @@ public class ProcurementWorkflowService
             var body =
                 $"Good news — procurement is complete for your material request #{materialRequestId}.\n\n" +
                 $"Purchase Order: #{po.Id}\n" +
-                $"Supplier: {winnerQuotation.Supplier?.Name}\n" +
+                $"Supplier: {winnerQuotation?.Supplier?.Name ?? (po.SupplierId > 0 ? $"Supplier #{po.SupplierId}" : "Confirmed supplier")}\n" +
                 $"Total: {po.TotalAmount:N2}\n" +
                 $"Expected delivery: {po.ExpectedDeliveryDate}\n\n" +
                 $"You can track delivery status in BuildWise.";

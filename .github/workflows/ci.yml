@@ -54,7 +54,7 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Test
-        run: pytest test_quotation_agent.py -v
+        run: pytest -q
 
   web:
     name: Web (React)

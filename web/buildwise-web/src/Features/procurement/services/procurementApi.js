@@ -163,11 +163,19 @@ export const procurementApi = {
     })
   }),
 
+  // RFQs
+  listRfqs: (status) => request(`/rfqs${qs({ status })}`, { mockFallback: () => [] }),
+  getRfq: (id) => request(`/rfqs/${id}`, { mockFallback: () => null }),
+  createRfq: (data) => request('/rfqs', { method: 'POST', body: data }),
+  addRfqSuppliers: (id, supplierIds) => request(`/rfqs/${id}/suppliers`, { method: 'POST', body: { supplierIds } }),
+  closeRfq: (id, reason) => request(`/rfqs/${id}/close`, { method: 'POST', body: { reason } }),
+
   // Agentic AI workflow
   startWorkflow: (requestId, body) => request(`/material-requests/${requestId}/procurement-workflow`, { method: 'POST', body: body ?? {}, mockFallback: () => ({ workflowId: MOCK.workflow.id, status: MOCK.workflow.status, message: 'Quotation & Supplier Analysis Agent completed (demo data — agent service not reachable).' }) }),
   getWorkflow: (workflowId) => request(`/procurement-workflow/${workflowId}`, { mockFallback: () => MOCK.workflow }),
   getWorkflowHistory: (workflowId) => request(`/procurement-workflow/${workflowId}/history`, { mockFallback: () => MOCK.workflow.steps }),
-  recordDecision: (workflowId, decision, comment) => request(`/procurement-workflow/${workflowId}/decision`, { method: 'POST', body: { decision, comment, reviewedByUserId: 1 } }),
+    recordDecision: (workflowId, decision, comment) => request(`/procurement-workflow/${workflowId}/decision`, { method: 'POST', body: { decision, comment } }),
+  analyzeRequest: (requestId) => request(`/agent/analyze-request/${requestId}`, { method: 'POST' }),
 
   // Purchase orders
   createPurchaseOrderFromWorkflow: (workflowId) => request(`/procurement-workflow/${workflowId}/purchase-order`, { method: 'POST' }),

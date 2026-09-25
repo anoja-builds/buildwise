@@ -12,13 +12,34 @@ public record AgentQuotationInput(
     Dictionary<string, decimal> quantity_offered,
     Dictionary<string, decimal> unit_prices,
     decimal total_amount,
-    bool valid
+    bool valid,
+    DateOnly? promised_delivery_date = null,
+    decimal transport_charge = 0m,
+    string? payment_terms = null,
+    SupplierHistoryInput? supplier_history = null
 );
+
+public record SupplierHistoryInput(
+    int delivery_count = 0,
+    int on_time_delivery_count = 0,
+    int discrepancy_count = 0,
+    int inspection_count = 0,
+    decimal rejected_quantity = 0m,
+    decimal inspected_quantity = 0m,
+    int ncr_count = 0
+)
+{
+    public decimal OnTimeRate => delivery_count == 0 ? 100m : (decimal)on_time_delivery_count / delivery_count * 100m;
+    public decimal DiscrepancyRate => delivery_count == 0 ? 0m : (decimal)discrepancy_count / delivery_count * 100m;
+    public decimal RejectionRate => inspected_quantity == 0 ? 0m : rejected_quantity / inspected_quantity * 100m;
+    public decimal PerformanceScore => Math.Round(Math.Max(0m, Math.Min(100m, OnTimeRate * 0.5m + (100m - DiscrepancyRate) * 0.2m + (100m - RejectionRate) * 0.3m)), 2);
+}
 
 public record AgentAnalyzePayload(
     int material_request_id,
     List<AgentQuotationInput> quotations,
-    Dictionary<string, decimal> requested_quantities
+    Dictionary<string, decimal> requested_quantities,
+    DateOnly? required_date = null
 );
 
 public class QuotationAgentClient
@@ -36,12 +57,13 @@ public class QuotationAgentClient
         int materialRequestId,
         List<AgentQuotationInput> quotations,
         Dictionary<string, decimal> requestedQuantities,
+        DateOnly? requiredDate = null,
         CancellationToken ct = default)
     {
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         cts.CancelAfter(TimeSpan.FromSeconds(10));
 
-        var payload = new AgentAnalyzePayload(materialRequestId, quotations, requestedQuantities);
+        var payload = new AgentAnalyzePayload(materialRequestId, quotations, requestedQuantities, requiredDate);
 
         try
         {
@@ -112,7 +134,8 @@ public class QuotationAgentClient
 
         var ranked = eligible
             .OrderBy(e => !e.CoversAll)
-            .ThenBy(e => e.Quotation.total_amount)
+            .ThenBy(e => e.Quotation.total_amount + e.Quotation.transport_charge)
+            .ThenByDescending(e => e.Quotation.supplier_history?.PerformanceScore ?? 0m)
             .ToList();
 
         if (ranked.Count == 0)
@@ -123,7 +146,10 @@ public class QuotationAgentClient
                 RecommendedSupplierName: null,
                 Rationale: "No eligible quotations met the procurement criteria.",
                 RankedAlternatives: new List<RankedAlternativeDto>(),
-                Warnings: warnings
+                Warnings: warnings,
+                Justification: new List<string>(),
+                RiskFlags: new List<string> { "NO_ELIGIBLE_QUOTATION" },
+                Ranking: new List<RankedAlternativeDto>()
             );
         }
 
@@ -143,13 +169,32 @@ public class QuotationAgentClient
             ? $"Selected '{top.Quotation.supplier_name}' (Quotation #{top.Quotation.quotation_id}) as the lowest-cost compliant supplier ({top.Quotation.total_amount:N2}) with 100% quantity fulfillment and Active standing."
             : $"Flagged '{top.Quotation.supplier_name}' as best available ({top.Quotation.total_amount:N2}), but NOTE: does not fully cover requested quantities.";
 
+        var justification = new List<string>();
+        var riskFlags = new List<string>();
+        if (top.CoversAll)
+            justification.Add($"Selected '{top.Quotation.supplier_name}' because it fully covers the requested quantity and has the lowest eligible landed cost.");
+        else
+            justification.Add($"'{top.Quotation.supplier_name}' is the best available quotation but has incomplete quantity coverage.");
+        justification.Add($"Landed cost is {top.Quotation.total_amount + top.Quotation.transport_charge:N2} including transport charge.");
+        if (top.Quotation.supplier_history is { } history)
+        {
+            justification.Add($"Supplier history: {history.OnTimeRate:N1}% on-time, {history.DiscrepancyRate:N1}% discrepancy, {history.RejectionRate:N1}% rejection.");
+            if (history.DiscrepancyRate > 0) riskFlags.Add($"DELIVERY_DISCREPANCY_HISTORY:{top.Quotation.supplier_name}");
+            if (history.RejectionRate > 0 || history.ncr_count > 0) riskFlags.Add($"QUALITY_HISTORY_REVIEW:{top.Quotation.supplier_name}");
+        }
+        if (top.Quotation.promised_delivery_date.HasValue) justification.Add($"Promised delivery date: {top.Quotation.promised_delivery_date:yyyy-MM-dd}.");
+        if (!top.CoversAll) riskFlags.Add($"PARTIAL_QUANTITY:{top.Quotation.supplier_name}");
+
         return new AgentRecommendationDto(
             RecommendedQuotationId: top.Quotation.quotation_id,
             RecommendedSupplierId: top.Quotation.supplier_id,
             RecommendedSupplierName: top.Quotation.supplier_name,
             Rationale: rationale,
             RankedAlternatives: alternatives,
-            Warnings: warnings
+            Warnings: warnings,
+            Justification: justification,
+            RiskFlags: riskFlags.Distinct().ToList(),
+            Ranking: alternatives
         );
     }
 }

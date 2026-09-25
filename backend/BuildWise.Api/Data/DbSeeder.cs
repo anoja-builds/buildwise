@@ -24,22 +24,49 @@ public static class DbSeeder
 
     private static async Task SeedUsersAsync(ApplicationDbContext db)
     {
-        if (await db.Users.AnyAsync()) return;
+        var requiredRoleNames = new[]
+        {
+            "Administrator", "SiteEngineer", "ProjectManager", "ProcurementOfficer",
+            "ProcurementManager", "ReceivingOfficer", "QualityInspector", "SiteOfficer", "SiteManager"
+        };
+        var existingRoleNames = await db.Roles.Select(role => role.Name).ToListAsync();
+        foreach (var roleName in requiredRoleNames.Where(name => !existingRoleNames.Contains(name)))
+        {
+            db.Roles.Add(new Role { Name = roleName });
+        }
+        await db.SaveChangesAsync();
 
         var roles = await db.Roles.ToDictionaryAsync(r => r.Name, r => r);
         var hasher = new PasswordHasher<User>();
 
-        (string Name, string Email, string Role)[] demoAccounts =
+                (string Name, string Email, string Role)[] demoAccounts =
         [
             ("Ada Administrator", "admin@buildwise.demo", "Administrator"),
             ("Sam SiteEngineer", "site.engineer@buildwise.demo", "SiteEngineer"),
+            ("Nipuni SiteOfficer", "site.officer@buildwise.demo", "SiteOfficer"),
             ("Priya Officer", "procurement.officer@buildwise.demo", "ProcurementOfficer"),
-            ("Mira Manager", "procurement.manager@buildwise.demo", "ProcurementManager")
+            ("Mira Manager", "procurement.manager@buildwise.demo", "ProcurementManager"),
+            ("Nimal Site Manager", "site.manager@buildwise.demo", "SiteManager"),
+            ("Dinesh Inspector", "quality.inspector@buildwise.demo", "QualityInspector"),
         ];
 
         foreach (var (name, email, roleName) in demoAccounts)
         {
-            if (!roles.TryGetValue(roleName, out var role)) continue;
+            if (await db.Users.AnyAsync(user => user.Email == email)) continue;
+
+            // SiteOfficer is an alias row for the same SiteEngineer permission
+            // set — grant both rows so either JWT role claim passes [Authorize].
+            var roleNames = roleName == "SiteEngineer"
+                ? new[] { "SiteEngineer", "SiteOfficer" }
+                : new[] { roleName };
+            UserRole? roleLink = null;
+            foreach (var rn in roleNames)
+            {
+                if (!roles.TryGetValue(rn, out var role)) continue;
+                roleLink = new UserRole { Role = role };
+                break;
+            }
+            if (roleLink is null) continue;
 
             var user = new User
             {
@@ -50,7 +77,12 @@ public static class DbSeeder
                 UpdatedAt = DateTime.UtcNow
             };
             user.PasswordHash = hasher.HashPassword(user, DemoPassword);
-            user.UserRoles.Add(new UserRole { Role = role });
+            foreach (var rn in roleNames)
+            {
+                if (!roles.TryGetValue(rn, out var linkedRole)) continue;
+                user.UserRoles.Add(new UserRole { Role = linkedRole });
+            }
+            if (user.UserRoles.Count == 0) continue;
 
             db.Users.Add(user);
         }

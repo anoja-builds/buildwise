@@ -37,6 +37,10 @@ public class AuthService
         if (exists)
             throw new InvalidOperationException($"An account with email '{normalizedEmail}' already exists.");
 
+        var selfRegisterRoles = new[] { "SiteEngineer", "SiteOfficer", "ProcurementOfficer", "QualityInspector" };
+        if (!selfRegisterRoles.Contains(dto.RoleName))
+            throw new ArgumentException("Manager and Administrator accounts must be provisioned by an existing administrator.");
+
         var role = await _db.Roles.FirstOrDefaultAsync(r => r.Name == dto.RoleName);
         if (role is null)
             throw new ArgumentException($"Unknown role '{dto.RoleName}'.");

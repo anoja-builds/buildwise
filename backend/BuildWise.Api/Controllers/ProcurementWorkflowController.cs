@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using BuildWise.Api.DTOs;
 using BuildWise.Api.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -7,17 +8,20 @@ namespace BuildWise.Api.Controllers;
 
 [ApiController]
 [Route("api")]
-[Authorize(Roles = "ProcurementOfficer,ProcurementManager,Administrator")]
+[Authorize(Roles = "ProcurementOfficer,ProcurementManager,SiteManager,Administrator")]
 public class ProcurementWorkflowController : ControllerBase
 {
     private readonly ProcurementWorkflowService _workflowService;
+    private readonly ProcurementPlanningAgentService _planningAgent;
     private readonly ILogger<ProcurementWorkflowController> _logger;
 
     public ProcurementWorkflowController(
         ProcurementWorkflowService workflowService,
+        ProcurementPlanningAgentService planningAgent,
         ILogger<ProcurementWorkflowController> logger)
     {
         _workflowService = workflowService;
+        _planningAgent = planningAgent;
         _logger = logger;
     }
 
@@ -31,7 +35,7 @@ public class ProcurementWorkflowController : ControllerBase
     {
         try
         {
-            var userId = request?.InitiatedByUserId ?? 1;
+            var userId = ParseUserId();
             var response = await _workflowService.StartWorkflowAsync(requestId, userId, request?.Objective);
             return Ok(response);
         }
@@ -43,6 +47,14 @@ public class ProcurementWorkflowController : ControllerBase
         {
             return BadRequest(new { error = ex.Message });
         }
+    }
+
+    [HttpGet("procurement-planning-agent/material-requests/{requestId:int}")]
+    public async Task<ActionResult<ProcurementPlanningOutput>> GetPlan(int requestId, [FromQuery] string? objective)
+    {
+        try { return Ok(await _planningAgent.CreatePlanAsync(new ProcurementPlanningInput(requestId, objective))); }
+        catch (KeyNotFoundException ex) { return NotFound(new { error = ex.Message }); }
+        catch (ArgumentException ex) { return BadRequest(new { error = ex.Message }); }
     }
 
     /// <summary>
@@ -76,12 +88,13 @@ public class ProcurementWorkflowController : ControllerBase
     /// Human-in-the-loop gate: Only an 'Approve' decision unlocks purchase order creation.
     /// </summary>
     [HttpPost("procurement-workflow/{workflowId:int}/decision")]
-    [Authorize(Roles = "ProcurementManager,Administrator")]
+    [Authorize(Policy = "ProcurementDecisionOnly")]
     public async Task<IActionResult> RecordDecision(int workflowId, [FromBody] WorkflowDecisionDto dto)
     {
         try
         {
-            var approval = await _workflowService.RecordDecisionAsync(workflowId, dto);
+            var userId = ParseUserId();
+            var approval = await _workflowService.RecordDecisionAsync(workflowId, dto, userId);
             return Ok(new
             {
                 message = $"Decision '{approval.Decision}' recorded successfully.",
@@ -99,5 +112,13 @@ public class ProcurementWorkflowController : ControllerBase
         {
             return BadRequest(new { error = ex.Message });
         }
+    }
+
+    private int ParseUserId()
+    {
+        var value = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (!int.TryParse(value, out var userId) || userId <= 0)
+            throw new InvalidOperationException("Authenticated user identifier is missing or invalid.");
+        return userId;
     }
 }

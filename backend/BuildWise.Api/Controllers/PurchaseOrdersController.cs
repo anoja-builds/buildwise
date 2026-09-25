@@ -11,7 +11,7 @@ namespace BuildWise.Api.Controllers;
 
 [ApiController]
 [Route("api")]
-[Authorize(Roles = "ProcurementOfficer,ProcurementManager,Administrator")]
+[Authorize(Roles = "ProcurementOfficer,ProcurementManager,SiteManager,Administrator,SiteEngineer,SiteOfficer,ReceivingOfficer,QualityInspector")]
 public class PurchaseOrdersController : ControllerBase
 {
     private readonly ApplicationDbContext _db;
@@ -32,6 +32,7 @@ public class PurchaseOrdersController : ControllerBase
     /// Explicitly trigger Purchase Order creation from an approved agent workflow (§4.6 / §7).
     /// </summary>
     [HttpPost("procurement-workflow/{workflowId:int}/purchase-order")]
+    [Authorize(Policy = "ProcurementDecisionOnly")]
     public async Task<ActionResult<PurchaseOrderDto>> CreateFromWorkflow(int workflowId)
     {
         try
@@ -54,7 +55,7 @@ public class PurchaseOrdersController : ControllerBase
     /// Exposes read-only purchase orders to Component 3 once status >= Confirmed.
     /// </summary>
     [HttpGet("purchase-orders")]
-    [Authorize(Roles = "ProcurementOfficer,ProcurementManager,Administrator,ReceivingOfficer")]
+    [Authorize(Roles = "ProcurementOfficer,ProcurementManager,Administrator,ReceivingOfficer,SiteEngineer,SiteOfficer,SiteManager,QualityInspector")]
     public async Task<ActionResult<PagedResultDto<PurchaseOrderDto>>> GetAll(
         [FromQuery] string? status,
         [FromQuery] string? search,
@@ -98,7 +99,7 @@ public class PurchaseOrdersController : ControllerBase
     /// Get purchase order detail with items and linked quotation.
     /// </summary>
     [HttpGet("purchase-orders/{id:int}")]
-    [Authorize(Roles = "ProcurementOfficer,ProcurementManager,Administrator,ReceivingOfficer")]
+    [Authorize(Roles = "ProcurementOfficer,ProcurementManager,Administrator,ReceivingOfficer,SiteEngineer,SiteOfficer,SiteManager,QualityInspector")]
     public async Task<ActionResult<PurchaseOrderDto>> GetById(int id)
     {
         var po = await _db.PurchaseOrders
@@ -120,6 +121,7 @@ public class PurchaseOrdersController : ControllerBase
     /// Update purchase order status (Confirmed, InProgress, Completed, Cancelled).
     /// </summary>
     [HttpPatch("purchase-orders/{id:int}/status")]
+    [Authorize(Policy = "ProcurementStaffOnly")]
     public async Task<IActionResult> UpdateStatus(int id, [FromBody] UpdatePurchaseOrderStatusDto dto)
     {
         var po = await _db.PurchaseOrders.FindAsync(id);

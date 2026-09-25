@@ -240,6 +240,27 @@ def test_fallback_does_not_resurrect_ineligible_suppliers():
     assert "no eligible quotations" in data["rationale"].lower()
 
 
+def test_landed_cost_history_and_risk_flags_are_structured():
+    payload = {
+        "material_request_id": 77,
+        "requested_quantities": {"1": 100.0},
+        "required_date": "2026-10-20",
+        "quotations": [
+            {"quotation_id": 701, "supplier_id": 71, "supplier_name": "Cheap but late", "supplier_status": "Active", "quantity_offered": {"1": 100}, "unit_prices": {"1": 90}, "total_amount": 9000, "transport_charge": 0, "promised_delivery_date": "2026-10-22", "valid": True},
+            {"quotation_id": 702, "supplier_id": 72, "supplier_name": "Compliant supplier", "supplier_status": "Active", "quantity_offered": {"1": 100}, "unit_prices": {"1": 100}, "total_amount": 10000, "transport_charge": 100, "promised_delivery_date": "2026-10-19", "valid": True, "supplier_history": {"delivery_count": 10, "on_time_delivery_count": 9, "discrepancy_count": 1, "inspection_count": 8, "rejected_quantity": 1, "inspected_quantity": 100, "ncr_count": 1}},
+        ],
+    }
+    response = client.post("/analyze", json=payload)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["recommended_quotation_id"] == 702
+    assert data["ranking"][0]["quotation_id"] == 702
+    assert data["justification"]
+    assert any("history" in item.lower() for item in data["justification"])
+    assert any("QUALITY_HISTORY_REVIEW" in item or "DELIVERY_DISCREPANCY_HISTORY" in item for item in data["risk_flags"])
+    assert any("after required date" in item for item in data["warnings"])
+
+
 if __name__ == "__main__":
     print("Running Agent Unit Tests...")
     test_health_endpoint()

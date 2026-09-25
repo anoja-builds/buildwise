@@ -5,7 +5,7 @@
 .DESCRIPTION
     Stops, in order:
       1. the PIDs recorded in <repo>\logs\dev-pids.json (written by start-dev.ps1), then
-      2. whatever is still listening on the three development ports (5078 API, 8001 agent service, 5173 web).
+      2. whatever is still listening on the six development ports (API, four agents, web).
 
     Only processes on those ports or in that PID file are touched, so unrelated dotnet/node/python
     processes on your machine are not affected. PostgreSQL is left running (it is a Windows service).
@@ -30,7 +30,10 @@ $pidFile  = Join-Path $repoRoot 'logs\dev-pids.json'
 # integer, so integer keys would resolve to $null instead of the service name.
 $ports = [ordered]@{
     '5078' = 'BuildWise API'
-    '8001' = 'Agent service'
+    '8001' = 'Quotation agent'
+    '8002' = 'Request agent'
+    '8003' = 'Delivery agent'
+    '8004' = 'Quality agent'
     '5173' = 'React web'
 }
 
@@ -83,7 +86,7 @@ foreach ($port in $ports.Keys) {
 }
 
 if ($stillUp.Count -eq 0) {
-    Write-Status 'All three development ports (5078, 8001, 5173) are free. PostgreSQL is still running.' 'Green'
+    Write-Status 'All six development ports (5078, 8001-8004, 5173) are free. PostgreSQL is still running.' 'Green'
     exit 0
 }
 

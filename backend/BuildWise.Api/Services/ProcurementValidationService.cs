@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 using System.Text.Json;
 using BuildWise.Api.Data;
 using BuildWise.Api.DTOs;
@@ -9,7 +11,9 @@ namespace BuildWise.Api.Services;
 
 public class ProcurementValidationResult
 {
+    [JsonIgnore]
     public bool IsValid => Errors.Count == 0;
+    public bool Valid => IsValid;
     public List<string> Errors { get; set; } = new();
     public List<string> Warnings { get; set; } = new();
 }
@@ -29,7 +33,8 @@ public class ProcurementValidationService
     /// </summary>
     public async Task<ProcurementValidationResult> ValidateRecommendationAsync(
         int recommendedQuotationId,
-        int materialRequestId)
+        int materialRequestId,
+        int? recommendedSupplierId = null)
     {
         var result = new ProcurementValidationResult();
 
@@ -66,6 +71,18 @@ public class ProcurementValidationService
             result.Errors.Add($"Quotation #{recommendedQuotationId} belongs to request #{quotation.MaterialRequestId}, not #{materialRequestId}.");
         }
 
+        if (request.Items.Any(i => i.RequestedQuantity <= 0))
+            result.Errors.Add("Every requested material quantity must be greater than zero.");
+        if (request.Items.Count == 0)
+            result.Errors.Add("Material request must contain at least one item.");
+
+        if (quotation.Items.Count == 0)
+            result.Errors.Add($"Quotation #{quotation.Id} must contain at least one item.");
+        if (quotation.Items.Any(i => i.Quantity <= 0))
+            result.Errors.Add("Every quotation quantity must be greater than zero.");
+        if (quotation.Items.Any(i => i.UnitPrice < 0))
+            result.Errors.Add("Quotation unit prices cannot be negative.");
+
         if (quotation.Supplier is null)
         {
             result.Errors.Add($"Supplier for quotation #{recommendedQuotationId} not found.");
@@ -75,10 +92,29 @@ public class ProcurementValidationService
             result.Errors.Add($"Supplier '{quotation.Supplier.Name}' is {quotation.Supplier.Status}. Only Active suppliers are eligible.");
         }
 
+        if (recommendedSupplierId.HasValue && recommendedSupplierId.Value != quotation.SupplierId)
+            result.Errors.Add($"Unsupported supplier identity: recommendation supplier #{recommendedSupplierId.Value} does not own quotation #{quotation.Id} (actual supplier #{quotation.SupplierId}).");
+
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
         if (quotation.ValidUntil < today)
         {
             result.Errors.Add($"Quotation #{recommendedQuotationId} expired on {quotation.ValidUntil:yyyy-MM-dd}.");
+        }
+        if (quotation.PromisedDeliveryDate is null)
+        {
+            result.Warnings.Add($"Quotation #{quotation.Id} has no promised delivery date; delivery risk cannot be fully evaluated.");
+        }
+        else if (quotation.PromisedDeliveryDate < quotation.QuotationDate)
+        {
+            result.Errors.Add($"Invalid promised delivery date {quotation.PromisedDeliveryDate:yyyy-MM-dd}: it precedes quotation date {quotation.QuotationDate:yyyy-MM-dd}.");
+        }
+        else if (quotation.PromisedDeliveryDate > quotation.ValidUntil)
+        {
+            result.Errors.Add($"Invalid promised delivery date {quotation.PromisedDeliveryDate:yyyy-MM-dd}: it is after quotation validity {quotation.ValidUntil:yyyy-MM-dd}.");
+        }
+        else if (quotation.PromisedDeliveryDate > request.RequiredDate)
+        {
+            result.Errors.Add($"Delivery risk: promised delivery {quotation.PromisedDeliveryDate:yyyy-MM-dd} is after the site required date {request.RequiredDate:yyyy-MM-dd}.");
         }
 
         // Rule 4: Every quotation_item references a material_request_item that belongs to this request
@@ -146,6 +182,18 @@ public class ProcurementValidationService
         {
             result.Errors.Add("Schema violation: ranked_alternatives array is null.");
         }
+        if (recommendation.Justification == null || recommendation.Justification.Count == 0)
+        {
+            result.Errors.Add("Schema violation: justification array is missing or empty.");
+        }
+        if (recommendation.RiskFlags == null)
+        {
+            result.Errors.Add("Schema violation: risk_flags array is missing.");
+        }
+        if (recommendation.Ranking == null || recommendation.Ranking.Count == 0)
+        {
+            result.Errors.Add("Schema violation: ranking array is missing or empty.");
+        }
 
         return result;
     }
@@ -169,8 +217,22 @@ public class ProcurementValidationService
         }
 
         // Rule 8: Blocked until an agent_approvals row exists with decision = Approved
-        var hasApprovedDecision = workflow.Approvals
-            .Any(a => a.Decision == AgentApprovalStatus.Approved);
+        var approvedDecisions = workflow.Approvals
+            .Where(a => a.Decision == AgentApprovalStatus.Approved)
+            .Select(a => a.ReviewedByUserId)
+            .ToList();
+        var hasApprovedDecision = approvedDecisions.Count > 0;
+        if (approvedDecisions.Count > 0)
+        {
+            var authorizedManagerCount = await _db.Users
+                .Where(user => approvedDecisions.Contains(user.Id))
+                .CountAsync(user => user.IsActive && user.UserRoles.Any(role =>
+                    role.Role.Name == "ProcurementManager" || role.Role.Name == "SiteManager"));
+            if (authorizedManagerCount == 0)
+            {
+                result.Errors.Add("Purchase order creation blocked: the Approved decision was not recorded by an authorized ProcurementManager or SiteManager.");
+            }
+        }
 
         if (!hasApprovedDecision)
         {

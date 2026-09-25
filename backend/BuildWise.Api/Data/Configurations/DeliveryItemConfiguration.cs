@@ -26,11 +26,9 @@ public class DeliveryItemConfiguration : IEntityTypeConfiguration<DeliveryItem>
             .HasForeignKey(di => di.DeliveryId)
             .OnDelete(DeleteBehavior.Cascade);
 
-        builder.HasOne(di => di.PurchaseOrderItem)
+        builder.HasOne(di => di.Material)
             .WithMany()
-            .HasForeignKey(di => di.PurchaseOrderItemId)
+            .HasForeignKey(di => di.MaterialId)
             .OnDelete(DeleteBehavior.Restrict);
-
-        builder.HasIndex(di => new { di.DeliveryId, di.PurchaseOrderItemId }).IsUnique();
     }
 }

@@ -1,14 +1,15 @@
 <#
 .SYNOPSIS
-    Starts the BuildWise Component 2 development stack (API, agent service, React web) in the background.
+    Starts the complete BuildWise development stack (API, all four agents, React web).
 
 .DESCRIPTION
-    Starts the three runtimes the setup guide describes, then verifies them:
-
-      1. BuildWise API   http://localhost:5078   (dotnet, Development environment, seeded database)
-      2. Agent service   http://127.0.0.1:8001   (uvicorn quotation_agent:app, from backend\agent_service\.venv)
-      3. React web       http://127.0.0.1:5173   (Vite dev server)
-
+    Starts all local runtimes, then verifies them:
+      1. BuildWise API   http://localhost:5078
+      2. Quotation agent http://127.0.0.1:8001
+      3. Request agent   http://127.0.0.1:8002
+      4. Delivery agent  http://127.0.0.1:8003
+      5. Quality agent   http://127.0.0.1:8004
+      6. React web       http://127.0.0.1:5173
     The API is run from its compiled DLL and the web server from node_modules\vite\bin\vite.js, so the PID
     recorded here is the actual server rather than a `dotnet run` / `npm` wrapper - that keeps stop-dev.ps1 reliable.
 
@@ -31,6 +32,7 @@
 [CmdletBinding()]
 param(
     [switch]$NoBuild,
+    [switch]$Wait,
     [int]$TimeoutSeconds = 60
 )
 
@@ -47,6 +49,37 @@ $webDir     = Join-Path $repoRoot 'web\buildwise-web'
 $viteBin    = Join-Path $webDir 'node_modules\vite\bin\vite.js'
 
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+
+# Load repository-root .env without overriding variables already supplied by the shell.
+$envFile = Join-Path $repoRoot '.env'
+if (Test-Path $envFile) {
+    foreach ($line in Get-Content $envFile) {
+        $trimmed = $line.Trim()
+        if (-not $trimmed -or $trimmed.StartsWith('#')) { continue }
+        if ($trimmed -notmatch '^([A-Za-z_][A-Za-z0-9_]*)=(.*)$') { continue }
+        $name = $matches[1]
+        $value = $matches[2].Trim()
+        if (($value.StartsWith('"') -and $value.EndsWith('"')) -or
+            ($value.StartsWith("'") -and $value.EndsWith("'"))) {
+            $value = $value.Substring(1, $value.Length - 2)
+        }
+        if (-not [Environment]::GetEnvironmentVariable($name, 'Process')) {
+            [Environment]::SetEnvironmentVariable($name, $value, 'Process')
+        }
+    }
+    Write-Host 'Loaded local configuration from .env (secrets are not printed).' -ForegroundColor DarkGray
+}
+
+# Build the ASP.NET Core PostgreSQL connection string from standard variables when
+# the more explicit ConnectionStrings__DefaultConnection value is not supplied.
+if (-not [Environment]::GetEnvironmentVariable('ConnectionStrings__DefaultConnection', 'Process') -and
+    [Environment]::GetEnvironmentVariable('POSTGRES_PASSWORD', 'Process')) {
+    $pgHost = if ($env:POSTGRES_HOST) { $env:POSTGRES_HOST } else { '127.0.0.1' }
+    $pgPort = if ($env:POSTGRES_PORT) { $env:POSTGRES_PORT } else { '5432' }
+    $pgDatabase = if ($env:POSTGRES_DB) { $env:POSTGRES_DB } else { 'buildwise' }
+    $pgUser = if ($env:POSTGRES_USER) { $env:POSTGRES_USER } else { 'postgres' }
+    $env:ConnectionStrings__DefaultConnection = "Host=$pgHost;Port=$pgPort;Database=$pgDatabase;Username=$pgUser;Password=$($env:POSTGRES_PASSWORD)"
+}
 
 function Test-PortBusy {
     param([int]$Port)
@@ -71,7 +104,9 @@ if (Test-PortBusy -Port 5078) {
 
     # launchSettings.json would normally supply these; we are starting the DLL directly.
     $env:ASPNETCORE_ENVIRONMENT = 'Development'
-    $env:ASPNETCORE_URLS        = 'http://localhost:5078'
+    # Bind to all interfaces so a physical phone on the same LAN can reach the API.
+    # 0.0.0.0 is only a development binding; use HTTPS and a private interface for deployment.
+    $env:ASPNETCORE_URLS        = 'http://0.0.0.0:5078'
 
     # Note: -ArgumentList does not add quotes, and this repo path contains spaces,
     # so the assembly path must be quoted explicitly or dotnet sees only "C:\Users\L".
@@ -83,20 +118,28 @@ if (Test-PortBusy -Port 5078) {
     Write-Host ("BuildWise API started (pid {0}) -> {1}" -f $api.Id, (Join-Path $logDir 'api.out.log')) -ForegroundColor Green
 }
 
-# ------------------------------------------------------------------ 2. Agent service
-if (Test-PortBusy -Port 8001) {
-    Write-Host 'Port 8001 already in use - leaving the running agent service alone.' -ForegroundColor Yellow
-} else {
+# ------------------------------------------------------------------ 2. Four AI agents
+$agentServices = @(
+    @{ Name = 'quotation_agent'; Port = 8001; Log = 'quotation-agent' },
+    @{ Name = 'request_agent'; Port = 8002; Log = 'request-agent' },
+    @{ Name = 'delivery_agent'; Port = 8003; Log = 'delivery-agent' },
+    @{ Name = 'quality_agent'; Port = 8004; Log = 'quality-agent' }
+)
+foreach ($service in $agentServices) {
+    if (Test-PortBusy -Port $service.Port) {
+        Write-Host "Port $($service.Port) already in use - leaving $($service.Name) alone." -ForegroundColor Yellow
+        continue
+    }
     if (-not (Test-Path $agentPy)) { throw "Python virtual environment not found at $agentPy - run: python -m venv .venv ; pip install -r requirements.txt" }
 
     $agent = Start-Process -FilePath $agentPy `
-        -ArgumentList @('-m', 'uvicorn', 'quotation_agent:app', '--host', '127.0.0.1', '--port', '8001') `
+        -ArgumentList @('-m', 'uvicorn', "$($service.Name):app", '--host', '127.0.0.1', '--port', "$($service.Port)") `
         -WorkingDirectory $agentDir `
-        -RedirectStandardOutput (Join-Path $logDir 'agent.out.log') `
-        -RedirectStandardError  (Join-Path $logDir 'agent.err.log') `
+        -RedirectStandardOutput (Join-Path $logDir "$($service.Log).out.log") `
+        -RedirectStandardError  (Join-Path $logDir "$($service.Log).err.log") `
         -WindowStyle Hidden -PassThru
-    $pids['agent'] = $agent.Id
-    Write-Host ("Agent service started (pid {0}) -> {1}" -f $agent.Id, (Join-Path $logDir 'agent.out.log')) -ForegroundColor Green
+    $pids[$service.Name] = $agent.Id
+    Write-Host ("$($service.Name) started on $($service.Port) (pid {0})" -f $agent.Id) -ForegroundColor Green
 }
 
 # ------------------------------------------------------------------ 3. React web
@@ -120,3 +163,8 @@ $pids | ConvertTo-Json | Set-Content -Path (Join-Path $logDir 'dev-pids.json') -
 Write-Host ''
 Write-Host "Waiting up to $TimeoutSeconds s for the stack to answer..." -ForegroundColor Cyan
 & (Join-Path $PSScriptRoot 'check-services.ps1') -WaitSeconds $TimeoutSeconds
+
+if ($Wait) {
+    Write-Host 'Stack is running in persistent background mode (Ctrl+C to stop)...' -ForegroundColor Green
+    while ($true) { Start-Sleep -Seconds 10 }
+}

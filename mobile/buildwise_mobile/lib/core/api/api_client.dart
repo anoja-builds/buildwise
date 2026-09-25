@@ -60,6 +60,13 @@ class ApiClient {
         .timeout(const Duration(seconds: 10));
   }
 
+  Future<http.Response> put(String path, {Map<String, dynamic>? body}) async {
+    final headers = await _authHeaders(json: true);
+    return _client
+        .put(Uri.parse('$apiBaseUrl$path'), headers: headers, body: body == null ? null : jsonEncode(body))
+        .timeout(const Duration(seconds: 10));
+  }
+
   Future<http.Response> post(String path, {Map<String, dynamic>? body}) async {
     final headers = await _authHeaders(json: true);
     return _client

@@ -61,12 +61,24 @@ public class AuthServiceTests
     }
 
     [Fact]
-    public async Task Login_CorrectPassword_Succeeds()
+    public async Task Register_PrivilegedSelfRegistration_IsBlocked()
     {
         var authService = CreateAuthService(out _);
-        await authService.RegisterAsync(new RegisterRequestDto("Mira Manager", "mira@buildwise.test", "SuperSecret1", "ProcurementManager"));
+        foreach (var role in new[] { "Administrator", "ProcurementManager", "SiteManager" })
+        {
+            var ex = await Assert.ThrowsAsync<ArgumentException>(() => authService.RegisterAsync(
+                new RegisterRequestDto("Privileged User", $"{role}@buildwise.test", "SuperSecret1", role)));
+            Assert.Contains("existing administrator", ex.Message);
+        }
+    }
 
-        var response = await authService.LoginAsync(new LoginRequestDto("mira@buildwise.test", "SuperSecret1"));
+    [Fact]
+    public async Task Login_CorrectPassword_Succeeds()
+    {
+        var authService = CreateAuthService(out var db);
+        await Data.DbSeeder.SeedAsync(db);
+
+        var response = await authService.LoginAsync(new LoginRequestDto("procurement.manager@buildwise.demo", Data.DbSeeder.DemoPassword));
 
         Assert.False(string.IsNullOrWhiteSpace(response.Token));
         Assert.Contains("ProcurementManager", response.User.Roles);
@@ -75,11 +87,11 @@ public class AuthServiceTests
     [Fact]
     public async Task Login_WrongPassword_ThrowsUnauthorized()
     {
-        var authService = CreateAuthService(out _);
-        await authService.RegisterAsync(new RegisterRequestDto("Mira Manager", "mira2@buildwise.test", "SuperSecret1", "ProcurementManager"));
+        var authService = CreateAuthService(out var db);
+        await Data.DbSeeder.SeedAsync(db);
 
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
-            authService.LoginAsync(new LoginRequestDto("mira2@buildwise.test", "WrongPassword")));
+            authService.LoginAsync(new LoginRequestDto("procurement.manager@buildwise.demo", "WrongPassword")));
     }
 
     [Fact]

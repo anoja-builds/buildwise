@@ -10,7 +10,7 @@ namespace BuildWise.Api.Controllers;
 
 [ApiController]
 [Route("api")]
-[Authorize(Roles = "ProcurementOfficer,ProcurementManager,Administrator")]
+[Authorize(Roles = "ProcurementOfficer,ProcurementManager,SiteManager,Administrator")]
 public class QuotationsController : ControllerBase
 {
     private readonly ApplicationDbContext _db;
@@ -26,6 +26,7 @@ public class QuotationsController : ControllerBase
     /// Get all quotations recorded against an approved material request.
     /// </summary>
     [HttpGet("material-requests/{requestId:int}/quotations")]
+    [Authorize(Roles = "ProcurementOfficer,ProcurementManager,Administrator,SiteManager")]
     public async Task<ActionResult<IEnumerable<QuotationDto>>> GetQuotationsForRequest(int requestId)
     {
         var quotations = await _db.Quotations
@@ -45,6 +46,7 @@ public class QuotationsController : ControllerBase
     /// Get single quotation by id with line items.
     /// </summary>
     [HttpGet("quotations/{id:int}")]
+    [Authorize(Roles = "ProcurementOfficer,ProcurementManager,Administrator,SiteManager")]
     public async Task<ActionResult<QuotationDto>> GetById(int id)
     {
         var quotation = await _db.Quotations
@@ -65,6 +67,7 @@ public class QuotationsController : ControllerBase
     /// Enforces: request must be Approved, total is auto-calculated by API from quantity * unit_price.
     /// </summary>
     [HttpPost("material-requests/{requestId:int}/quotations")]
+    [Authorize(Roles = "ProcurementOfficer,Administrator")]
     public async Task<ActionResult<QuotationDto>> Create(int requestId, CreateQuotationDto dto)
     {
         var request = await _db.MaterialRequests
@@ -76,6 +79,21 @@ public class QuotationsController : ControllerBase
 
         if (request.Status != MaterialRequestStatus.Approved)
             return BadRequest($"Cannot record quotations: Material Request #{requestId} is '{request.Status}', but must be 'Approved'.");
+
+        if (dto.ValidUntil < DateOnly.FromDateTime(DateTime.UtcNow))
+            return BadRequest($"Quotation validity date '{dto.ValidUntil:yyyy-MM-dd}' has expired.");
+
+        if (dto.ValidUntil < dto.QuotationDate)
+            return BadRequest("Quotation ValidUntil cannot be earlier than QuotationDate.");
+
+        if (dto.RfqId.HasValue)
+        {
+            var rfq = await _db.Rfqs.FirstOrDefaultAsync(r => r.Id == dto.RfqId.Value);
+            if (rfq is null || rfq.MaterialRequestId != requestId)
+                return BadRequest("RFQ is missing or belongs to a different material request.");
+            if (rfq.Status != RfqStatus.Issued)
+                return BadRequest("Quotations can only be recorded against an Issued RFQ.");
+        }
 
         var supplier = await _db.Suppliers.FindAsync(dto.SupplierId);
         if (supplier is null)
@@ -101,11 +119,15 @@ public class QuotationsController : ControllerBase
         var quotation = new Quotation
         {
             MaterialRequestId = requestId,
+            RfqId = dto.RfqId,
             SupplierId = dto.SupplierId,
             QuotationDate = dto.QuotationDate,
             ValidUntil = dto.ValidUntil,
+            PromisedDeliveryDate = dto.PromisedDeliveryDate,
             Status = QuotationStatus.Submitted,
             TotalAmount = totalAmount,
+            TransportCharge = dto.TransportCharge,
+            PaymentTerms = dto.PaymentTerms?.Trim(),
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
             Items = dto.Items.Select(i => new QuotationItem
@@ -150,6 +172,7 @@ public class QuotationsController : ControllerBase
     /// One row per requested item, columns per supplier quotation with coverage and price indicators.
     /// </summary>
     [HttpGet("material-requests/{requestId:int}/quotations/compare")]
+    [Authorize(Roles = "ProcurementOfficer,ProcurementManager,Administrator,SiteManager")]
     public async Task<ActionResult<QuotationComparisonResponseDto>> Compare(int requestId)
     {
         var request = await _db.MaterialRequests
@@ -213,6 +236,7 @@ public class QuotationsController : ControllerBase
             q.Supplier?.Status.ToString() ?? "Unknown",
             q.QuotationDate,
             q.ValidUntil,
+            q.PromisedDeliveryDate,
             q.Status.ToString(),
             q.TotalAmount,
             q.CreatedAt,

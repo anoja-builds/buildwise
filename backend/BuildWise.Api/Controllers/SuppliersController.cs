@@ -10,7 +10,7 @@ namespace BuildWise.Api.Controllers;
 
 [ApiController]
 [Route("api/suppliers")]
-[Authorize(Roles = "ProcurementOfficer,ProcurementManager,Administrator")]
+[Authorize(Roles = "ProcurementOfficer,ProcurementManager,SiteManager,Administrator")]
 public class SuppliersController : ControllerBase
 {
     private readonly ApplicationDbContext _db;
@@ -114,6 +114,7 @@ public class SuppliersController : ControllerBase
     /// Create a new supplier (defaults to Active).
     /// </summary>
     [HttpPost]
+    [Authorize(Roles = "ProcurementOfficer,Administrator")]
     public async Task<ActionResult<SupplierDto>> Create(CreateSupplierDto dto)
     {
         if (string.IsNullOrWhiteSpace(dto.Name))
@@ -155,6 +156,7 @@ public class SuppliersController : ControllerBase
     /// Edit supplier profile details.
     /// </summary>
     [HttpPut("{id:int}")]
+    [Authorize(Roles = "ProcurementOfficer,Administrator")]
     public async Task<ActionResult<SupplierDto>> Update(int id, UpdateSupplierDto dto)
     {
         var supplier = await _db.Suppliers.FindAsync(id);
@@ -191,6 +193,7 @@ public class SuppliersController : ControllerBase
     /// Status changes are audited and affect procurement AI eligibility (§2 / §5).
     /// </summary>
     [HttpPatch("{id:int}/status")]
+    [Authorize(Roles = "ProcurementOfficer,Administrator")]
     public async Task<IActionResult> UpdateStatus(int id, UpdateSupplierStatusDto dto)
     {
         var supplier = await _db.Suppliers.FindAsync(id);

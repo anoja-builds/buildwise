@@ -25,7 +25,11 @@ public class RoleConfiguration : IEntityTypeConfiguration<Role>
             new Role { Id = 4, Name = "ProcurementOfficer" },
             new Role { Id = 5, Name = "ProcurementManager" },
             new Role { Id = 6, Name = "ReceivingOfficer" },
-            new Role { Id = 7, Name = "QualityInspector" }
+            new Role { Id = 7, Name = "QualityInspector" },
+            // Aliases required by the role-based access matrix and frontend shells:
+            // SiteOfficer ↔ SiteEngineer, SiteManager ↔ ProcurementManager.
+            new Role { Id = 8, Name = "SiteOfficer" },
+            new Role { Id = 9, Name = "SiteManager" }
         );
     }
 }

@@ -27,6 +27,10 @@ public class AgentRecommendationSchemaTests
 {
     private const string AgentRationaleText =
         "Supplier A was selected for full compliant coverage at the lowest eligible price.";
+    private static readonly List<RankedAlternativeDto> AgentRanking = new()
+    {
+        new(3, 1, "Supplier A Building Materials", 1, 525000m, "Full coverage")
+    };
 
     // ------------------------------------------------------------------ schema gate (§5.7)
 
@@ -78,11 +82,11 @@ public class AgentRecommendationSchemaTests
             RecommendedSupplierId: 1,
             RecommendedSupplierName: "Supplier A Building Materials",
             Rationale: "Lowest-cost compliant supplier with full quantity coverage.",
-            RankedAlternatives: new List<RankedAlternativeDto>
-            {
-                new(3, 1, "Supplier A Building Materials", 1, 525000m, "Full coverage across all items")
-            },
-            Warnings: new List<string>()
+            RankedAlternatives: AgentRanking,
+            Warnings: new List<string>(),
+            Justification: new List<string> { "Supplier A fully covers the requirement." },
+            RiskFlags: new List<string>(),
+            Ranking: AgentRanking
         );
 
         var result = service.ValidateRecommendationSchema(valid);
@@ -117,7 +121,21 @@ public class AgentRecommendationSchemaTests
                     reason = "Full coverage across all items, total 525,000.00"
                 }
             },
-            warnings = Array.Empty<string>()
+            warnings = Array.Empty<string>(),
+            justification = new[] { "Supplier A fully covers the requirement." },
+            risk_flags = Array.Empty<string>(),
+            ranking = new[]
+            {
+                new
+                {
+                    quotation_id = quotation.Id,
+                    supplier_id = supplier.Id,
+                    supplier_name = supplier.Name,
+                    rank = 1,
+                    total_amount = 525000m,
+                    reason = "Full coverage across all items"
+                }
+            }
         });
 
         var handler = new StubAgentHandler(agentJson);
@@ -148,7 +166,7 @@ public class AgentRecommendationSchemaTests
     }
 
     [Fact]
-    public async Task Workflow_Fails_Without_Awaiting_Approval_When_Agent_Payload_Is_Schema_Invalid()
+    public async Task Workflow_Requires_Revision_Without_Awaiting_Approval_When_Agent_Payload_Is_Schema_Invalid()
     {
         var db = TestDbFactory.CreateInMemory();
         var (data, _, _) = await SeedApprovedRequestWithQuotationAsync(db);
@@ -169,20 +187,22 @@ public class AgentRecommendationSchemaTests
         var start = await service.StartWorkflowAsync(data.Request.Id, initiatedByUserId: 1);
         var details = await service.GetWorkflowDetailsAsync(start.WorkflowId);
 
-        Assert.Equal("Failed", start.Status);
+        Assert.Equal("RevisionRequired", start.Status);
         Assert.Contains("Agent schema validation failed", start.Message);
 
         Assert.NotNull(details);
-        Assert.Equal("Failed", details!.Status);
-        Assert.Contains("schema violation", details.FinalOutcome!, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("RevisionRequired", details!.Status);
+        Assert.Contains("structured-field contract", details.FinalOutcome!, StringComparison.OrdinalIgnoreCase);
 
-        // The gate held: the analysis step failed, nothing was stored as a recommendation,
-        // the workflow never reached AwaitingApproval, and no purchase order was created.
+        // Assert: No recommendation reaches approval and the validation agent is auditable.
         var analysisStep = details.Steps.Single(s => s.AgentRole == "QuotationSupplierAnalysisAgent");
         Assert.Equal("Failed", analysisStep.Status);
         Assert.Null(analysisStep.StructuredResult);
+        var validationStep = details.Steps.Single(s => s.AgentRole == "ProcurementValidationAgent");
+        Assert.Equal("Completed", validationStep.Status);
+        Assert.Contains("\"valid\": false", validationStep.ValidationResult!, StringComparison.OrdinalIgnoreCase);
         Assert.Null(details.Recommendation);
-        Assert.NotEqual("AwaitingApproval", details.Status);
+        Assert.Equal("RevisionRequired", details.Status);
         Assert.Empty(db.PurchaseOrders);
     }
 
@@ -225,6 +245,7 @@ public class AgentRecommendationSchemaTests
             db,
             agentClient,
             new ProcurementValidationService(db),
+            new ProcurementPlanningAgentService(db),
             new NoOpEmailService(),
             NullLogger<ProcurementWorkflowService>.Instance);
     }

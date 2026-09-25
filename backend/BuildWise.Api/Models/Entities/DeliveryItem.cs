@@ -8,13 +8,11 @@ public class DeliveryItem : BaseEntity
 
     public Delivery? Delivery { get; set; }
 
-    public int PurchaseOrderItemId { get; set; }
+    public int MaterialId { get; set; }
 
-    public PurchaseOrderItem? PurchaseOrderItem { get; set; }
+    public Material? Material { get; set; }
 
     public decimal ReceivedQuantity { get; set; }
 
-    public decimal DamagedQuantity { get; set; } = 0;
-
-    public string? Notes { get; set; }
+    public decimal DamagedQuantity { get; set; }
 }

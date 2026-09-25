@@ -38,8 +38,23 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
 $repoRoot  = Split-Path -Parent $PSScriptRoot
+$envFile = Join-Path $repoRoot '.env'
+if (Test-Path $envFile) {
+    foreach ($line in Get-Content $envFile) {
+        $trimmed = $line.Trim()
+        if (-not $trimmed -or $trimmed.StartsWith('#') -or $trimmed -notmatch '^([A-Za-z_][A-Za-z0-9_]*)=(.*)$') { continue }
+        $name = $matches[1]; $value = $matches[2].Trim()
+        if (($value.StartsWith('"') -and $value.EndsWith('"')) -or ($value.StartsWith("'") -and $value.EndsWith("'"))) { $value = $value.Substring(1, $value.Length - 2) }
+        if (-not [Environment]::GetEnvironmentVariable($name, 'Process')) { [Environment]::SetEnvironmentVariable($name, $value, 'Process') }
+    }
+}
 $apiBase   = 'http://127.0.0.1:5078'
-$agentBase = 'http://127.0.0.1:8001'
+$agentBases = @{
+    8001 = 'http://127.0.0.1:8001'
+    8002 = 'http://127.0.0.1:8002'
+    8003 = 'http://127.0.0.1:8003'
+    8004 = 'http://127.0.0.1:8004'
+}
 $webBase   = 'http://127.0.0.1:5173'
 
 # Mirrors BuildWise.Api/Data/DbSeeder.cs (DemoPassword) - seeded demo accounts only.
@@ -75,15 +90,38 @@ function Get-PsqlPath {
 }
 
 function Get-ConnectionStringParts {
-    try {
-        $settings = Get-Content (Join-Path $repoRoot 'backend\BuildWise.Api\appsettings.json') -Raw | ConvertFrom-Json
-        $cs = $settings.ConnectionStrings.DefaultConnection
-        $parts = @{}
-        foreach ($pair in $cs -split ';') {
-            if ($pair -match '^\s*([^=]+)=(.*)$') { $parts[$matches[1].Trim()] = $matches[2].Trim() }
+    $connectionString = [Environment]::GetEnvironmentVariable('ConnectionStrings__DefaultConnection', 'Process')
+    if ([string]::IsNullOrWhiteSpace($connectionString)) {
+        $postgresPassword = [Environment]::GetEnvironmentVariable('POSTGRES_PASSWORD', 'Process')
+        if ($postgresPassword) {
+            $hostName = if ($env:POSTGRES_HOST) { $env:POSTGRES_HOST } else { '127.0.0.1' }
+            $port = if ($env:POSTGRES_PORT) { $env:POSTGRES_PORT } else { '5432' }
+            $database = if ($env:POSTGRES_DB) { $env:POSTGRES_DB } else { 'buildwise' }
+            $userName = if ($env:POSTGRES_USER) { $env:POSTGRES_USER } else { 'postgres' }
+            $connectionString = "Host=$hostName;Port=$port;Database=$database;Username=$userName;Password=$postgresPassword"
         }
-        return $parts
-    } catch { return $null }
+    }
+    if ([string]::IsNullOrWhiteSpace($connectionString)) {
+        try {
+            $settings = Get-Content (Join-Path $repoRoot 'backend\BuildWise.Api\appsettings.json') -Raw | ConvertFrom-Json
+            $connectionString = $settings.ConnectionStrings.DefaultConnection
+        } catch { }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($connectionString)) {
+        try {
+            $secretLines = & dotnet user-secrets list --project (Join-Path $repoRoot 'backend\BuildWise.Api\BuildWise.Api.csproj') 2>$null
+            $secretLine = $secretLines | Where-Object { $_ -match '^ConnectionStrings:DefaultConnection\s*=' } | Select-Object -First 1
+            if ($secretLine) { $connectionString = ($secretLine -split '=', 2)[1].Trim() }
+        } catch { }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($connectionString)) { return $null }
+    $parts = @{}
+    foreach ($pair in $connectionString -split ';') {
+        if ($pair -match '^\s*([^=]+)=(.*)$') { $parts[$matches[1].Trim()] = $matches[2].Trim() }
+    }
+    return $parts
 }
 
 function New-Result {
@@ -128,22 +166,30 @@ function Test-Postgres {
     return New-Result -Name 'PostgreSQL' -Port 5432 -Up $true -Detail $detail
 }
 
-function Test-AgentService {
-    if (-not (Test-PortOpen -Port 8001)) {
-        return New-Result -Name 'Agent service' -Port 8001 -Up $false `
-            -Detail 'nothing listening on 127.0.0.1:8001 - start uvicorn quotation_agent:app --port 8001'
-    }
-
-    try {
-        $response = Invoke-WebRequest -Uri "$agentBase/health" -UseBasicParsing -TimeoutSec 5
-        $health = $response.Content | ConvertFrom-Json
-        $up = ($health.status -eq 'healthy')
-        $detail = "HTTP $($response.StatusCode); status=$($health.status); service=$($health.service); llm_rationale_enabled=$($health.llm_rationale_enabled)"
-        if (-not $up) { $detail = "$detail (expected status=healthy)" }
-        return New-Result -Name 'Agent service' -Port 8001 -Up $up -Detail $detail
-    } catch {
-        return New-Result -Name 'Agent service' -Port 8001 -Up $false -Detail "port is open but /health failed: $($_.Exception.Message)"
-    }
+function Test-AgentServices {
+    $definitions = @(
+        @{ Port = 8001; Name = 'Quotation agent'; Service = 'quotation_agent' },
+        @{ Port = 8002; Name = 'Request agent'; Service = 'request_agent' },
+        @{ Port = 8003; Name = 'Delivery agent'; Service = 'delivery_agent' },
+        @{ Port = 8004; Name = 'Quality agent'; Service = 'quality_risk_agent' }
+    )
+    return @($definitions | ForEach-Object {
+        $definition = $_
+        if (-not (Test-PortOpen -Port $definition.Port)) {
+            return New-Result -Name $definition.Name -Port $definition.Port -Up $false `
+                -Detail "nothing listening on 127.0.0.1:$($definition.Port)"
+        }
+        try {
+            $response = Invoke-WebRequest -Uri "$($agentBases[$definition.Port])/health" -UseBasicParsing -TimeoutSec 5
+            $health = $response.Content | ConvertFrom-Json
+            $up = ($health.status -eq 'healthy' -and $health.service -eq $definition.Service)
+            return New-Result -Name $definition.Name -Port $definition.Port -Up $up `
+                -Detail "HTTP $($response.StatusCode); status=$($health.status); service=$($health.service)"
+        } catch {
+            return New-Result -Name $definition.Name -Port $definition.Port -Up $false `
+                -Detail "port is open but /health failed: $($_.Exception.Message)"
+        }
+    })
 }
 
 function Test-Api {
@@ -204,8 +250,8 @@ function Test-Web {
 
 function Invoke-AllChecks {
     return @(
-        (Test-Postgres),
-        (Test-AgentService),
+        (Test-Postgres)
+    ) + @(Test-AgentServices) + @(
         (Test-Api),
         (Test-Web)
     )
@@ -230,7 +276,7 @@ if ($Json) {
     $results | ConvertTo-Json -Depth 4
 } else {
     Write-Host ''
-    Write-Host 'BuildWise Component 2 - service status' -ForegroundColor Cyan
+    Write-Host 'BuildWise complete stack - service status' -ForegroundColor Cyan
     Write-Host ('=' * 74)
     $results | Format-Table -AutoSize @{ Label = 'Service'; Expression = { $_.Service } },
                                       @{ Label = 'Port'; Expression = { $_.Port } },

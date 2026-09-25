@@ -14,6 +14,7 @@ export default function QuotationEntryForm({ requestDetail, onCreated }) {
   const [supplierId, setSupplierId] = useState('')
   const [quotationDate, setQuotationDate] = useState(today())
   const [validUntil, setValidUntil] = useState(plusDays(21))
+  const [promisedDeliveryDate, setPromisedDeliveryDate] = useState(plusDays(5))
   const [lines, setLines] = useState({})
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -50,7 +51,7 @@ export default function QuotationEntryForm({ requestDetail, onCreated }) {
 
     setSubmitting(true)
     try {
-      await procurementApi.createQuotation(requestDetail.id, { supplierId: Number(supplierId), quotationDate, validUntil, items: quoteItems })
+      await procurementApi.createQuotation(requestDetail.id, { supplierId: Number(supplierId), quotationDate, validUntil, promisedDeliveryDate, items: quoteItems })
       setSupplierId('')
       setLines({})
       onCreated?.()
@@ -68,6 +69,7 @@ export default function QuotationEntryForm({ requestDetail, onCreated }) {
           <SelectInput label="Supplier" name="supplierId" value={supplierId} onChange={(e) => setSupplierId(e.target.value)} options={[{ value: '', label: 'Select an active supplier' }, ...suppliers.map((s) => ({ value: String(s.id), label: s.name }))]} />
           <TextInput label="Quotation date" name="quotationDate" type="date" value={quotationDate} onChange={(e) => setQuotationDate(e.target.value)} required />
           <TextInput label="Valid until" name="validUntil" type="date" value={validUntil} onChange={(e) => setValidUntil(e.target.value)} required />
+          <TextInput label="Promised delivery date" name="promisedDeliveryDate" type="date" value={promisedDeliveryDate} onChange={(e) => setPromisedDeliveryDate(e.target.value)} required />
         </div>
 
         <div>

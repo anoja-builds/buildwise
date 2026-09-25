@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
-import 'common/screens/screens.dart';
+import 'features/operations/screens/delivery_receiving_screen.dart';
+import 'features/operations/screens/material_requests_screen.dart';
+import 'features/operations/screens/quality_inspection_screen.dart';
 import 'core/theme/app_theme.dart';
 import 'features/auth/screens/login_screen.dart';
 import 'features/auth/services/auth_service.dart';
@@ -65,16 +67,78 @@ class MainAppShell extends StatefulWidget {
 
 class _MainAppShellState extends State<MainAppShell> {
   int selectedIndex = 0;
+  List<String> _roles = const [];
   final _authService = AuthService();
+  late Future<void> _sessionFuture;
 
-  static const screens = [
-    MobileHomeBaseScreen(),
-    ProcurementHomeScreen(),
-    MobileListBaseScreen(),
-    MobileFormBaseScreen(),
-    MobileDetailBaseScreen(),
-    MobileUiStatesScreen(),
-  ];
+  @override
+  void initState() {
+    super.initState();
+    _sessionFuture = _loadSession();
+  }
+
+  Future<void> _loadSession() async {
+    final user = await _authService.currentUser();
+    if (mounted) {
+      setState(() {
+        _roles = ((user?['roles'] as List<dynamic>?) ?? const []).cast<String>();
+      });
+    }
+  }
+
+  bool _has(Set<String> roles) => roles.any(_roles.contains);
+
+  List<_MobileDestination> get _destinations {
+    final destinations = <_MobileDestination>[
+      _MobileDestination(
+        label: 'Home',
+        icon: Icons.home_outlined,
+        selectedIcon: Icons.home,
+        builder: (_) => _RoleHomeScreen(roles: _roles),
+      ),
+    ];
+    if (_has({'SiteEngineer', 'SiteOfficer', 'Administrator'})) {
+      destinations.addAll([
+        _MobileDestination(
+          label: 'Requests',
+          icon: Icons.assignment_outlined,
+          selectedIcon: Icons.assignment,
+          builder: (_) => MaterialRequestsScreen(
+            readOnly: _has({'Administrator'}),
+          ),
+        ),
+        _MobileDestination(
+          label: 'Receiving',
+          icon: Icons.local_shipping_outlined,
+          selectedIcon: Icons.local_shipping,
+          builder: (_) => DeliveryReceivingScreen(
+            readOnly: _has({'Administrator'}),
+          ),
+        ),
+      ]);
+    }
+    if (_has({'SiteEngineer', 'SiteOfficer', 'ProcurementOfficer', 'ProcurementManager', 'SiteManager', 'Administrator'})) {
+      destinations.add(_MobileDestination(
+        label: 'Procurement',
+        icon: Icons.route_outlined,
+        selectedIcon: Icons.route,
+        builder: (_) => ProcurementHomeScreen(
+          siteScoped: _has({'SiteEngineer', 'SiteOfficer'}),
+        ),
+      ));
+    }
+    if (_has({'QualityInspector', 'Administrator'})) {
+      destinations.add(_MobileDestination(
+        label: 'Quality',
+        icon: Icons.fact_check_outlined,
+        selectedIcon: Icons.fact_check,
+        builder: (_) => QualityInspectionScreen(
+          readOnly: _has({'Administrator'}),
+        ),
+      ));
+    }
+    return destinations;
+  }
 
   Future<void> _signOut() async {
     await _authService.logout();
@@ -82,58 +146,69 @@ class _MainAppShellState extends State<MainAppShell> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(
-      title: const Text('BuildWise'),
-      actions: [
-        IconButton(
-          onPressed: () {},
-          tooltip: 'Notifications',
-          icon: const Icon(Icons.notifications_none),
+  Widget build(BuildContext context) => FutureBuilder<void>(
+    future: _sessionFuture,
+    builder: (context, snapshot) {
+      if (snapshot.connectionState != ConnectionState.done) {
+        return const Scaffold(body: Center(child: CircularProgressIndicator()));
+      }
+      final destinations = _destinations;
+      final safeIndex = selectedIndex.clamp(0, destinations.length - 1);
+      return Scaffold(
+        appBar: AppBar(
+          title: const Text('BuildWise'),
+          actions: [
+            IconButton(onPressed: () {}, tooltip: 'Notifications', icon: const Icon(Icons.notifications_none)),
+            IconButton(onPressed: _signOut, tooltip: 'Sign out', icon: const Icon(Icons.logout)),
+          ],
         ),
-        IconButton(
-          onPressed: _signOut,
-          tooltip: 'Sign out',
-          icon: const Icon(Icons.logout),
+        body: IndexedStack(index: safeIndex, children: [for (final item in destinations) item.builder(context)]),
+        bottomNavigationBar: NavigationBar(
+          selectedIndex: safeIndex,
+          onDestinationSelected: (index) => setState(() => selectedIndex = index),
+          destinations: [
+            for (final item in destinations)
+              NavigationDestination(icon: Icon(item.icon), selectedIcon: Icon(item.selectedIcon), label: item.label),
+          ],
         ),
-      ],
-    ),
-    body: IndexedStack(index: selectedIndex, children: screens),
-    bottomNavigationBar: NavigationBar(
-      selectedIndex: selectedIndex,
-      onDestinationSelected: (index) => setState(() => selectedIndex = index),
-      destinations: const [
-        NavigationDestination(
-          icon: Icon(Icons.home_outlined),
-          selectedIcon: Icon(Icons.home),
-          label: 'Home',
+      );
+    },
+  );
+}
+
+class _MobileDestination {
+  const _MobileDestination({required this.label, required this.icon, required this.selectedIcon, required this.builder});
+  final String label;
+  final IconData icon;
+  final IconData selectedIcon;
+  final WidgetBuilder builder;
+}
+
+class _RoleHomeScreen extends StatelessWidget {
+  const _RoleHomeScreen({required this.roles});
+  final List<String> roles;
+
+  @override
+  Widget build(BuildContext context) => ListView(
+    padding: const EdgeInsets.all(16),
+    children: [
+      Text('BuildWise Operations', style: Theme.of(context).textTheme.headlineSmall),
+      const SizedBox(height: 8),
+      Text('Signed in as ${roles.isEmpty ? 'Team member' : roles.join(', ')}', style: const TextStyle(color: Colors.black54)),
+      const SizedBox(height: 20),
+      Card(
+        child: Padding(
+          padding: const EdgeInsets.all(18),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Role-based workspace', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+              const SizedBox(height: 8),
+              const Text('Only destinations assigned to your JWT roles appear here. API authorization remains mandatory for every operation.'),
+            ],
+          ),
         ),
-        NavigationDestination(
-          icon: Icon(Icons.local_shipping_outlined),
-          selectedIcon: Icon(Icons.local_shipping),
-          label: 'Procurement',
-        ),
-        NavigationDestination(
-          icon: Icon(Icons.list_alt_outlined),
-          selectedIcon: Icon(Icons.list_alt),
-          label: 'List',
-        ),
-        NavigationDestination(
-          icon: Icon(Icons.edit_note_outlined),
-          selectedIcon: Icon(Icons.edit_note),
-          label: 'Form',
-        ),
-        NavigationDestination(
-          icon: Icon(Icons.description_outlined),
-          selectedIcon: Icon(Icons.description),
-          label: 'Detail',
-        ),
-        NavigationDestination(
-          icon: Icon(Icons.widgets_outlined),
-          selectedIcon: Icon(Icons.widgets),
-          label: 'States',
-        ),
-      ],
-    ),
+      ),
+    ],
   );
 }
