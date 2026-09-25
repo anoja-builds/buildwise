@@ -13,6 +13,7 @@ void main() => runApp(const BuildWiseApp());
 
 class BuildWiseApp extends StatelessWidget {
   const BuildWiseApp({super.key});
+
   @override
   Widget build(BuildContext context) => MaterialApp(
     title: 'BuildWise Mobile',
@@ -26,6 +27,7 @@ class BuildWiseApp extends StatelessWidget {
 /// hands off to the main app shell.
 class AuthGate extends StatefulWidget {
   const AuthGate({super.key});
+
   @override
   State<AuthGate> createState() => _AuthGateState();
 }
@@ -69,6 +71,7 @@ class _AuthGateState extends State<AuthGate> {
 
 class MainAppShell extends StatefulWidget {
   const MainAppShell({super.key, required this.onSignOut});
+
   final VoidCallback onSignOut;
 
   @override
