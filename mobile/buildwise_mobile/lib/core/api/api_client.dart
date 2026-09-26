@@ -1,14 +1,19 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 
-/// Base URL for BuildWise.Api. Defaults to the Android emulator's alias for
-/// the host machine's localhost; override per platform/device with
+/// Base URL for BuildWise.Api. Uses the browser host on web and the Android
+/// emulator's host alias elsewhere; override per device with
 /// `--dart-define=API_BASE_URL=...` (see docs/component2_setup_guide.md).
+const String _defaultApiBaseUrl = kIsWeb
+    ? 'http://localhost:5078/api'
+    : 'http://10.0.2.2:5078/api';
+
 const String apiBaseUrl = String.fromEnvironment(
   'API_BASE_URL',
-  defaultValue: 'http://10.0.2.2:5078/api',
+  defaultValue: _defaultApiBaseUrl,
 );
 
 /// Thin shared HTTP client: attaches the signed-in user's JWT (from secure
