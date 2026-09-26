@@ -41,7 +41,7 @@ public class DeliveryTests
             Id = 1,
             SupplierId = supplier.Id,
             ProjectId = project.Id,
-            OrderDate = DateTime.UtcNow,
+            OrderDate = DateOnly.FromDateTime(DateTime.UtcNow),
             TotalAmount = 1000m,
             Status = PurchaseOrderStatus.InProgress
         };
@@ -126,8 +126,8 @@ public class DeliveryTests
             Id = 1,
             SupplierId = supplier.Id,
             ProjectId = project.Id,
-            OrderDate = new DateTime(2026, 08, 20),
-            ExpectedDeliveryDate = new DateTime(2026, 08, 28), // 3 days late
+            OrderDate = new DateOnly(2026, 08, 20),
+            ExpectedDeliveryDate = new DateOnly(2026, 08, 28), // 3 days late
             TotalAmount = 1000m,
             Status = PurchaseOrderStatus.Created
         };
