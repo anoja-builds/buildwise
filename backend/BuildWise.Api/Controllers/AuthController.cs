@@ -21,8 +21,7 @@ public class AuthController : ControllerBase
         _authService = authService;
     }
 
-    /// <summary>Create an account with a single role (Administrator, SiteEngineer,
-    /// ProjectManager, ProcurementOfficer, ProcurementManager, ReceivingOfficer, QualityInspector).</summary>
+    /// <summary>Public signup creates SiteEngineer accounts only.</summary>
     [HttpPost("register")]
     [AllowAnonymous]
     public async Task<ActionResult<AuthResponseDto>> Register(RegisterRequestDto dto)

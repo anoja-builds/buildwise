@@ -29,9 +29,11 @@ public class ProcurementWorkflowController : ControllerBase
         int requestId,
         [FromBody] StartProcurementWorkflowRequest? request)
     {
+        if (!User.TryGetUserId(out var actorId)) return Unauthorized();
+
         try
         {
-            var userId = request?.InitiatedByUserId ?? 1;
+            var userId = actorId;
             var response = await _workflowService.StartWorkflowAsync(requestId, userId, request?.Objective);
             return Ok(response);
         }
@@ -79,9 +81,11 @@ public class ProcurementWorkflowController : ControllerBase
     [Authorize(Roles = "ProcurementManager,Administrator")]
     public async Task<IActionResult> RecordDecision(int workflowId, [FromBody] WorkflowDecisionDto dto)
     {
+        if (!User.TryGetUserId(out var actorId)) return Unauthorized();
+
         try
         {
-            var approval = await _workflowService.RecordDecisionAsync(workflowId, dto);
+            var approval = await _workflowService.RecordDecisionAsync(workflowId, dto with { ReviewedByUserId = actorId });
             return Ok(new
             {
                 message = $"Decision '{approval.Decision}' recorded successfully.",

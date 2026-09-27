@@ -4,23 +4,28 @@ using BuildWise.Api.Models.Entities;
 using BuildWise.Api.Models.Enums;
 using BuildWise.Api.Services;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 
 namespace BuildWise.Api.Controllers;
 
+[Authorize(Roles = "ProcurementOfficer,ProcurementManager,Administrator")]
 [ApiController]
 [Route("api/[controller]")]
 public class ProcurementController : ControllerBase
 {
     private readonly ApplicationDbContext _dbContext;
     private readonly SupplierEvaluationAgentService _supplierEvaluationAgent;
+    private readonly ProcurementValidationService _validationService;
 
     public ProcurementController(
         ApplicationDbContext dbContext,
-        SupplierEvaluationAgentService supplierEvaluationAgent)
+        SupplierEvaluationAgentService supplierEvaluationAgent,
+        ProcurementValidationService validationService)
     {
         _dbContext = dbContext;
         _supplierEvaluationAgent = supplierEvaluationAgent;
+        _validationService = validationService;
     }
 
     [HttpGet("rfqs")]
@@ -248,8 +253,11 @@ public class ProcurementController : ControllerBase
     }
 
     [HttpPost("recommendations/{id}/approve")]
+    [Authorize(Roles = "ProcurementManager,Administrator")]
     public async Task<IActionResult> ApproveRecommendation(int id, [FromBody] ProcurementApprovalDto dto)
     {
+        if (!User.TryGetUserId(out var actorId)) return Unauthorized();
+
         var rec = await _dbContext.ProcurementRecommendations
             .Include(r => r.MaterialRequest)
                 .ThenInclude(mr => mr!.Items)
@@ -265,88 +273,62 @@ public class ProcurementController : ControllerBase
             return BadRequest("Recommendation has already been decided.");
         }
 
-        rec.ApprovedByUserId = dto.UserId;
+        if (dto.Decision is not (RecommendationStatus.Approved or RecommendationStatus.Rejected or RecommendationStatus.RevisionRequested))
+            return BadRequest("Invalid approval decision.");
+
+        PurchaseOrder? po = null;
+        Delivery? delivery = null;
+        if (dto.Decision == RecommendationStatus.Approved)
+        {
+            if (rec.RecommendedQuotationId is not int quotationId)
+                return BadRequest("A valid quotation is required before approval.");
+            var validation = await _validationService.ValidateRecommendationAsync(quotationId, rec.MaterialRequestId);
+            if (!validation.IsValid) return BadRequest(new { errors = validation.Errors });
+            if (rec.RecommendedQuotation!.SupplierId != rec.RecommendedSupplierId)
+                return BadRequest("Recommended supplier does not match the quotation.");
+            if (await _dbContext.PurchaseOrders.AnyAsync(p => p.Status != PurchaseOrderStatus.Cancelled &&
+                (p.Quotation != null && p.Quotation.MaterialRequestId == rec.MaterialRequestId ||
+                 _dbContext.ProcurementRecommendations.Any(r => r.MaterialRequestId == rec.MaterialRequestId && r.GeneratedPurchaseOrderId == p.Id))))
+                return BadRequest("A purchase order already exists for this material request.");
+
+            po = new PurchaseOrder
+            {
+                QuotationId = quotationId,
+                SupplierId = rec.RecommendedQuotation.SupplierId,
+                ProjectId = rec.MaterialRequest!.ProjectId,
+                OrderDate = DateOnly.FromDateTime(DateTime.UtcNow),
+                ExpectedDeliveryDate = rec.MaterialRequest.RequiredDate,
+                Status = PurchaseOrderStatus.Created,
+                TotalAmount = rec.RecommendedQuotation.TotalAmount,
+                Items = rec.RecommendedQuotation.Items.Select(q => new PurchaseOrderItem
+                {
+                    QuotationItemId = q.Id,
+                    MaterialId = rec.MaterialRequest.Items.Single(i => i.Id == q.MaterialRequestItemId).MaterialId,
+                    OrderedQuantity = q.Quantity,
+                    UnitPrice = q.UnitPrice
+                }).ToList()
+            };
+            delivery = new Delivery
+            {
+                PurchaseOrder = po,
+                DeliveryReference = $"DN-REC-{rec.Id}",
+                Status = DeliveryStatus.Scheduled,
+                Items = po.Items.Select(i => new DeliveryItem { PurchaseOrderItem = i }).ToList()
+            };
+            _dbContext.Deliveries.Add(delivery);
+            rec.GeneratedPurchaseOrder = po;
+            rec.RecommendedQuotation.Status = QuotationStatus.Selected;
+        }
+
+        rec.ApprovedByUserId = actorId;
         rec.Status = dto.Decision;
         rec.DecisionComment = dto.Comment;
         rec.DecisionDate = DateTime.UtcNow;
         rec.UpdatedAt = DateTime.UtcNow;
-
-        if (dto.Decision == RecommendationStatus.Approved)
-        {
-            // Human Approval Boundary Check: Issue Purchase Order
-            var po = new PurchaseOrder
-            {
-                SupplierId = rec.RecommendedSupplierId,
-                ProjectId = rec.MaterialRequest?.ProjectId ?? 1,
-                OrderDate = DateOnly.FromDateTime(DateTime.UtcNow),
-                ExpectedDeliveryDate = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(5)),
-                Status = PurchaseOrderStatus.Created,
-                TotalAmount = rec.RecommendedQuotation?.TotalAmount ?? 100000.00m,
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
-            };
-
-            _dbContext.PurchaseOrders.Add(po);
-            await _dbContext.SaveChangesAsync();
-
-            // Populate PO Items
-            if (rec.RecommendedQuotation?.Items.Any() == true)
-            {
-                foreach (var qItem in rec.RecommendedQuotation.Items)
-                {
-                    var poItem = new PurchaseOrderItem
-                    {
-                        PurchaseOrderId = po.Id,
-                        QuotationItemId = qItem.Id,
-                        OrderedQuantity = qItem.Quantity,
-                        UnitPrice = qItem.UnitPrice,
-                        CreatedAt = DateTime.UtcNow,
-                        UpdatedAt = DateTime.UtcNow
-                    };
-                    _dbContext.PurchaseOrderItems.Add(poItem);
-                }
-            }
-
-            // Create a scheduled delivery for site officers!
-            var delivery = new Delivery
-            {
-                PurchaseOrderId = po.Id,
-                DeliveryReference = $"DN-{rec.RecommendedSupplier?.Name?.Substring(0, Math.Min(3, rec.RecommendedSupplier?.Name?.Length ?? 3)).ToUpper()}-{po.Id:D4}",
-                Status = DeliveryStatus.Scheduled,
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
-            };
-
-            _dbContext.Deliveries.Add(delivery);
-            await _dbContext.SaveChangesAsync();
-
-            rec.GeneratedPurchaseOrderId = po.Id;
-
-            if (rec.MaterialRequest != null)
-            {
-                rec.MaterialRequest.Status = MaterialRequestStatus.Approved;
-            }
-
-            await _dbContext.SaveChangesAsync();
-
-            return Ok(new
-            {
-                Message = "Procurement Recommendation APPROVED by Manager. Purchase Order & Delivery record created successfully!",
-                PurchaseOrderId = po.Id,
-                DeliveryId = delivery.Id,
-                Status = "Approved"
-            });
-        }
-        else
-        {
-            if (rec.MaterialRequest != null)
-            {
-                rec.MaterialRequest.Status = dto.Decision == RecommendationStatus.Rejected ? MaterialRequestStatus.Rejected : MaterialRequestStatus.PendingApproval;
-            }
-            await _dbContext.SaveChangesAsync();
-
-            return Ok(new { Message = $"Recommendation {dto.Decision}.", Status = dto.Decision.ToString() });
-        }
+        // One SaveChanges makes the decision, order, items and delivery atomic.
+        await _dbContext.SaveChangesAsync();
+        return Ok(new { Message = $"Recommendation {dto.Decision}.", Status = dto.Decision.ToString(),
+            PurchaseOrderId = po?.Id, DeliveryId = delivery?.Id });
     }
 
     [HttpGet("purchase-orders")]

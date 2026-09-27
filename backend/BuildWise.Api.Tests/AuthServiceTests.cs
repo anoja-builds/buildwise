@@ -31,11 +31,11 @@ public class AuthServiceTests
         var authService = CreateAuthService(out var db);
 
         var response = await authService.RegisterAsync(new RegisterRequestDto(
-            "Priya Officer", "priya@buildwise.test", "SuperSecret1", "ProcurementOfficer"));
+            "Priya Officer", "priya@buildwise.test", "SuperSecret1", "SiteEngineer"));
 
         Assert.False(string.IsNullOrWhiteSpace(response.Token));
         Assert.Equal("priya@buildwise.test", response.User.Email);
-        Assert.Contains("ProcurementOfficer", response.User.Roles);
+        Assert.Contains("SiteEngineer", response.User.Roles);
 
         var stored = db.Users.Single(u => u.Email == "priya@buildwise.test");
         Assert.NotEqual("SuperSecret1", stored.PasswordHash);
@@ -45,10 +45,10 @@ public class AuthServiceTests
     public async Task Register_DuplicateEmail_Throws()
     {
         var authService = CreateAuthService(out _);
-        await authService.RegisterAsync(new RegisterRequestDto("A", "dup@buildwise.test", "SuperSecret1", "ProcurementOfficer"));
+        await authService.RegisterAsync(new RegisterRequestDto("A", "dup@buildwise.test", "SuperSecret1", "SiteEngineer"));
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            authService.RegisterAsync(new RegisterRequestDto("B", "dup@buildwise.test", "AnotherPass1", "ProcurementManager")));
+            authService.RegisterAsync(new RegisterRequestDto("B", "dup@buildwise.test", "AnotherPass1", "SiteEngineer")));
     }
 
     [Fact]
@@ -64,19 +64,19 @@ public class AuthServiceTests
     public async Task Login_CorrectPassword_Succeeds()
     {
         var authService = CreateAuthService(out _);
-        await authService.RegisterAsync(new RegisterRequestDto("Mira Manager", "mira@buildwise.test", "SuperSecret1", "ProcurementManager"));
+        await authService.RegisterAsync(new RegisterRequestDto("Mira Manager", "mira@buildwise.test", "SuperSecret1", "SiteEngineer"));
 
         var response = await authService.LoginAsync(new LoginRequestDto("mira@buildwise.test", "SuperSecret1"));
 
         Assert.False(string.IsNullOrWhiteSpace(response.Token));
-        Assert.Contains("ProcurementManager", response.User.Roles);
+        Assert.Contains("SiteEngineer", response.User.Roles);
     }
 
     [Fact]
     public async Task Login_WrongPassword_ThrowsUnauthorized()
     {
         var authService = CreateAuthService(out _);
-        await authService.RegisterAsync(new RegisterRequestDto("Mira Manager", "mira2@buildwise.test", "SuperSecret1", "ProcurementManager"));
+        await authService.RegisterAsync(new RegisterRequestDto("Mira Manager", "mira2@buildwise.test", "SuperSecret1", "SiteEngineer"));
 
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
             authService.LoginAsync(new LoginRequestDto("mira2@buildwise.test", "WrongPassword")));

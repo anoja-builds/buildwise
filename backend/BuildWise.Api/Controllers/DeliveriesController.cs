@@ -4,10 +4,12 @@ using BuildWise.Api.Models.Enums;
 using BuildWise.Api.Services;
 using BuildWise.Api.Models.Dtos;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 
 namespace BuildWise.Api.Controllers;
 
+[Authorize]
 [ApiController]
 [Route("api/[controller]")]
 public class DeliveriesController : ControllerBase
@@ -24,6 +26,7 @@ public class DeliveriesController : ControllerBase
     }
 
     [HttpGet("expected")]
+    [Authorize(Roles = "ReceivingOfficer,Administrator,ProcurementOfficer,ProcurementManager,QualityInspector,ProjectManager")]
     public async Task<IActionResult> GetExpectedDeliveries()
     {
         var deliveries = await _dbContext.Deliveries
@@ -65,6 +68,7 @@ public class DeliveriesController : ControllerBase
     }
 
     [HttpGet("history")]
+    [Authorize(Roles = "ReceivingOfficer,Administrator,ProcurementOfficer,ProcurementManager,QualityInspector,ProjectManager")]
     public async Task<IActionResult> GetDeliveryHistory()
     {
         var deliveries = await _dbContext.Deliveries
@@ -111,6 +115,7 @@ public class DeliveriesController : ControllerBase
     }
 
     [HttpGet("{id}")]
+    [Authorize(Roles = "ReceivingOfficer,Administrator,ProcurementOfficer,ProcurementManager,QualityInspector,ProjectManager")]
     public async Task<IActionResult> GetDeliveryById(int id)
     {
         var delivery = await _dbContext.Deliveries
@@ -164,6 +169,7 @@ public class DeliveriesController : ControllerBase
     }
 
     [HttpPost]
+    [Authorize(Roles = "ProcurementOfficer,ProcurementManager,Administrator,ReceivingOfficer")]
     public async Task<IActionResult> ScheduleDelivery([FromBody] CreateDeliveryDto dto)
     {
         var purchaseOrder = await _dbContext.PurchaseOrders
@@ -208,8 +214,11 @@ public class DeliveriesController : ControllerBase
     }
 
     [HttpPost("{id}/receive")]
+    [Authorize(Roles = "ReceivingOfficer,Administrator")]
     public async Task<IActionResult> ReceiveDelivery(int id, [FromBody] ReceiveDeliveryDto dto)
     {
+        if (!User.TryGetUserId(out var actorId)) return Unauthorized();
+
         var delivery = await _dbContext.Deliveries
             .Include(d => d.Items)
                 .ThenInclude(di => di.PurchaseOrderItem)
@@ -227,13 +236,13 @@ public class DeliveriesController : ControllerBase
         }
 
         // Retrieve user
-        var user = await _dbContext.Users.FindAsync(dto.ReceivedByUserId);
+        var user = await _dbContext.Users.FindAsync(actorId);
         if (user == null)
         {
             return BadRequest("Valid receiving officer/user is required.");
         }
 
-        delivery.ReceivedByUserId = dto.ReceivedByUserId;
+        delivery.ReceivedByUserId = actorId;
         delivery.Notes = dto.Notes;
         delivery.ActualArrivalDate = DateTime.UtcNow;
         delivery.ReceivedAt = DateTime.UtcNow;
@@ -317,6 +326,7 @@ public class DeliveriesController : ControllerBase
     }
 
     [HttpPost("{id}/evidence")]
+    [Authorize(Roles = "ReceivingOfficer,Administrator")]
     public async Task<IActionResult> AddPhotographicEvidence(int id, [FromBody] EvidenceDto dto)
     {
         var delivery = await _dbContext.Deliveries.FindAsync(id);
@@ -333,6 +343,7 @@ public class DeliveriesController : ControllerBase
     }
 
     [HttpGet("schedules")]
+    [Authorize(Roles = "ReceivingOfficer,Administrator,ProcurementOfficer,ProcurementManager,QualityInspector,ProjectManager")]
     public async Task<IActionResult> GetSchedules()
     {
         var schedules = await _dbContext.DeliverySchedules
@@ -347,6 +358,7 @@ public class DeliveriesController : ControllerBase
     }
 
     [HttpPost("schedule")]
+    [Authorize(Roles = "ProcurementOfficer,ProcurementManager,Administrator,ReceivingOfficer")]
     public async Task<IActionResult> CreateSchedule([FromBody] ScheduleDeliveryDto dto)
     {
         var schedule = new DeliverySchedule
@@ -367,6 +379,7 @@ public class DeliveriesController : ControllerBase
     }
 
     [HttpGet("issues")]
+    [Authorize(Roles = "ReceivingOfficer,Administrator,ProcurementOfficer,ProcurementManager,QualityInspector,ProjectManager")]
     public async Task<IActionResult> GetIssues()
     {
         var issues = await _dbContext.DeliveryIssues
@@ -379,8 +392,11 @@ public class DeliveriesController : ControllerBase
     }
 
     [HttpPost("report-issue")]
+    [Authorize(Roles = "ReceivingOfficer,Administrator")]
     public async Task<IActionResult> ReportIssue([FromBody] ReportIssueDto dto)
     {
+        if (!User.TryGetUserId(out var actorId)) return Unauthorized();
+
         var issue = new DeliveryIssue
         {
             DeliveryId = dto.DeliveryId,
@@ -388,7 +404,7 @@ public class DeliveriesController : ControllerBase
             IssueType = dto.IssueType,
             Description = dto.Description,
             Severity = dto.Severity,
-            ReportedByUserId = dto.ReportedByUserId,
+            ReportedByUserId = actorId,
             Status = "Open",
             ReportedAt = DateTime.UtcNow,
             CreatedAt = DateTime.UtcNow,
@@ -402,11 +418,14 @@ public class DeliveriesController : ControllerBase
     }
 
     [HttpPost("evaluate-risk/{purchaseOrderId}")]
+    [Authorize(Roles = "ProcurementOfficer,ProcurementManager,Administrator,ReceivingOfficer")]
     public async Task<IActionResult> EvaluateDeliveryRisk(int purchaseOrderId, [FromQuery] int? userId)
     {
+        if (!User.TryGetUserId(out var actorId)) return Unauthorized();
+
         try
         {
-            var assessment = await _riskAgentService.EvaluateDeliveryRiskAsync(purchaseOrderId, userId);
+            var assessment = await _riskAgentService.EvaluateDeliveryRiskAsync(purchaseOrderId, actorId);
             return Ok(assessment);
         }
         catch (ArgumentException ex)
@@ -420,14 +439,17 @@ public class DeliveriesController : ControllerBase
     }
 
     [HttpPost("{id}/risk-analysis")]
+    [Authorize(Roles = "ProcurementOfficer,ProcurementManager,Administrator,ReceivingOfficer")]
     public async Task<IActionResult> AnalyzeDeliveryRisk(int id, [FromQuery] int? userId)
     {
+        if (!User.TryGetUserId(out var actorId)) return Unauthorized();
+
         try
         {
             var delivery = await _dbContext.Deliveries.FindAsync(id);
             if (delivery == null) return NotFound("Delivery not found.");
 
-            var assessment = await _riskAgentService.EvaluateDeliveryRiskAsync(delivery.PurchaseOrderId, userId, id);
+            var assessment = await _riskAgentService.EvaluateDeliveryRiskAsync(delivery.PurchaseOrderId, actorId, id);
             return Ok(assessment);
         }
         catch (Exception ex)

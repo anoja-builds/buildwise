@@ -371,7 +371,7 @@ public class ProcurementWorkflowService
             workflow.Status = WorkflowStatus.Completed;
             workflow.CompletedAt = DateTime.UtcNow;
             workflow.FinalOutcome = $"Manager Approved recommendation: {dto.Comment}";
-            await _db.SaveChangesAsync();
+            // Persist the approval together with the validated purchase order.
 
             // Auto-create purchase order on Manager approval (§4.6)
             await CreatePurchaseOrderInternalAsync(workflow);
@@ -428,6 +428,13 @@ public class ProcurementWorkflowService
 
         if (winnerQuotation is null)
             throw new InvalidOperationException($"Winner quotation #{recommendation.RecommendedQuotationId} not found.");
+
+        var currentValidation = await _validationService.ValidateRecommendationAsync(
+            winnerQuotation.Id, workflow.MaterialRequestId ?? 0);
+        if (!currentValidation.IsValid)
+            throw new InvalidOperationException($"Cannot create Purchase Order: {string.Join("; ", currentValidation.Errors)}");
+        if (recommendation.RecommendedSupplierId != winnerQuotation.SupplierId)
+            throw new InvalidOperationException("Recommended supplier does not match the quotation.");
 
         // Purchase order creation touches several tables that must succeed or
         // fail together (§5.9: the source quotation and request must never end

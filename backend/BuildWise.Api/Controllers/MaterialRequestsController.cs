@@ -4,10 +4,12 @@ using BuildWise.Api.Models.Entities;
 using BuildWise.Api.Models.Enums;
 using BuildWise.Api.Services;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 
 namespace BuildWise.Api.Controllers;
 
+[Authorize]
 [ApiController]
 [Route("api/[controller]")]
 public class MaterialRequestsController : ControllerBase
@@ -24,6 +26,7 @@ public class MaterialRequestsController : ControllerBase
     }
 
     [HttpGet]
+    [Authorize(Roles = "SiteEngineer,ProjectManager,ProcurementOfficer,ProcurementManager,Administrator")]
     public async Task<IActionResult> GetRequests([FromQuery] string? status, [FromQuery] int? projectId)
     {
         var query = _dbContext.MaterialRequests
@@ -70,6 +73,7 @@ public class MaterialRequestsController : ControllerBase
     }
 
     [HttpGet("{id}")]
+    [Authorize(Roles = "SiteEngineer,ProjectManager,ProcurementOfficer,ProcurementManager,Administrator")]
     public async Task<IActionResult> GetRequestById(int id)
     {
         var r = await _dbContext.MaterialRequests
@@ -105,15 +109,18 @@ public class MaterialRequestsController : ControllerBase
     }
 
     [HttpPost]
+    [Authorize(Roles = "SiteEngineer,Administrator")]
     public async Task<IActionResult> CreateRequest([FromBody] CreateMaterialRequestDto dto)
     {
+        if (!User.TryGetUserId(out var actorId)) return Unauthorized();
+
         var project = await _dbContext.Projects.FindAsync(dto.ProjectId);
         if (project == null) return BadRequest("Invalid Project ID.");
 
         var request = new MaterialRequest
         {
             ProjectId = dto.ProjectId,
-            RequestedByUserId = dto.RequestedByUserId,
+            RequestedByUserId = actorId,
             RequiredDate = DateOnly.FromDateTime(dto.RequiredDate),
             Reason = dto.Reason,
             Status = dto.SubmitImmediately ? MaterialRequestStatus.PendingApproval : MaterialRequestStatus.Draft,
@@ -142,10 +149,15 @@ public class MaterialRequestsController : ControllerBase
     }
 
     [HttpPost("{id}/submit")]
+    [Authorize(Roles = "SiteEngineer,Administrator")]
     public async Task<IActionResult> SubmitRequest(int id)
     {
+        if (!User.TryGetUserId(out var actorId)) return Unauthorized();
+
         var request = await _dbContext.MaterialRequests.FindAsync(id);
         if (request == null) return NotFound("Material Request not found.");
+
+        if (request.RequestedByUserId != actorId && !User.IsInRole("Administrator")) return Forbid();
 
         if (request.Status != MaterialRequestStatus.Draft)
         {
@@ -160,10 +172,17 @@ public class MaterialRequestsController : ControllerBase
     }
 
     [HttpPost("{id}/approve")]
+    [Authorize(Roles = "ProjectManager,Administrator")]
     public async Task<IActionResult> ApproveRequest(int id, [FromBody] ApproveMaterialRequestDto dto)
     {
+        if (!User.TryGetUserId(out var actorId)) return Unauthorized();
+
         var request = await _dbContext.MaterialRequests.FindAsync(id);
         if (request == null) return NotFound("Material Request not found.");
+
+        if (request.Status != MaterialRequestStatus.PendingApproval)
+            return BadRequest("Only pending requests can be reviewed.");
+        if (!Enum.IsDefined(dto.Decision)) return BadRequest("Invalid approval decision.");
 
         if (dto.Decision == ApprovalDecision.Approved)
         {
@@ -185,11 +204,14 @@ public class MaterialRequestsController : ControllerBase
     }
 
     [HttpPost("{id}/plan")]
+    [Authorize(Roles = "SiteEngineer,ProjectManager,ProcurementOfficer,ProcurementManager,Administrator")]
     public async Task<IActionResult> RunProcurementPlanningAgent(int id, [FromQuery] int? userId)
     {
+        if (!User.TryGetUserId(out var actorId)) return Unauthorized();
+
         try
         {
-            var result = await _planningAgentService.EvaluateMaterialRequestPlanAsync(id, userId);
+            var result = await _planningAgentService.EvaluateMaterialRequestPlanAsync(id, actorId);
             return Ok(result);
         }
         catch (ArgumentException ex)

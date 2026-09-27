@@ -81,6 +81,13 @@ public class ProcurementValidationService
             result.Errors.Add($"Quotation #{recommendedQuotationId} expired on {quotation.ValidUntil:yyyy-MM-dd}.");
         }
 
+        if (quotation.Status == QuotationStatus.Rejected)
+            result.Errors.Add("Rejected quotations cannot be selected.");
+        if (request.Items.Count == 0 || quotation.Items.Count == 0)
+            result.Errors.Add("The request and quotation must contain items.");
+        if (quotation.Items.Any(i => i.Quantity <= 0 || i.UnitPrice < 0))
+            result.Errors.Add("Quotation quantities must be positive and prices cannot be negative.");
+
         // Rule 4: Every quotation_item references a material_request_item that belongs to this request
         var validRequestItemIds = request.Items.Select(i => i.Id).ToHashSet();
         foreach (var qItem in quotation.Items)
@@ -178,7 +185,7 @@ public class ProcurementValidationService
         }
 
         // Rule 1: Request must still be Approved
-        if (workflow.MaterialRequest.Status != MaterialRequestStatus.Approved)
+        if (workflow.MaterialRequest?.Status != MaterialRequestStatus.Approved)
         {
             result.Errors.Add($"Material request #{workflow.MaterialRequestId} is not in Approved state.");
         }
@@ -186,8 +193,9 @@ public class ProcurementValidationService
         // Rule 10: Idempotency check: Cannot create duplicate non-cancelled PO for the same material request
         var existingPo = await _db.PurchaseOrders
             .Include(po => po.Quotation)
-            .FirstOrDefaultAsync(po => po.Quotation.MaterialRequestId == workflow.MaterialRequestId
-                                       && po.Status != PurchaseOrderStatus.Cancelled);
+            .FirstOrDefaultAsync(po => po.Status != PurchaseOrderStatus.Cancelled &&
+                ((po.Quotation != null && po.Quotation.MaterialRequestId == workflow.MaterialRequestId) ||
+                 _db.ProcurementRecommendations.Any(r => r.MaterialRequestId == workflow.MaterialRequestId && r.GeneratedPurchaseOrderId == po.Id)));
 
         if (existingPo != null)
         {

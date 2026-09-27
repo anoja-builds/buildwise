@@ -25,6 +25,10 @@ public class AuthService
 
     public async Task<AuthResponseDto> RegisterAsync(RegisterRequestDto dto)
     {
+        // Public signup must never provision an approval or administrative role.
+        if (!string.Equals(dto.RoleName, "SiteEngineer", StringComparison.Ordinal))
+            throw new ArgumentException("Public registration is limited to the SiteEngineer role.");
+
         if (string.IsNullOrWhiteSpace(dto.FullName) || string.IsNullOrWhiteSpace(dto.Email) || string.IsNullOrWhiteSpace(dto.Password))
             throw new ArgumentException("Full name, email and password are all required.");
 
