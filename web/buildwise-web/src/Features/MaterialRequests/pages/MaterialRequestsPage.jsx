@@ -1,9 +1,36 @@
 import React, { useEffect, useState } from 'react';
+import { useAuth } from '../../../auth/AuthContext';
 import { materialRequestService } from '../services/materialRequestService';
 import ProcurementPlanningPanel from '../components/ProcurementPlanningPanel';
 import CreateMaterialRequestModal from '../components/CreateMaterialRequestModal';
 
 export default function MaterialRequestsPage() {
+  const { hasRole } = useAuth();
+  const canApprove = hasRole('ProjectManager') || hasRole('Administrator');
+  const canCreate = hasRole('SiteEngineer') || hasRole('Administrator');
+  const [reviewing, setReviewing] = useState(null);
+  const [decision, setDecision] = useState('Approved');
+  const [savingDecision, setSavingDecision] = useState(false);
+  const [decisionError, setDecisionError] = useState('');
+  const [notice, setNotice] = useState('');
+
+  const recordDecision = async (event) => {
+    event.preventDefault();
+    if (!canApprove || savingDecision) return;
+    setSavingDecision(true);
+    setDecisionError('');
+    try {
+      await materialRequestService.approveRequest(reviewing.id, { decision });
+      setNotice(`Request #${reviewing.id}: ${decision}.`);
+      setReviewing(null);
+      await loadRequests();
+    } catch (err) {
+      setDecisionError(err.message || 'Failed to record approval decision');
+    } finally {
+      setSavingDecision(false);
+    }
+  };
+
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -32,7 +59,7 @@ export default function MaterialRequestsPage() {
   const getBadgeClass = (status) => {
     switch (status) {
       case 'Draft': return 'badge--secondary';
-      case 'Submitted': return 'badge--info';
+      case 'PendingApproval': return 'badge--info';
       case 'RfqInProgress': return 'badge--warning';
       case 'Approved': return 'badge--success';
       case 'Rejected': return 'badge--danger';
@@ -50,12 +77,28 @@ export default function MaterialRequestsPage() {
             Capture site material demand, enforce approval workflows, and run AI procurement planning.
           </p>
         </div>
-        <button className="btn btn--primary" onClick={() => setShowCreateModal(true)}>
+        {canCreate && <button className="btn btn--primary" onClick={() => setShowCreateModal(true)}>
           + Create New Material Request
-        </button>
+        </button>}
       </div>
 
       {error && <div className="error-state" style={{ marginBottom: '20px' }}>⚠️ {error}</div>}
+
+      {notice && <p role="status">{notice}</p>}
+      {reviewing && (
+        <form onSubmit={recordDecision} className="card" aria-label="Review material request" style={{ padding: 20, marginBottom: 20 }}>
+          <h2>Review request #{reviewing.id}</h2>
+          <p>{reviewing.projectName}: {reviewing.reason}</p>
+          <label htmlFor="request-decision">Decision</label>
+          <select id="request-decision" value={decision} disabled={savingDecision} onChange={e => setDecision(e.target.value)}>
+            <option value="Approved">Approve</option>
+            <option value="Rejected">Reject</option>
+          </select>
+          {decisionError && <p role="alert">{decisionError}</p>}
+          <button className="btn btn--primary" disabled={savingDecision} type="submit">{savingDecision ? 'Saving decision...' : 'Confirm decision'}</button>
+          <button className="btn btn--secondary" disabled={savingDecision} type="button" onClick={() => setReviewing(null)}>Cancel</button>
+        </form>
+      )}
 
       {/* Filter and stats */}
       <div style={{ display: 'flex', gap: '16px', marginBottom: '20px', alignItems: 'center' }}>
@@ -68,7 +111,7 @@ export default function MaterialRequestsPage() {
         >
           <option value="">All Statuses</option>
           <option value="Draft">Draft</option>
-          <option value="Submitted">Submitted</option>
+          <option value="PendingApproval">Pending Approval</option>
           <option value="RfqInProgress">RFQ In Progress</option>
           <option value="Approved">Approved</option>
           <option value="Rejected">Rejected</option>
@@ -139,11 +182,16 @@ export default function MaterialRequestsPage() {
                     <td style={{ padding: '10px', fontSize: '12.5px' }}>
                       {r.items && r.items.map((i, idx) => (
                         <div key={idx}>
-                          • <strong>{i.quantity} {i.unit}</strong> {i.materialName}
+                          • <strong>{i.quantity} {i.materialUnit ?? i.unit}</strong> {i.materialName}
                         </div>
                       ))}
                     </td>
                     <td style={{ padding: '10px' }}>
+                      {canApprove && r.status === 'PendingApproval' && (
+                        <button className="btn btn--primary" disabled={savingDecision} onClick={() => {
+                          setReviewing(r); setDecision('Approved'); setDecisionError(''); setNotice('');
+                        }}>Review request #{r.id}</button>
+                      )}
                       <button 
                         className="btn btn--secondary" 
                         style={{ padding: '4px 10px', fontSize: '12px' }}
@@ -160,7 +208,7 @@ export default function MaterialRequestsPage() {
         </div>
       )}
 
-      {showCreateModal && (
+      {canCreate && showCreateModal && (
         <CreateMaterialRequestModal 
           onClose={() => setShowCreateModal(false)}
           onSuccess={() => {

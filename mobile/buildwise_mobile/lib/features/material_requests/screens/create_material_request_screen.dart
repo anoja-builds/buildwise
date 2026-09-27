@@ -1,28 +1,86 @@
 import 'package:flutter/material.dart';
+
 import '../services/material_request_service.dart';
 
 class CreateMaterialRequestScreen extends StatefulWidget {
-  const CreateMaterialRequestScreen({super.key});
+  const CreateMaterialRequestScreen({super.key, this.service});
+
+  final MaterialRequestService? service;
 
   @override
-  State<CreateMaterialRequestScreen> createState() => _CreateMaterialRequestScreenState();
+  State<CreateMaterialRequestScreen> createState() =>
+      _CreateMaterialRequestScreenState();
 }
 
-class _CreateMaterialRequestScreenState extends State<CreateMaterialRequestScreen> {
-  final _service = MaterialRequestService();
+class _CreateMaterialRequestScreenState
+    extends State<CreateMaterialRequestScreen> {
+  late final _service = widget.service ?? MaterialRequestService();
   final _reasonController = TextEditingController();
   final _notesController = TextEditingController();
-  final _quantityController = TextEditingController(text: '200');
+  final _quantityController = TextEditingController();
 
   String _priority = 'High';
-  int _materialId = 1; // 1: OPC Cement, 2: Steel, 3: Sand
-  String _unit = 'bags';
+  int? _projectId;
+  int? _materialId;
+  String _unit = '';
+  List<dynamic> _projects = [];
+  List<dynamic> _materials = [];
+  bool _loadingOptions = true;
+  String? _optionsError;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadOptions();
+  }
+
+  Future<void> _loadOptions() async {
+    setState(() {
+      _loadingOptions = true;
+      _optionsError = null;
+    });
+    try {
+      final options = await _service.getOptions();
+      if (!mounted) return;
+      setState(() {
+        _projects = options['projects'] as List<dynamic>;
+        _materials = options['materials'] as List<dynamic>;
+        _projectId = null;
+        _materialId = null;
+        _unit = '';
+      });
+    } catch (e) {
+      if (mounted) setState(() => _optionsError = e.toString());
+    } finally {
+      if (mounted) setState(() => _loadingOptions = false);
+    }
+  }
+
+  @override
+  void dispose() {
+    _reasonController.dispose();
+    _notesController.dispose();
+    _quantityController.dispose();
+    super.dispose();
+  }
+
   bool _loading = false;
 
   Future<void> _submit() async {
-    if (_reasonController.text.isEmpty) {
+    final quantity = double.tryParse(_quantityController.text);
+    if (_projectId == null ||
+        _materialId == null ||
+        quantity == null ||
+        !quantity.isFinite ||
+        quantity <= 0 ||
+        quantity > 1000000 ||
+        _reasonController.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter reason for request')),
+        const SnackBar(
+          content: Text(
+            'Select a project and material, enter a valid quantity and reason',
+          ),
+        ),
       );
       return;
     }
@@ -30,36 +88,40 @@ class _CreateMaterialRequestScreenState extends State<CreateMaterialRequestScree
     setState(() => _loading = true);
     try {
       final payload = {
-        'projectId': 1,
-        'requestedByUserId': 1,
+        'projectId': _projectId,
         'priority': _priority,
-        'requiredDate': DateTime.now().add(const Duration(days: 5)).toIso8601String(),
+        'requiredDate': DateTime.now()
+            .add(const Duration(days: 5))
+            .toIso8601String(),
         'reason': _reasonController.text,
         'siteNotes': _notesController.text,
         'submitImmediately': true,
         'items': [
           {
             'materialId': _materialId,
-            'quantity': double.tryParse(_quantityController.text) ?? 100,
+            'quantity': quantity,
             'unit': _unit,
-            'requiredDate': DateTime.now().add(const Duration(days: 5)).toIso8601String(),
-            'notes': _notesController.text
-          }
-        ]
+            'requiredDate': DateTime.now()
+                .add(const Duration(days: 5))
+                .toIso8601String(),
+            'notes': _notesController.text,
+          },
+        ],
       };
 
       await _service.createRequest(payload);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Material Request Submitted to Office!')),
+          const SnackBar(
+            content: Text('Material Request Submitted to Office!'),
+          ),
         );
         Navigator.pop(context, true);
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Error: $e')));
       }
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -69,9 +131,7 @@ class _CreateMaterialRequestScreenState extends State<CreateMaterialRequestScree
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('New Material Request'),
-      ),
+      appBar: AppBar(title: const Text('New Material Request')),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16.0),
         child: Column(
@@ -82,23 +142,68 @@ class _CreateMaterialRequestScreenState extends State<CreateMaterialRequestScree
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 16),
-            const Text('Material Select:', style: TextStyle(fontWeight: FontWeight.bold)),
+            if (_loadingOptions) const LinearProgressIndicator(),
+            if (_optionsError != null) ...[
+              Text(_optionsError!),
+              TextButton(
+                onPressed: _loadOptions,
+                child: const Text('Retry loading options'),
+              ),
+            ],
+            if (!_loadingOptions &&
+                _optionsError == null &&
+                (_projects.isEmpty || _materials.isEmpty))
+              const Text(
+                'No active projects or materials are available. Contact the office.',
+              ),
+            const Text('Project / Construction Site'),
             DropdownButton<int>(
-              value: _materialId,
+              key: const Key('project-select'),
+              value: _projectId,
+              hint: const Text('Select project'),
               isExpanded: true,
-              items: const [
-                DropdownMenuItem(value: 1, child: Text('OPC Cement (Bags)')),
-                DropdownMenuItem(value: 2, child: Text('Reinforcement Steel (Tonnes)')),
-                DropdownMenuItem(value: 3, child: Text('River Sand (Cubic Metres)')),
-              ],
-              onChanged: (val) {
-                if (val != null) {
-                  setState(() {
-                    _materialId = val;
-                    _unit = val == 1 ? 'bags' : val == 2 ? 'tonnes' : 'cubic metres';
-                  });
-                }
-              },
+              items: _projects
+                  .map(
+                    (p) => DropdownMenuItem<int>(
+                      value: p['id'] as int,
+                      child: Text(p['name'] as String),
+                    ),
+                  )
+                  .toList(),
+              onChanged: _loading
+                  ? null
+                  : (value) => setState(() => _projectId = value),
+            ),
+            const Text(
+              'Material Select:',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            DropdownButton<int>(
+              key: const Key('material-select'),
+              value: _materialId,
+              hint: const Text('Select material'),
+              isExpanded: true,
+              items: _materials
+                  .map(
+                    (m) => DropdownMenuItem<int>(
+                      value: m['id'] as int,
+                      child: Text('${m['name']} (${m['unit']})'),
+                    ),
+                  )
+                  .toList(),
+              onChanged: _loading
+                  ? null
+                  : (value) {
+                      if (value == null) return;
+                      setState(() {
+                        _materialId = value;
+                        _unit =
+                            _materials.firstWhere(
+                                  (m) => m['id'] == value,
+                                )['unit']
+                                as String;
+                      });
+                    },
             ),
             const SizedBox(height: 16),
             TextField(
@@ -110,15 +215,24 @@ class _CreateMaterialRequestScreenState extends State<CreateMaterialRequestScree
               ),
             ),
             const SizedBox(height: 16),
-            const Text('Priority Level:', style: TextStyle(fontWeight: FontWeight.bold)),
+            const Text(
+              'Priority Level:',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
             DropdownButton<String>(
               value: _priority,
               isExpanded: true,
               items: const [
                 DropdownMenuItem(value: 'Low', child: Text('Low Priority')),
-                DropdownMenuItem(value: 'Medium', child: Text('Medium Priority')),
+                DropdownMenuItem(
+                  value: 'Medium',
+                  child: Text('Medium Priority'),
+                ),
                 DropdownMenuItem(value: 'High', child: Text('High Priority')),
-                DropdownMenuItem(value: 'Urgent', child: Text('Urgent Priority')),
+                DropdownMenuItem(
+                  value: 'Urgent',
+                  child: Text('Urgent Priority'),
+                ),
               ],
               onChanged: (val) {
                 if (val != null) setState(() => _priority = val);
@@ -148,12 +262,22 @@ class _CreateMaterialRequestScreenState extends State<CreateMaterialRequestScree
               width: double.infinity,
               height: 50,
               child: ElevatedButton(
-                onPressed: _loading ? null : _submit,
+                onPressed:
+                    _loading ||
+                        _loadingOptions ||
+                        _optionsError != null ||
+                        _projects.isEmpty ||
+                        _materials.isEmpty
+                    ? null
+                    : _submit,
                 child: _loading
                     ? const CircularProgressIndicator()
-                    : const Text('SUBMIT MATERIAL REQUEST', style: TextStyle(fontWeight: FontWeight.bold)),
+                    : const Text(
+                        'SUBMIT MATERIAL REQUEST',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
               ),
-            )
+            ),
           ],
         ),
       ),

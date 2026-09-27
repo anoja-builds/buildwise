@@ -25,6 +25,19 @@ public class MaterialRequestsController : ControllerBase
         _planningAgentService = planningAgentService;
     }
 
+    [HttpGet("options")]
+    [Authorize(Roles = "SiteEngineer,ProjectManager,Administrator")]
+    public async Task<IActionResult> GetOptions()
+    {
+        var projects = await _dbContext.Projects.AsNoTracking()
+            .Where(p => p.Status == ProjectStatus.Active).OrderBy(p => p.Name)
+            .Select(p => new { p.Id, p.Name }).ToListAsync();
+        var materials = await _dbContext.Materials.AsNoTracking()
+            .Where(m => m.IsActive).OrderBy(m => m.Name)
+            .Select(m => new { m.Id, m.Name, m.Unit }).ToListAsync();
+        return Ok(new { projects, materials });
+    }
+
     [HttpGet]
     [Authorize(Roles = "SiteEngineer,ProjectManager,ProcurementOfficer,ProcurementManager,Administrator")]
     public async Task<IActionResult> GetRequests([FromQuery] string? status, [FromQuery] int? projectId)
@@ -115,7 +128,10 @@ public class MaterialRequestsController : ControllerBase
         if (!User.TryGetUserId(out var actorId)) return Unauthorized();
 
         var project = await _dbContext.Projects.FindAsync(dto.ProjectId);
-        if (project == null) return BadRequest("Invalid Project ID.");
+        if (project == null || project.Status != ProjectStatus.Active) return BadRequest("Select an active project.");
+        var materialIds = dto.Items.Select(i => i.MaterialId).Distinct().ToList();
+        if (materialIds.Count == 0 || await _dbContext.Materials.CountAsync(m => materialIds.Contains(m.Id) && m.IsActive) != materialIds.Count)
+            return BadRequest("Select active materials from the catalogue.");
 
         var request = new MaterialRequest
         {
@@ -129,13 +145,12 @@ public class MaterialRequestsController : ControllerBase
         };
 
         _dbContext.MaterialRequests.Add(request);
-        await _dbContext.SaveChangesAsync();
 
         foreach (var itemDto in dto.Items)
         {
             var item = new MaterialRequestItem
             {
-                MaterialRequestId = request.Id,
+                MaterialRequest = request,
                 MaterialId = itemDto.MaterialId,
                 RequestedQuantity = itemDto.Quantity,
                 Notes = itemDto.Notes

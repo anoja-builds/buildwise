@@ -91,7 +91,10 @@ public class SecurityAuthorizationTests : IAsyncLifetime
             Status = WorkflowStatus.AwaitingApproval, Steps = [new AgentWorkflowStep {
                 StructuredResult = System.Text.Json.JsonSerializer.Serialize(new BuildWise.Api.DTOs.AgentRecommendationDto(
                     1, 1, "Active supplier", "Best quote", [], [])) }] });
-        db.Deliveries.Add(new Delivery { PurchaseOrder = new PurchaseOrder { Supplier = supplier } });
+        var receiptOrder = new PurchaseOrder { Supplier = supplier,
+            Items = [new PurchaseOrderItem { OrderedQuantity = 10, MaterialId = scenario.Material.Id }] };
+        db.Deliveries.Add(new Delivery { PurchaseOrder = receiptOrder,
+            Items = [new DeliveryItem { PurchaseOrderItem = receiptOrder.Items.Single() }] });
         await db.SaveChangesAsync();
     }
 
@@ -195,7 +198,7 @@ public class SecurityAuthorizationTests : IAsyncLifetime
     public async Task Receipt_and_issue_use_JWT_actor()
     {
         SignIn("ReceivingOfficer");
-        using var receipt = await _client.PostAsJsonAsync("/api/Deliveries/1/receive", new { receivedByUserId = 999, items = Array.Empty<object>() });
+        using var receipt = await _client.PostAsJsonAsync("/api/Deliveries/1/receive", new { receivedByUserId = 999, items = new[] { new { purchaseOrderItemId = 1, receivedQuantity = 10, damagedQuantity = 0 } } });
         Assert.Equal(HttpStatusCode.OK, receipt.StatusCode);
         using var issue = await _client.PostAsJsonAsync("/api/Deliveries/report-issue", new { deliveryId = 1, reportedByUserId = 999, issueType = "Damage", description = "Test" });
         Assert.Equal(HttpStatusCode.OK, issue.StatusCode);
@@ -283,7 +286,7 @@ public class SecurityAuthorizationTests : IAsyncLifetime
     public async Task Invalid_claim_cannot_fall_back_to_body_or_query(string path, string role)
     {
         SignIn(role, 0);
-        using var response = await _client.PostAsJsonAsync(path + "?userId=77", new { userId = 77, reviewedByUserId = 77, receivedByUserId = 77, decision = "Approved" });
+        using var response = await _client.PostAsJsonAsync(path + "?userId=77", new { userId = 77, reviewedByUserId = 77, receivedByUserId = 77, decision = "Approved", items = new[] { new { purchaseOrderItemId = 1, receivedQuantity = 1 } } });
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
@@ -369,6 +372,31 @@ public class SecurityAuthorizationTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         using var repeat = await _client.PostAsJsonAsync("/api/MaterialRequests/1/approve", new { decision = "Rejected" });
         Assert.Equal(HttpStatusCode.BadRequest, repeat.StatusCode);
+    }
+
+    [Fact]
+    public async Task Site_request_manager_decision_and_site_status_share_the_same_record()
+    {
+        SignIn("SiteEngineer");
+        using var optionsResponse = await _client.GetAsync("/api/materialrequests/options");
+        Assert.Equal(HttpStatusCode.OK, optionsResponse.StatusCode);
+        using var options = System.Text.Json.JsonDocument.Parse(await optionsResponse.Content.ReadAsStringAsync());
+        var projectId = options.RootElement.GetProperty("projects")[0].GetProperty("id").GetInt32();
+        var material = options.RootElement.GetProperty("materials")[0];
+        using var created = await _client.PostAsJsonAsync("/api/materialrequests", new {
+            projectId, reason = "Cross-platform request", items = new[] {
+                new { materialId = material.GetProperty("id").GetInt32(), unit = material.GetProperty("unit").GetString(), quantity = 12 } } });
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        using var body = System.Text.Json.JsonDocument.Parse(await created.Content.ReadAsStringAsync());
+        var id = body.RootElement.GetProperty("id").GetInt32();
+        Assert.Equal("PendingApproval", body.RootElement.GetProperty("status").GetString());
+        SignIn("ProjectManager");
+        using var approval = await _client.PostAsJsonAsync($"/api/materialrequests/{id}/approve", new { decision = "Approved" });
+        Assert.Equal(HttpStatusCode.OK, approval.StatusCode);
+        SignIn("SiteEngineer");
+        using var detail = System.Text.Json.JsonDocument.Parse(await _client.GetStringAsync($"/api/materialrequests/{id}"));
+        Assert.Equal("Approved", detail.RootElement.GetProperty("status").GetString());
+        Assert.Equal(77, detail.RootElement.GetProperty("requestedByUserId").GetInt32());
     }
 
     public async Task DisposeAsync()

@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
 using BuildWise.Api.Models.Enums;
 
 namespace BuildWise.Api.Models.Dtos;
@@ -13,13 +14,16 @@ public class ReceiveDeliveryDto
 {
     public int ReceivedByUserId { get; set; }
     public string? Notes { get; set; }
+    [Required, MinLength(1)]
     public List<ReceiveDeliveryItemDto> Items { get; set; } = new();
 }
 
 public class ReceiveDeliveryItemDto
 {
     public int PurchaseOrderItemId { get; set; }
+    [Range(typeof(decimal), "0", "79228162514264337593543950335")]
     public decimal ReceivedQuantity { get; set; }
+    [Range(typeof(decimal), "0", "79228162514264337593543950335")]
     public decimal DamagedQuantity { get; set; }
     public string? Notes { get; set; }
 }

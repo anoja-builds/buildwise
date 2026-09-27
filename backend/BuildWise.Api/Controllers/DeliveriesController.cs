@@ -219,103 +219,81 @@ public class DeliveriesController : ControllerBase
     {
         if (!User.TryGetUserId(out var actorId)) return Unauthorized();
 
+        // Serialize concurrent receipts on relational databases so two deliveries
+        // cannot both reconcile against the same stale order quantities.
+        await using var transaction = _dbContext.Database.IsRelational()
+            ? await _dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable)
+            : null;
         var delivery = await _dbContext.Deliveries
-            .Include(d => d.Items)
-                .ThenInclude(di => di.PurchaseOrderItem)
-            .Include(d => d.PurchaseOrder)
+            .Include(d => d.Items).ThenInclude(i => i.PurchaseOrderItem)
+            .Include(d => d.PurchaseOrder).ThenInclude(p => p!.Items)
             .FirstOrDefaultAsync(d => d.Id == id);
-
-        if (delivery == null)
-        {
-            return NotFound("Delivery not found.");
-        }
-
-        if (delivery.Status == DeliveryStatus.Received || delivery.Status == DeliveryStatus.DiscrepancyReported)
-        {
+        if (delivery == null) return NotFound("Delivery not found.");
+        if (delivery.ReceivedAt != null || delivery.Status is DeliveryStatus.Received
+            or DeliveryStatus.DiscrepancyReported or DeliveryStatus.PartiallyReceived)
             return BadRequest("This delivery has already been processed.");
-        }
+        if (delivery.PurchaseOrder == null || delivery.PurchaseOrder.Items.Count == 0)
+            return BadRequest("Delivery must belong to a purchase order with items.");
+        if (delivery.PurchaseOrder.Status == PurchaseOrderStatus.Cancelled)
+            return BadRequest("Cannot receive a cancelled purchase order.");
+        if (!await _dbContext.Users.AnyAsync(u => u.Id == actorId && u.IsActive))
+            return Forbid();
 
-        // Retrieve user
-        var user = await _dbContext.Users.FindAsync(actorId);
-        if (user == null)
+        if (dto.Items == null || dto.Items.Count == 0)
+            return BadRequest("At least one delivery item is required.");
+        if (dto.Items.Select(i => i.PurchaseOrderItemId).Distinct().Count() != dto.Items.Count)
+            return BadRequest("Duplicate purchase-order item IDs are not allowed.");
+        var deliveryItems = delivery.Items.ToDictionary(i => i.PurchaseOrderItemId);
+        if (dto.Items.Any(i => !deliveryItems.ContainsKey(i.PurchaseOrderItemId)
+            || deliveryItems[i.PurchaseOrderItemId].PurchaseOrderItem?.PurchaseOrderId != delivery.PurchaseOrderId))
+            return BadRequest("Every item must belong to this delivery and its purchase order.");
+        if (dto.Items.Count != deliveryItems.Count)
+            return BadRequest("Supply every delivery item, using zero for items not received.");
+        if (dto.Items.Any(i => i.ReceivedQuantity < 0 || i.DamagedQuantity < 0 || i.DamagedQuantity > i.ReceivedQuantity))
+            return BadRequest("Quantities cannot be negative and damaged quantity cannot exceed received quantity.");
+
+        // Read only other finalized deliveries. The current receipt is added
+        // exactly once below, independent of EF tracking/provider behavior.
+        var priorItems = await _dbContext.DeliveryItems.AsNoTracking()
+            .Where(i => i.DeliveryId != id && i.Delivery!.PurchaseOrderId == delivery.PurchaseOrderId
+                && (i.Delivery.Status == DeliveryStatus.Received
+                    || i.Delivery.Status == DeliveryStatus.PartiallyReceived
+                    || i.Delivery.Status == DeliveryStatus.DiscrepancyReported))
+            .ToListAsync();
+        var priorUsable = priorItems.GroupBy(i => i.PurchaseOrderItemId)
+            .ToDictionary(g => g.Key, g => g.Sum(i => i.ReceivedQuantity - i.DamagedQuantity));
+        foreach (var item in dto.Items)
         {
-            return BadRequest("Valid receiving officer/user is required.");
+            var remaining = Math.Max(0, deliveryItems[item.PurchaseOrderItemId].PurchaseOrderItem!.OrderedQuantity
+                - priorUsable.GetValueOrDefault(item.PurchaseOrderItemId));
+            if (item.ReceivedQuantity > remaining)
+                return BadRequest($"Received quantity for item #{item.PurchaseOrderItemId} exceeds the outstanding quantity ({remaining}).");
         }
 
+        var now = DateTime.UtcNow;
+        foreach (var item in dto.Items)
+        {
+            var stored = deliveryItems[item.PurchaseOrderItemId];
+            stored.ReceivedQuantity = item.ReceivedQuantity;
+            stored.DamagedQuantity = item.DamagedQuantity;
+            stored.Notes = item.Notes;
+            stored.UpdatedAt = now;
+        }
+        var complete = delivery.PurchaseOrder.Items.All(i =>
+            priorUsable.GetValueOrDefault(i.Id) + delivery.Items.Where(d => d.PurchaseOrderItemId == i.Id)
+                .Sum(d => d.ReceivedQuantity - d.DamagedQuantity) >= i.OrderedQuantity);
+        // Preserve the existing shortage/damage discrepancy workflow used by quality.
+        delivery.Status = dto.Items.Any(i => i.DamagedQuantity > 0) || !complete
+            ? DeliveryStatus.DiscrepancyReported : DeliveryStatus.Received;
         delivery.ReceivedByUserId = actorId;
         delivery.Notes = dto.Notes;
-        delivery.ActualArrivalDate = DateTime.UtcNow;
-        delivery.ReceivedAt = DateTime.UtcNow;
-        delivery.UpdatedAt = DateTime.UtcNow;
-
-        bool hasDiscrepancy = false;
-        bool allCompleted = true;
-
-        foreach (var itemDto in dto.Items)
-        {
-            var deliveryItem = delivery.Items
-                .FirstOrDefault(di => di.PurchaseOrderItemId == itemDto.PurchaseOrderItemId);
-
-            if (deliveryItem == null) continue;
-
-            deliveryItem.ReceivedQuantity = itemDto.ReceivedQuantity;
-            deliveryItem.DamagedQuantity = itemDto.DamagedQuantity;
-            deliveryItem.Notes = itemDto.Notes;
-            deliveryItem.UpdatedAt = DateTime.UtcNow;
-
-            var orderedQty = deliveryItem.PurchaseOrderItem?.OrderedQuantity ?? 0;
-            var shortage = orderedQty - itemDto.ReceivedQuantity;
-
-            if (shortage > 0 || itemDto.DamagedQuantity > 0)
-            {
-                hasDiscrepancy = true;
-            }
-
-            if (itemDto.ReceivedQuantity < orderedQty)
-            {
-                allCompleted = false;
-            }
-        }
-
-        if (hasDiscrepancy)
-        {
-            delivery.Status = DeliveryStatus.DiscrepancyReported;
-        }
-        else if (allCompleted)
-        {
-            delivery.Status = DeliveryStatus.Received;
-        }
-        else
-        {
-            delivery.Status = DeliveryStatus.PartiallyReceived;
-        }
-
-        // Check if all items in the Purchase Order are fully received across all deliveries
-        if (delivery.PurchaseOrder != null)
-        {
-            // If this delivery was received successfully or partially
-            var allPoItems = await _dbContext.PurchaseOrderItems
-                .Where(poi => poi.PurchaseOrderId == delivery.PurchaseOrderId)
-                .ToListAsync();
-
-            bool isPoComplete = true;
-            foreach (var poItem in allPoItems)
-            {
-                var totalReceivedForPoItem = await _dbContext.DeliveryItems
-                    .Where(di => di.PurchaseOrderItemId == poItem.Id && di.Delivery!.Status != DeliveryStatus.Scheduled && di.Delivery!.Status != DeliveryStatus.InTransit)
-                    .SumAsync(di => di.ReceivedQuantity) + dto.Items.FirstOrDefault(i => i.PurchaseOrderItemId == poItem.Id)?.ReceivedQuantity ?? 0;
-
-                if (totalReceivedForPoItem < poItem.OrderedQuantity)
-                {
-                    isPoComplete = false;
-                    break;
-                }
-            }
-
-            delivery.PurchaseOrder.Status = isPoComplete ? PurchaseOrderStatus.Completed : PurchaseOrderStatus.InProgress;
-        }
-
+        delivery.ActualArrivalDate = now;
+        delivery.ReceivedAt = now;
+        delivery.UpdatedAt = now;
+        delivery.PurchaseOrder.Status = complete ? PurchaseOrderStatus.Completed : PurchaseOrderStatus.InProgress;
+        delivery.PurchaseOrder.UpdatedAt = now;
         await _dbContext.SaveChangesAsync();
+        if (transaction != null) await transaction.CommitAsync();
 
         return Ok(new
         {

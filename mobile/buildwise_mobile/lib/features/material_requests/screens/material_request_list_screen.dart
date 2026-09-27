@@ -1,22 +1,39 @@
 import 'package:flutter/material.dart';
+
 import '../services/material_request_service.dart';
 import 'create_material_request_screen.dart';
 
 class MaterialRequestListScreen extends StatefulWidget {
-  const MaterialRequestListScreen({super.key});
+  const MaterialRequestListScreen({super.key, this.service});
+
+  final MaterialRequestService? service;
 
   @override
-  State<MaterialRequestListScreen> createState() => _MaterialRequestListScreenState();
+  State<MaterialRequestListScreen> createState() =>
+      _MaterialRequestListScreenState();
 }
 
-class _MaterialRequestListScreenState extends State<MaterialRequestListScreen> {
-  final _service = MaterialRequestService();
+class _MaterialRequestListScreenState extends State<MaterialRequestListScreen>
+    with WidgetsBindingObserver {
+  late final _service = widget.service ?? MaterialRequestService();
   late Future<List<dynamic>> _futureRequests;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _refresh();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && mounted) _refresh();
   }
 
   void _refresh() {
@@ -33,8 +50,9 @@ class _MaterialRequestListScreenState extends State<MaterialRequestListScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
+            tooltip: 'Refresh request status',
             onPressed: _refresh,
-          )
+          ),
         ],
       ),
       body: FutureBuilder<List<dynamic>>(
@@ -59,12 +77,16 @@ class _MaterialRequestListScreenState extends State<MaterialRequestListScreen> {
                 margin: const EdgeInsets.only(bottom: 12),
                 child: ListTile(
                   leading: CircleAvatar(
-                    backgroundColor: item['priority'] == 'High' || item['priority'] == 'Urgent'
+                    backgroundColor:
+                        item['priority'] == 'High' ||
+                            item['priority'] == 'Urgent'
                         ? Colors.orange.shade100
                         : Colors.blue.shade100,
                     child: Icon(
                       Icons.assignment,
-                      color: item['priority'] == 'High' || item['priority'] == 'Urgent'
+                      color:
+                          item['priority'] == 'High' ||
+                              item['priority'] == 'Urgent'
                           ? Colors.orange.shade800
                           : Colors.blue.shade800,
                     ),
@@ -82,7 +104,9 @@ class _MaterialRequestListScreenState extends State<MaterialRequestListScreen> {
                         'Status: ${item['status']}',
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
-                          color: item['status'] == 'Approved' || item['status'] == 'Ordered'
+                          color:
+                              item['status'] == 'Approved' ||
+                                  item['status'] == 'Ordered'
                               ? Colors.green
                               : Colors.blue.shade800,
                         ),
@@ -90,14 +114,20 @@ class _MaterialRequestListScreenState extends State<MaterialRequestListScreen> {
                     ],
                   ),
                   trailing: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
                     decoration: BoxDecoration(
                       color: Colors.grey.shade200,
                       borderRadius: BorderRadius.circular(4),
                     ),
                     child: Text(
                       item['priority'] ?? 'Medium',
-                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
                 ),
@@ -110,9 +140,11 @@ class _MaterialRequestListScreenState extends State<MaterialRequestListScreen> {
         onPressed: () async {
           final res = await Navigator.push(
             context,
-            MaterialPageRoute(builder: (_) => const CreateMaterialRequestScreen()),
+            MaterialPageRoute(
+              builder: (_) => CreateMaterialRequestScreen(service: _service),
+            ),
           );
-          if (res == true) _refresh();
+          if (res == true && mounted) _refresh();
         },
         icon: const Icon(Icons.add),
         label: const Text('New Request'),
