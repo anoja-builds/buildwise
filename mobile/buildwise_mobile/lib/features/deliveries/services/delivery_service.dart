@@ -1,37 +1,39 @@
 import 'dart:convert';
-import 'package:http/http.dart' as http;
+import '../../../core/api/api_client.dart';
 
 class DeliveryService {
-  static const String baseUrl = 'http://localhost:5078/api/deliveries';
+  DeliveryService({ApiClient? apiClient})
+      : _apiClient = apiClient ?? ApiClient();
+
+  final ApiClient _apiClient;
 
   Future<List<dynamic>> getExpectedDeliveries() async {
-    final response = await http.get(Uri.parse('$baseUrl/expected'));
+    final response = await _apiClient.get('/deliveries/expected');
     if (response.statusCode == 200) {
       return json.decode(response.body);
     } else {
-      throw Exception('Failed to load expected deliveries');
+      throw Exception('Failed to load expected deliveries (${response.statusCode})');
     }
   }
 
   Future<void> receiveDelivery(int id, Map<String, dynamic> data) async {
-    final response = await http.post(
-      Uri.parse('$baseUrl/$id/receive'),
-      headers: {'Content-Type': 'application/json'},
-      body: json.encode(data),
+    final response = await _apiClient.post(
+      '/deliveries/$id/receive',
+      body: data,
     );
     if (response.statusCode != 200) {
-      throw Exception('Failed to reconcile delivery');
+      throw Exception('Failed to reconcile delivery (${response.statusCode})');
     }
   }
 
   Future<void> uploadEvidence(int id, String imageUrl) async {
-    final response = await http.post(
-      Uri.parse('$baseUrl/$id/evidence'),
-      headers: {'Content-Type': 'application/json'},
-      body: json.encode({'imageUrl': imageUrl}),
+    final response = await _apiClient.post(
+      '/deliveries/$id/evidence',
+      body: {'imageUrl': imageUrl},
     );
     if (response.statusCode != 200) {
-      throw Exception('Failed to upload evidence');
+      throw Exception('Failed to upload evidence (${response.statusCode})');
     }
   }
 }
+

@@ -32,6 +32,7 @@ public class PurchaseOrdersController : ControllerBase
     /// Explicitly trigger Purchase Order creation from an approved agent workflow (§4.6 / §7).
     /// </summary>
     [HttpPost("procurement-workflow/{workflowId:int}/purchase-order")]
+    [Authorize(Roles = "ProcurementManager,Administrator")]
     public async Task<ActionResult<PurchaseOrderDto>> CreateFromWorkflow(int workflowId)
     {
         try

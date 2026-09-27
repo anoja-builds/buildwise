@@ -33,8 +33,11 @@ public static class DbSeeder
         [
             ("Ada Administrator", "admin@buildwise.demo", "Administrator"),
             ("Sam SiteEngineer", "site.engineer@buildwise.demo", "SiteEngineer"),
+            ("Paul ProjectManager", "project.manager@buildwise.demo", "ProjectManager"),
             ("Priya Officer", "procurement.officer@buildwise.demo", "ProcurementOfficer"),
-            ("Mira Manager", "procurement.manager@buildwise.demo", "ProcurementManager")
+            ("Mira Manager", "procurement.manager@buildwise.demo", "ProcurementManager"),
+            ("Ramya Receiving", "receiving.officer@buildwise.demo", "ReceivingOfficer"),
+            ("Quinn Inspector", "quality.inspector@buildwise.demo", "QualityInspector")
         ];
 
         foreach (var (name, email, roleName) in demoAccounts)
