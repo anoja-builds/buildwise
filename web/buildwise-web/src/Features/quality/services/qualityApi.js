@@ -44,6 +44,9 @@ async function request(path, { method = 'GET', body } = {}) {
 export const qualityApi = {
   listInspections: () => request('/inspections'),
   getInspection: (id) => request(`/inspections/${id}`),
+  pendingDeliveries: () => request('/inspections/pending-deliveries'),
+  startInspection: (body) => request('/inspections', { method: 'POST', body }),
+  completeInspection: (id, body) => request(`/inspections/${id}/complete`, { method: 'POST', body }),
   listNcrs: () => request('/non-conformances'),
   getNcr: (id) => request(`/non-conformances/${id}`),
   createNcr: (body) => request('/non-conformances', { method: 'POST', body }),

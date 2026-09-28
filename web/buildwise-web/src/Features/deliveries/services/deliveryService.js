@@ -74,6 +74,54 @@ export const deliveryService = {
     handleUnauthorized(res);
     if (!res.ok) throw new Error('Failed to run Delivery Risk Agent');
     return res.json();
+  },
+
+  async analyzeDiscrepancies(id) {
+    const res = await fetch(`${API_BASE_URL}/deliveries/${id}/discrepancy-analysis`, {
+      method: 'POST',
+      headers: getHeaders()
+    });
+    handleUnauthorized(res);
+    if (!res.ok) {
+      const errorMsg = await res.text();
+      throw new Error(errorMsg || 'Failed to run discrepancy analysis');
+    }
+    return res.json();
+  },
+
+  async getDiscrepancyHistory(id) {
+    const res = await fetch(`${API_BASE_URL}/deliveries/${id}/discrepancy-history`, {
+      headers: getHeaders()
+    });
+    handleUnauthorized(res);
+    if (!res.ok) {
+      const errorMsg = await res.text();
+      throw new Error(errorMsg || 'Failed to fetch discrepancy history');
+    }
+    return res.json();
+  },
+
+  async getConfirmedPOs() {
+    const res = await fetch(`${API_BASE_URL}/purchase-orders`, { headers: getHeaders() });
+    handleUnauthorized(res);
+    if (!res.ok) throw new Error('Failed to fetch purchase orders');
+    const data = await res.json();
+    const items = Array.isArray(data) ? data : (data.items || []);
+    return items.filter(po => po.status === 'Confirmed' || po.status === 'InProgress');
+  },
+
+  async scheduleDelivery(purchaseOrderId, deliveryReference) {
+    const res = await fetch(`${API_BASE_URL}/deliveries`, {
+      method: 'POST',
+      headers: getHeaders(true),
+      body: JSON.stringify({ purchaseOrderId, deliveryReference })
+    });
+    handleUnauthorized(res);
+    if (!res.ok) {
+      const errorMsg = await res.text();
+      throw new Error(errorMsg || 'Failed to schedule delivery');
+    }
+    return res.json();
   }
 };
 

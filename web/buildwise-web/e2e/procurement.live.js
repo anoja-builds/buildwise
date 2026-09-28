@@ -16,7 +16,7 @@ test('Flutter request → React approval, quotations and PO confirmation', async
     await page.getByRole('button', { name: 'Sign in', exact: true }).click()
     await expect(page.getByRole('button', { name: 'Sign out' })).toBeVisible()
   }
-  async function nav(name) { await page.getByRole('navigation').getByRole('button', { name, exact: true }).click() }
+  async function nav(name) { await page.getByRole('navigation').getByRole('link', { name, exact: true }).click() }
   async function workspace() {
     await nav('Quotations')
     await page.getByRole('row').filter({ has: page.getByText(`MR-${requestId}`, { exact: true }) })

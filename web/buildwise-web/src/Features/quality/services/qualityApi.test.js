@@ -17,6 +17,9 @@ describe('quality API', () => {
   })
   it.each([
     ['listInspections', [], '/inspections', 'GET'], ['getInspection', [4], '/inspections/4', 'GET'],
+    ['pendingDeliveries', [], '/inspections/pending-deliveries', 'GET'],
+    ['startInspection', [{ deliveryId: 10, notes: null }], '/inspections', 'POST'],
+    ['completeInspection', [7, { overallDecision: 'Accepted', items: [] }], '/inspections/7/complete', 'POST'],
     ['listNcrs', [], '/non-conformances', 'GET'], ['getNcr', [5], '/non-conformances/5', 'GET'],
     ['createNcr', [{ inspectionItemId: 9 }], '/non-conformances', 'POST'],
     ['updateCorrectiveAction', [5, 'Replace'], '/non-conformances/5/corrective-action', 'PATCH'],

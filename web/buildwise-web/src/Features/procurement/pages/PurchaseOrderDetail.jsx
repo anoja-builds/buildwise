@@ -5,7 +5,7 @@ import { statusTone } from '../components/statusTone'
 
 const NEXT_STATUS = { Created: ['Confirmed', 'Cancelled'], Confirmed: ['Cancelled'], InProgress: [], Completed: [], Cancelled: [] }
 
-export default function PurchaseOrderDetail({ orderId, onBack }) {
+export default function PurchaseOrderDetail({ orderId, onBack, canUpdate = false }) {
   const [order, setOrder] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -59,14 +59,14 @@ export default function PurchaseOrderDetail({ orderId, onBack }) {
             <div className="detail-row" key={label}><span className="detail-row__label">{label}</span><span className="detail-row__value">{value}</span></div>
           ))}
         </Card>
-        <Card title="Update status">
+        {canUpdate && <Card title="Update status">
           {options.length === 0 ? <p className="status-note">This order is in a final state and cannot be updated further.</p> : (
             <div className="form-grid">
               <SelectInput label="New status" value={nextStatus} onChange={(e) => setNextStatus(e.target.value)} options={[{ value: '', label: 'Select next status' }, ...options.map((o) => ({ value: o, label: o }))]} />
               <div className="form-actions form-span"><Button onClick={handleStatusUpdate} disabled={!nextStatus || saving}>{saving ? 'Saving…' : 'Update status'}</Button></div>
             </div>
           )}
-        </Card>
+        </Card>}
       </div>
 
       <Card title="Order items">

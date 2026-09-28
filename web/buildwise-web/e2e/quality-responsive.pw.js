@@ -73,7 +73,7 @@ async function fitsViewport(page) {
 }
 
 async function inspectionDetail(page) {
-  await page.getByRole('button', { name: 'Quality Inspections', exact: true }).click()
+  await page.getByRole('link', { name: 'Quality Inspections', exact: true }).click()
   await page.getByRole('button', { name: 'Inspection #1', exact: true }).click()
   await page.getByRole('heading', { name: 'Inspection items', exact: true }).waitFor()
 }
@@ -94,7 +94,7 @@ async function tableScrollsLocally(page) {
 }
 
 test('history and inspection tables stay inside cards and navigation still works', async ({ page }, testInfo) => {
-  await page.getByRole('button', { name: 'Quality Inspections', exact: true }).click()
+  await page.getByRole('link', { name: 'Quality Inspections', exact: true }).click()
   await page.getByRole('button', { name: 'Inspection #1', exact: true }).waitFor()
   await fitsViewport(page)
   await tableScrollsLocally(page)
@@ -102,7 +102,7 @@ test('history and inspection tables stay inside cards and navigation still works
   await page.getByRole('heading', { name: 'Inspection items', exact: true }).waitFor()
   await fitsViewport(page)
   await tableScrollsLocally(page)
-  await page.screenshot({ path: testInfo.outputPath('inspection.png'), fullPage: true })
+  await page.screenshot({ path: testInfo.outputPath('inspection.png'), fullPage: true, animations: 'disabled' })
 
   // Reach the action at the far end of the table without moving the document.
   const action = page.getByRole('button', { name: 'Create NCR for item #9', exact: true })
@@ -114,7 +114,7 @@ test('history and inspection tables stay inside cards and navigation still works
   await page.getByRole('button', { name: 'Cancel', exact: true }).click()
   await page.getByRole('button', { name: 'Back to Quality Inspections', exact: true }).click()
   await expect(page.getByRole('button', { name: 'Inspection #1', exact: true })).toBeVisible()
-  await page.getByRole('button', { name: 'Non-Conformances', exact: true }).click()
+  await page.getByRole('link', { name: 'Non-Conformances', exact: true }).click()
   await expect(page.getByRole('button', { name: 'NCR #5', exact: true })).toBeVisible()
   await fitsViewport(page)
   if (page.viewportSize().width === 1440) {
@@ -129,13 +129,13 @@ test('NCR forms, list and long corrective actions fit without clipping', async (
   await fitsViewport(page)
   await page.getByLabel(/Issue description/).fill('Five damaged bags')
   await page.getByLabel(/Corrective action/).fill(ncr.correctiveAction)
-  await page.screenshot({ path: testInfo.outputPath('ncr-form.png'), fullPage: true })
+  await page.screenshot({ path: testInfo.outputPath('ncr-form.png'), fullPage: true, animations: 'disabled' })
   await page.getByRole('button', { name: 'Create NCR', exact: true }).click()
   await page.getByRole('heading', { name: 'Non-conformance details', exact: true }).waitFor()
   await fitsViewport(page)
   await page.getByLabel(/Corrective action/).fill('Replacement arranged')
   await fitsViewport(page)
-  await page.getByRole('button', { name: 'Non-Conformances', exact: true }).click()
+  await page.getByRole('link', { name: 'Non-Conformances', exact: true }).click()
   await page.getByRole('button', { name: 'NCR #5', exact: true }).waitFor()
   await fitsViewport(page)
   await tableScrollsLocally(page)
@@ -152,7 +152,7 @@ test('agent inputs, expanded structured results and errors fit the viewport', as
   await page.getByText('Structured result and execution trace', { exact: true }).click()
   await expect(page.locator('details pre')).toBeVisible()
   await fitsViewport(page)
-  await page.screenshot({ path: testInfo.outputPath('agent-results.png'), fullPage: true })
+  await page.screenshot({ path: testInfo.outputPath('agent-results.png'), fullPage: true, animations: 'disabled' })
   await page.getByLabel(/Workflow ID/).fill('999')
   await page.getByRole('button', { name: 'Load workflow', exact: true }).click()
   await expect(page.getByRole('alert')).toContainText('Quality-agent workflow not found.')

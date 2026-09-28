@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../../auth/AuthContext'
 import { Button, Card, EmptyState, ErrorState, LoadingState, PageHeader, SelectInput, StatusBadge, TextInput } from '../../components/shared'
 import { qualityApi } from './services/qualityApi'
@@ -36,25 +37,380 @@ export default function QualityApp({ section }) {
   return <QualityWorkspace key={section} section={section} />
 }
 
-function QualityWorkspace({ section }) {
-  const [view, setView] = useState({ kind: section === 'Non-Conformances' ? 'ncrList' : 'inspectionList' })
+function QualityWorkspace({ section, routeView, onNavigate }) {
+  const [localView, setLocalView] = useState({ kind: section === 'Non-Conformances' ? 'ncrList' : 'inspectionList' })
+  const view = routeView || localView
+  const setView = onNavigate || setLocalView
   const openInspection = (id) => setView({ kind: 'inspection', id })
   const openNcr = (id) => setView({ kind: 'ncr', id })
   const back = () => setView({ kind: section === 'Non-Conformances' ? 'ncrList' : 'inspectionList' })
   return <div className="stack quality-workspace">
     {view.kind !== 'inspectionList' && view.kind !== 'ncrList' && <Button variant="secondary" onClick={back}>Back to {section}</Button>}
-    {view.kind === 'inspectionList' && <InspectionHistory onOpen={openInspection} />}
-    {view.kind === 'inspection' && <InspectionDetail key={view.id} id={view.id} onCreate={(inspection, item) => setView({ kind: 'create', inspection, item })} />}
+    {view.kind === 'inspectionList' && <InspectionSection onOpen={openInspection} onBeginInspection={(delivery) => setView({ kind: 'startInspection', delivery })} />}
+    {view.kind === 'inspection' && <InspectionDetail key={view.id} id={view.id} onComplete={onNavigate ? (inspection) => setView({ kind: 'completeInspection', inspection }) : undefined} onCreate={(inspection, item) => setView({ kind: 'create', inspection, item })} />}
     {view.kind === 'create' && <CreateNcr inspection={view.inspection} item={view.item} onSaved={openNcr} onCancel={() => openInspection(view.inspection.id)} />}
     {view.kind === 'ncrList' && <NcrList onOpen={openNcr} onInspections={() => setView({ kind: 'inspectionList' })} />}
     {view.kind === 'ncr' && <NcrDetail key={view.id} id={view.id} onInspection={openInspection} />}
+    {view.kind === 'startInspection' && (
+      <StartInspectionForm
+        delivery={view.delivery}
+        onSuccess={(inspection) => setView({ kind: 'completeInspection', inspection })}
+        onCancel={() => setView({ kind: 'inspectionList' })}
+      />
+    )}
+    {view.kind === 'completeInspection' && (
+      <CompleteInspectionForm
+        inspection={view.inspection}
+        onSuccess={(id) => openInspection(id)}
+        onCancel={() => setView({ kind: 'inspectionList' })}
+      />
+    )}
   </div>
 }
+
+// URL-driven adapter reuses the forms above; business validation stays in place.
+export function RoutedQualityApp({ kind }) {
+  const params = useParams()
+  const navigate = useNavigate()
+  const section = kind.startsWith('ncr') ? 'Non-Conformances' : 'Quality Inspections'
+  const onNavigate = (view) => {
+    const paths = {
+      inspectionList: '/quality-inspections',
+      ncrList: '/non-conformances',
+      inspection: `/quality-inspections/${view.id}`,
+      ncr: `/non-conformances/${view.id}`,
+      startInspection: `/quality-inspections/new/${view.delivery?.deliveryId}`,
+      completeInspection: `/quality-inspections/${view.inspection?.id}/complete`,
+      create: `/quality-inspections/${view.inspection?.id}/non-conformances/new/${view.item?.id}`,
+    }
+    navigate(paths[view.kind])
+  }
+  const view = { kind, id: params.id }
+  if (['startInspection', 'completeInspection', 'create'].includes(kind)) {
+    return <QualityFormRoute key={`${kind}:${params.id}:${params.deliveryId}:${params.itemId}`} kind={kind} params={params} section={section} onNavigate={onNavigate} />
+  }
+  return <QualityWorkspace section={section} routeView={view} onNavigate={onNavigate} />
+}
+
+function QualityFormRoute({ kind, params, section, onNavigate }) {
+  const load = useCallback(async () => {
+    if (kind === 'startInspection') {
+      const deliveries = await qualityApi.pendingDeliveries()
+      const delivery = deliveries.find((item) => String(item.deliveryId) === params.deliveryId)
+      if (!delivery) throw new Error('This delivery is no longer pending inspection.')
+      return { kind, delivery }
+    }
+    const inspection = await qualityApi.getInspection(params.id)
+    if (kind === 'completeInspection') return { kind, inspection }
+    const item = inspection.items.find((item) => String(item.id) === params.itemId)
+    if (!item) throw new Error('Inspection item not found.')
+    return { kind, inspection, item }
+  }, [kind, params.id, params.deliveryId, params.itemId])
+  const state = useRecord(load)
+  return <ReadState state={state}>{(view) => <QualityWorkspace section={section} routeView={view} onNavigate={onNavigate} />}</ReadState>
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Inspection section: pending deliveries + history
+// ─────────────────────────────────────────────────────────────────────────────
+
+function InspectionSection({ onOpen, onBeginInspection }) {
+  const [revision, setRevision] = useState(0)
+  const refresh = () => setRevision((v) => v + 1)
+  return <>
+    <PageHeader
+      title="Quality Inspections"
+      description="Inspection history recorded through the shared BuildWise API."
+      actions={<Button variant="secondary" onClick={refresh}>Refresh</Button>}
+    />
+    <PendingDeliveries key={`pending-${revision}`} onBeginInspection={onBeginInspection} />
+    <InspectionHistory key={`history-${revision}`} onOpen={onOpen} />
+  </>
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Pending Inspections panel — calls GET /api/inspections/pending-deliveries
+// ─────────────────────────────────────────────────────────────────────────────
+
+function PendingDeliveries({ onBeginInspection }) {
+  const load = useCallback(() => qualityApi.pendingDeliveries(), [])
+  const state = useRecord(load)
+  if (state.loading) return <LoadingState message="Loading pending inspections..." />
+  if (state.error) return <ErrorState message={state.error} onRetry={state.refresh} />
+  const rows = state.data ?? []
+  if (!rows.length) return (
+    <Card title="Pending Inspections">
+      <EmptyState title="No pending inspections" message="Deliveries with Received or DiscrepancyReported status and received items will appear here." />
+    </Card>
+  )
+  return (
+    <Card title="Pending Inspections">
+      <div className="table-wrap">
+        <table className="data-table">
+          <thead><tr>
+            <th>Delivery Reference</th>
+            <th>Status</th>
+            <th>Items (received)</th>
+            <th>Total Received Qty</th>
+            <th>Total Damaged Qty</th>
+            <th>Action</th>
+          </tr></thead>
+          <tbody>{rows.map((d) => {
+            const totalReceived = d.items.reduce((sum, i) => sum + i.receivedQuantity, 0)
+            const totalDamaged = d.items.reduce((sum, i) => sum + i.damagedQuantity, 0)
+            return (
+              <tr key={d.deliveryId}>
+                <td><strong>{d.deliveryReference || `Delivery #${d.deliveryId}`}</strong></td>
+                <td><Badge value={d.status} /></td>
+                <td>{d.items.length}</td>
+                <td>{totalReceived}</td>
+                <td>{totalDamaged > 0 ? <span style={{ color: '#c0392b' }}>{totalDamaged}</span> : totalDamaged}</td>
+                <td>
+                  <button
+                    className="table-action"
+                    onClick={() => onBeginInspection(d)}
+                  >
+                    Start Inspection
+                  </button>
+                </td>
+              </tr>
+            )
+          })}</tbody>
+        </table>
+      </div>
+    </Card>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Start Inspection form — calls POST /api/inspections
+// ─────────────────────────────────────────────────────────────────────────────
+
+function StartInspectionForm({ delivery, onSuccess, onCancel }) {
+  const [notes, setNotes] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const locked = useRef(false)
+  const active = useRef(true)
+  useEffect(() => { active.current = true; return () => { active.current = false } }, [])
+
+  async function submit(e) {
+    e.preventDefault()
+    if (locked.current) return
+    locked.current = true
+    setBusy(true); setError('')
+    try {
+      const inspection = await qualityApi.startInspection({
+        deliveryId: delivery.deliveryId,
+        notes: notes.trim() || null
+      })
+      if (active.current) onSuccess(inspection)
+    } catch (err) {
+      if (active.current) setError(err.message)
+    } finally {
+      locked.current = false
+      if (active.current) setBusy(false)
+    }
+  }
+
+  return (
+    <Card title={`Start Inspection — ${delivery.deliveryReference || `Delivery #${delivery.deliveryId}`}`}>
+      <p>
+        Delivery <strong>{delivery.deliveryReference || `#${delivery.deliveryId}`}</strong> has{' '}
+        {delivery.items.length} item(s) ready for inspection.
+        The backend will record you as the inspector from your session token.
+      </p>
+      <form className="stack" onSubmit={submit}>
+        <TextInput
+          name="notes"
+          label="Initial notes (optional)"
+          multiline
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          disabled={busy}
+        />
+        {error && <ErrorState message={error} />}
+        <div className="quality-actions">
+          <Button type="submit" disabled={busy}>{busy ? 'Starting…' : 'Start Inspection'}</Button>
+          <Button variant="secondary" disabled={busy} onClick={onCancel}>Cancel</Button>
+        </div>
+      </form>
+    </Card>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Complete Inspection form — calls POST /api/inspections/{id}/complete
+// Backend validation rules are preserved:
+//   • Every positive-received delivery item must be included
+//   • accepted + rejected ≤ received
+//   • Accepted → zero rejected; Rejected → zero accepted; PartiallyAccepted → both > 0
+// ─────────────────────────────────────────────────────────────────────────────
+
+const DECISIONS = ['Accepted', 'PartiallyAccepted', 'Rejected']
+
+function CompleteInspectionForm({ inspection, onSuccess, onCancel }) {
+  const deliveryItems = inspection.deliveryItems ?? []
+
+  const initItems = () =>
+    deliveryItems.map((di) => ({
+      deliveryItemId: di.deliveryItemId,
+      receivedQuantity: di.receivedQuantity,
+      condition: '',
+      acceptedQuantity: '',
+      rejectedQuantity: '',
+      remarks: ''
+    }))
+
+  const [items, setItems] = useState(initItems)
+  const [decision, setDecision] = useState('')
+  const [notes, setNotes] = useState(inspection.notes ?? '')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const locked = useRef(false)
+  const active = useRef(true)
+  useEffect(() => { active.current = true; return () => { active.current = false } }, [])
+
+  function setItemField(idx, field, value) {
+    setItems((prev) => prev.map((it, i) => i === idx ? { ...it, [field]: value } : it))
+  }
+
+  function clientValidate() {
+    if (!decision) return 'Select an overall decision.'
+    for (const it of items) {
+      const acc = parseFloat(it.acceptedQuantity) || 0
+      const rej = parseFloat(it.rejectedQuantity) || 0
+      if (acc < 0 || rej < 0) return 'Quantities cannot be negative.'
+      if (acc + rej > it.receivedQuantity)
+        return `Item #${it.deliveryItemId}: accepted + rejected (${acc + rej}) exceeds received (${it.receivedQuantity}).`
+    }
+    const totalAcc = items.reduce((s, it) => s + (parseFloat(it.acceptedQuantity) || 0), 0)
+    const totalRej = items.reduce((s, it) => s + (parseFloat(it.rejectedQuantity) || 0), 0)
+    if (decision === 'Accepted' && totalRej > 0) return 'Accepted requires zero rejected quantity.'
+    if (decision === 'Accepted' && totalAcc === 0) return 'Accepted requires a positive accepted quantity.'
+    if (decision === 'Rejected' && totalAcc > 0) return 'Rejected requires zero accepted quantity.'
+    if (decision === 'Rejected' && totalRej === 0) return 'Rejected requires a positive rejected quantity.'
+    if (decision === 'PartiallyAccepted' && (totalAcc === 0 || totalRej === 0))
+      return 'PartiallyAccepted requires both accepted and rejected quantities.'
+    return null
+  }
+
+  async function submit(e) {
+    e.preventDefault()
+    const clientError = clientValidate()
+    if (clientError) { setError(clientError); return }
+    if (locked.current) return
+    locked.current = true
+    setBusy(true); setError('')
+    try {
+      const body = {
+        overallDecision: decision,
+        notes: notes.trim() || null,
+        items: items.map((it) => ({
+          deliveryItemId: it.deliveryItemId,
+          condition: it.condition.trim() || null,
+          acceptedQuantity: parseFloat(it.acceptedQuantity) || 0,
+          rejectedQuantity: parseFloat(it.rejectedQuantity) || 0,
+          remarks: it.remarks.trim() || null
+        }))
+      }
+      const completed = await qualityApi.completeInspection(inspection.id, body)
+      if (active.current) onSuccess(completed.id)
+    } catch (err) {
+      if (active.current) setError(err.message)
+    } finally {
+      locked.current = false
+      if (active.current) setBusy(false)
+    }
+  }
+
+  return (
+    <Card title={`Complete Inspection #${inspection.id} — ${inspection.deliveryReference || `Delivery #${inspection.deliveryId}`}`}>
+      <p>Fill in every delivery item below. The backend requires all positive-received items to be included.</p>
+      <form className="stack" onSubmit={submit}>
+        {/* Per-item form rows */}
+        {items.map((it, idx) => (
+          <div key={it.deliveryItemId} style={{ border: '1px solid #e2e8f0', borderRadius: 6, padding: 12, marginBottom: 8 }}>
+            <strong>Delivery Item #{it.deliveryItemId}</strong>
+            <span style={{ marginLeft: 8, color: '#888', fontSize: 13 }}>Received qty: {it.receivedQuantity}</span>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 8 }}>
+              <TextInput
+                name={`condition-${idx}`}
+                label="Condition"
+                value={it.condition}
+                onChange={(e) => setItemField(idx, 'condition', e.target.value)}
+                disabled={busy}
+              />
+              <TextInput
+                name={`remarks-${idx}`}
+                label="Remarks"
+                value={it.remarks}
+                onChange={(e) => setItemField(idx, 'remarks', e.target.value)}
+                disabled={busy}
+              />
+              <TextInput
+                name={`accepted-${idx}`}
+                label="Accepted quantity"
+                type="number"
+                min="0"
+                step="0.01"
+                value={it.acceptedQuantity}
+                onChange={(e) => setItemField(idx, 'acceptedQuantity', e.target.value)}
+                disabled={busy}
+              />
+              <TextInput
+                name={`rejected-${idx}`}
+                label="Rejected quantity"
+                type="number"
+                min="0"
+                step="0.01"
+                value={it.rejectedQuantity}
+                onChange={(e) => setItemField(idx, 'rejectedQuantity', e.target.value)}
+                disabled={busy}
+              />
+            </div>
+          </div>
+        ))}
+
+        {/* Overall decision and notes */}
+        <SelectInput
+          name="decision"
+          label="Overall decision"
+          value={decision}
+          onChange={(e) => setDecision(e.target.value)}
+          disabled={busy}
+          options={[
+            { value: '', label: '— Select decision —' },
+            ...DECISIONS.map((d) => ({ value: d, label: d }))
+          ]}
+        />
+        <TextInput
+          name="complete-notes"
+          label="Inspection notes"
+          multiline
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          disabled={busy}
+        />
+
+        {error && <ErrorState message={error} />}
+
+        <div className="quality-actions">
+          <Button type="submit" disabled={busy}>{busy ? 'Completing…' : 'Complete Inspection'}</Button>
+          <Button variant="secondary" disabled={busy} onClick={onCancel}>Cancel</Button>
+        </div>
+      </form>
+    </Card>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Inspection History list
+// ─────────────────────────────────────────────────────────────────────────────
 
 function InspectionHistory({ onOpen }) {
   const state = useRecord(qualityApi.listInspections)
   return <>
-    <PageHeader title="Quality Inspections" description="Inspection history recorded through the shared BuildWise API." actions={<Button variant="secondary" onClick={state.refresh}>Refresh</Button>} />
     <Card><ReadState state={state} empty="No inspections yet">{(rows) => <div className="table-wrap"><table className="data-table">
       <thead><tr><th>Inspection</th><th>Delivery</th><th>Inspector</th><th>Date</th><th>Status</th><th>Decision</th></tr></thead>
       <tbody>{rows.map((row) => <tr key={row.id}>
@@ -66,10 +422,15 @@ function InspectionHistory({ onOpen }) {
   </>
 }
 
-function InspectionDetail({ id, onCreate }) {
+// ─────────────────────────────────────────────────────────────────────────────
+// Inspection Detail (view + NCR creation trigger)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function InspectionDetail({ id, onCreate, onComplete }) {
   const state = useRecord(qualityApi.getInspection, id)
   return <><PageHeader title={`Inspection #${id}`} actions={<Button variant="secondary" onClick={state.refresh}>Refresh</Button>} />
     <ReadState state={state}>{(inspection) => <>
+      {onComplete && inspection.status !== 'Completed' && <Button onClick={() => onComplete(inspection)}>Complete inspection</Button>}
       <Card title="Inspection details"><dl className="quality-facts">
         <dt>Delivery</dt><dd>{inspection.deliveryReference || `Delivery #${inspection.deliveryId}`} (#{inspection.deliveryId})</dd>
         <dt>Inspector</dt><dd>{inspection.inspectorName || `User #${inspection.inspectorUserId}`}</dd>
@@ -88,6 +449,10 @@ function InspectionDetail({ id, onCreate }) {
     </>}</ReadState>
   </>
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Create NCR
+// ─────────────────────────────────────────────────────────────────────────────
 
 function CreateNcr({ inspection, item, onSaved, onCancel }) {
   const [issue, setIssue] = useState('')
@@ -122,6 +487,10 @@ function CreateNcr({ inspection, item, onSaved, onCancel }) {
   </Card>
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// NCR List
+// ─────────────────────────────────────────────────────────────────────────────
+
 function NcrList({ onOpen, onInspections }) {
   const state = useRecord(qualityApi.listNcrs)
   return <><PageHeader title="Non-Conformances" description="Track rejected inspection items through corrective action and closure." actions={<div className="quality-actions"><Button onClick={onInspections}>Choose inspection to create NCR</Button><Button variant="secondary" onClick={state.refresh}>Refresh</Button></div>} />
@@ -131,6 +500,10 @@ function NcrList({ onOpen, onInspections }) {
     </table></div>}</ReadState></Card>
   </>
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NCR Detail
+// ─────────────────────────────────────────────────────────────────────────────
 
 function NcrDetail({ id, onInspection }) {
   const state = useRecord(qualityApi.getNcr, id)

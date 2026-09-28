@@ -2,13 +2,20 @@ import React, { useEffect, useState } from 'react';
 import { deliveryService } from '../services/deliveryService';
 import DeliveryRiskPanel from '../components/DeliveryRiskPanel';
 import DeliveryDiscrepancyPanel from '../components/DeliveryDiscrepancyPanel';
+import ScheduleDeliveryModal from '../components/ScheduleDeliveryModal';
+import { useAuth } from '../../../auth/AuthContext';
+import { purchaseOrderRoles } from '../../../routes/routeConfig';
 import RecordDeliveryForm from './RecordDeliveryForm';
 
 export default function DeliveryDashboard() {
+  const { roles } = useAuth();
+  const canSchedule = purchaseOrderRoles.some(role => roles.includes(role));
+  const canReceive = roles.includes('ReceivingOfficer') || roles.includes('Administrator');
   const [expected, setExpected] = useState([]);
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [showScheduleModal, setShowScheduleModal] = useState(false);
   
   // Selection for recording delivery
   const [activeDelivery, setActiveDelivery] = useState(null);
@@ -67,12 +74,29 @@ export default function DeliveryDashboard() {
             Verify deliveries, reconcile quantities, and evaluate supplier risks (Component Ownership: Ramya)
           </p>
         </div>
+        {canSchedule && <button
+          type="button"
+          className="btn btn--primary"
+          onClick={() => setShowScheduleModal(true)}
+        >
+          + Schedule Delivery
+        </button>}
       </div>
+
+      {canSchedule && showScheduleModal && (
+        <ScheduleDeliveryModal
+          onCancel={() => setShowScheduleModal(false)}
+          onSuccess={() => {
+            setShowScheduleModal(false);
+            loadData();
+          }}
+        />
+      )}
 
       {error && <div className="error-state" style={{ marginBottom: '20px' }}>⚠️ {error}</div>}
 
       {/* Grid of stats */}
-      <div className="dashboard-stats" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginBottom: '24px' }}>
+      <div className="dashboard-stats delivery-stats">
         <div className="card stats-card" style={{ padding: '16px', textAlign: 'center', background: '#eaf2f8' }}>
           <h4 style={{ margin: '0 0 8px 0', color: '#2980b9' }}>Expected Shipments</h4>
           <span style={{ fontSize: '28px', fontWeight: 'bold', color: '#1f618d' }}>{expected.length}</span>
@@ -98,7 +122,7 @@ export default function DeliveryDashboard() {
       </div>
 
       {/* active record form */}
-      {activeDelivery && (
+      {canReceive && activeDelivery && (
         <div style={{ marginBottom: '30px' }}>
           <RecordDeliveryForm
             delivery={activeDelivery}
@@ -143,7 +167,7 @@ export default function DeliveryDashboard() {
         </div>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr', gap: '20px' }}>
+      <div className="delivery-columns">
         {/* Left Side: Expected and History Lists */}
         <div>
           {/* Expected Deliveries */}
@@ -172,20 +196,20 @@ export default function DeliveryDashboard() {
                         <span className={`badge ${getStatusBadgeClass(del.status)}`}>{del.status}</span>
                       </td>
                       <td style={{ padding: '10px', display: 'flex', gap: '8px' }}>
-                        <button 
+                        {canReceive && <button
                           className="btn btn--primary" 
                           style={{ padding: '6px 12px', fontSize: '12px' }}
                           onClick={() => setActiveDelivery(del)}
                         >
                           Receive
-                        </button>
-                        <button 
+                        </button>}
+                        {canSchedule && <button
                           className="btn btn--secondary" 
                           style={{ padding: '6px 12px', fontSize: '12px' }}
                           onClick={() => setActivePoForRisk(del.purchaseOrderId)}
                         >
                           AI Risk Check
-                        </button>
+                        </button>}
                       </td>
                     </tr>
                   ))}

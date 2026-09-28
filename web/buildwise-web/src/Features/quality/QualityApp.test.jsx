@@ -4,13 +4,14 @@ import QualityApp from './QualityApp'
 import { useAuth } from '../../auth/AuthContext'
 import { qualityApi } from './services/qualityApi'
 vi.mock('../../auth/AuthContext', () => ({ useAuth: vi.fn() }))
-vi.mock('./services/qualityApi', () => ({ qualityApi: Object.fromEntries(['listInspections', 'getInspection', 'listNcrs', 'getNcr', 'createNcr', 'updateCorrectiveAction', 'resolveNcr', 'closeNcr'].map((key) => [key, vi.fn()])) }))
+vi.mock('./services/qualityApi', () => ({ qualityApi: Object.fromEntries(['listInspections', 'getInspection', 'pendingDeliveries', 'listNcrs', 'getNcr', 'createNcr', 'updateCorrectiveAction', 'resolveNcr', 'closeNcr'].map((key) => [key, vi.fn()])) }))
 const inspection = { id: 1, deliveryId: 2, deliveryReference: 'DEL-240', inspectorUserId: 7, inspectorName: 'Inspector Silva', status: 'Completed', overallDecision: 'PartiallyAccepted', items: [{ id: 9, deliveryItemId: 3, condition: 'Damaged bags', acceptedQuantity: 235, rejectedQuantity: 5 }, { id: 10, deliveryItemId: 4, acceptedQuantity: 10, rejectedQuantity: 0 }], deliveryItems: [{ deliveryItemId: 3, receivedQuantity: 240 }] }
 const ncr = { id: 5, inspectionId: 1, inspectionItemId: 9, issueDescription: 'Wet cement', severity: 'High', status: 'Open', rejectedQuantity: 5 }
 beforeEach(() => {
   vi.resetAllMocks(); useAuth.mockReturnValue({ roles: ['QualityInspector'] })
   qualityApi.listInspections.mockResolvedValue([inspection]); qualityApi.getInspection.mockResolvedValue(inspection)
   qualityApi.listNcrs.mockResolvedValue([ncr]); qualityApi.getNcr.mockResolvedValue(ncr)
+  qualityApi.pendingDeliveries.mockResolvedValue([])
 })
 const renderInspections = () => render(<QualityApp section="Quality Inspections" />)
 const openInspection = async () => { fireEvent.click(await screen.findByRole('button', { name: 'Inspection #1' })); await screen.findByText('Damaged bags') }
