@@ -53,11 +53,9 @@ class _ReceiveDeliveryScreenState extends State<ReceiveDeliveryScreen> {
       final payload = {
         'notes': _notesController.text,
         'items': _items.map((i) => {
-          return {
-            'purchaseOrderItemId': i['purchaseOrderItemId'],
-            'receivedQuantity': i['receivedQuantity'],
-            'damagedQuantity': i['damagedQuantity'],
-          };
+          'purchaseOrderItemId': i['purchaseOrderItemId'],
+          'receivedQuantity': i['receivedQuantity'],
+          'damagedQuantity': i['damagedQuantity'],
         }).toList(),
       };
 

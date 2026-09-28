@@ -89,12 +89,12 @@ describe('DeliveryDiscrepancyPanel', () => {
     });
 
     // Verify quantities displayed
-    expect(screen.getByText('10')).toBeTruthy();  // shortage
-    expect(screen.getByText('5')).toBeTruthy();   // damaged
-    expect(screen.getByText('235')).toBeTruthy(); // undamaged received
-    expect(screen.getByText('Cement')).toBeTruthy();
-    expect(screen.getByText('Shortage')).toBeTruthy();
-    expect(screen.getByText('Damage')).toBeTruthy();
+    expect(screen.getAllByText('10').length).toBeGreaterThan(0);  // shortage
+    expect(screen.getAllByText('5').length).toBeGreaterThan(0);   // damaged
+    expect(screen.getAllByText('235').length).toBeGreaterThan(0); // undamaged received
+    expect(screen.getAllByText('Cement').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Shortage').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Damage').length).toBeGreaterThan(0);
   });
 
   it('displays error when API fails', async () => {

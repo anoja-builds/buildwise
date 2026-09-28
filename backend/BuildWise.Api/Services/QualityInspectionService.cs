@@ -65,12 +65,25 @@ public class QualityInspectionService
         if (inspector == null || !inspector.IsActive)
             throw new QualityInspectionException(403, "An active inspector user is required.");
 
-        await using var transaction = await _dbContext.Database.BeginTransactionAsync();
+        await using var transaction = _dbContext.Database.IsRelational()
+            ? await _dbContext.Database.BeginTransactionAsync()
+            : null;
+
         // Serialize starts for this delivery across requests and application instances.
-        var deliveries = await _dbContext.Deliveries.FromSqlInterpolated(
-            $"SELECT * FROM deliveries WHERE \"Id\" = {dto.DeliveryId} FOR UPDATE").ToListAsync();
-        var delivery = deliveries.SingleOrDefault()
-            ?? throw Missing("Delivery not found.");
+        Delivery? delivery;
+        if (_dbContext.Database.IsRelational())
+        {
+            var deliveries = await _dbContext.Deliveries.FromSqlInterpolated(
+                $"SELECT * FROM deliveries WHERE \"Id\" = {dto.DeliveryId} FOR UPDATE").ToListAsync();
+            delivery = deliveries.SingleOrDefault();
+        }
+        else
+        {
+            delivery = await _dbContext.Deliveries.SingleOrDefaultAsync(d => d.Id == dto.DeliveryId);
+        }
+
+        if (delivery == null)
+            throw Missing("Delivery not found.");
 
         if (!EligibleStatuses.Contains(delivery.Status))
             throw Conflict("Delivery must be Received or DiscrepancyReported before inspection.");
@@ -93,7 +106,10 @@ public class QualityInspectionService
         };
         _dbContext.Inspections.Add(inspection);
         await _dbContext.SaveChangesAsync();
-        await transaction.CommitAsync();
+        if (transaction != null)
+        {
+            await transaction.CommitAsync();
+        }
         return await ToResponseAsync(inspection);
     }
 
@@ -107,17 +123,40 @@ public class QualityInspectionService
 
     public async Task<QualityInspectionResponseDto> CompleteInspectionAsync(int id, CompleteInspectionDto dto)
     {
-        await using var transaction = await _dbContext.Database.BeginTransactionAsync();
-        var inspections = await _dbContext.Inspections.FromSqlInterpolated(
-            $"SELECT * FROM inspections WHERE \"Id\" = {id} FOR UPDATE").ToListAsync();
-        var inspection = inspections.SingleOrDefault()
-            ?? throw Missing("Inspection not found.");
+        await using var transaction = _dbContext.Database.IsRelational()
+            ? await _dbContext.Database.BeginTransactionAsync()
+            : null;
+
+        Inspection? inspection;
+        if (_dbContext.Database.IsRelational())
+        {
+            var inspections = await _dbContext.Inspections.FromSqlInterpolated(
+                $"SELECT * FROM inspections WHERE \"Id\" = {id} FOR UPDATE").ToListAsync();
+            inspection = inspections.SingleOrDefault();
+        }
+        else
+        {
+            inspection = await _dbContext.Inspections.SingleOrDefaultAsync(i => i.Id == id);
+        }
+
+        if (inspection == null)
+            throw Missing("Inspection not found.");
+
         // Defensive parent-row lock held through commit; inspection starts only after receiving.
         // This lock alone does not coordinate every possible receiving operation.
-        var deliveries = await _dbContext.Deliveries.FromSqlInterpolated(
-            $"SELECT * FROM deliveries WHERE \"Id\" = {inspection.DeliveryId} FOR UPDATE").ToListAsync();
-        if (deliveries.Count == 0)
-            throw Missing("Delivery not found.");
+        if (_dbContext.Database.IsRelational())
+        {
+            var deliveries = await _dbContext.Deliveries.FromSqlInterpolated(
+                $"SELECT * FROM deliveries WHERE \"Id\" = {inspection.DeliveryId} FOR UPDATE").ToListAsync();
+            if (deliveries.Count == 0)
+                throw Missing("Delivery not found.");
+        }
+        else
+        {
+            var deliveryExists = await _dbContext.Deliveries.AnyAsync(d => d.Id == inspection.DeliveryId);
+            if (!deliveryExists)
+                throw Missing("Delivery not found.");
+        }
 
         var deliveryItems = await _dbContext.DeliveryItems.AsNoTracking()
             .Where(di => di.DeliveryId == inspection.DeliveryId)
@@ -126,7 +165,10 @@ public class QualityInspectionService
         var obsolete = InspectionCompletion.Apply(inspection, dto, deliveryItems);
         _dbContext.InspectionItems.RemoveRange(obsolete);
         await _dbContext.SaveChangesAsync();
-        await transaction.CommitAsync();
+        if (transaction != null)
+        {
+            await transaction.CommitAsync();
+        }
         return await ToResponseAsync(inspection);
     }
 

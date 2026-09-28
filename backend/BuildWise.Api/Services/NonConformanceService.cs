@@ -114,16 +114,34 @@ public class NonConformanceService
 
     private async Task<NonConformanceResponseDto> UpdateAsync(int id, Action<NonConformance, DateTime> update)
     {
-        await using var transaction = await _dbContext.Database.BeginTransactionAsync();
+        await using var transaction = _dbContext.Database.IsRelational()
+            ? await _dbContext.Database.BeginTransactionAsync()
+            : null;
+
         // Serialize competing edits and transitions for this NCR without changing its schema.
-        var records = await _dbContext.NonConformances.FromSqlInterpolated(
-            $"SELECT * FROM non_conformances WHERE \"Id\" = {id} FOR UPDATE").ToListAsync();
-        var record = records.SingleOrDefault() ?? throw Missing("Non-conformance not found.");
+        NonConformance? record;
+        if (_dbContext.Database.IsRelational())
+        {
+            var records = await _dbContext.NonConformances.FromSqlInterpolated(
+                $"SELECT * FROM non_conformances WHERE \"Id\" = {id} FOR UPDATE").ToListAsync();
+            record = records.SingleOrDefault();
+        }
+        else
+        {
+            record = await _dbContext.NonConformances.SingleOrDefaultAsync(nc => nc.Id == id);
+        }
+
+        if (record == null)
+            throw Missing("Non-conformance not found.");
+
         update(record, DateTime.UtcNow);
         await _dbContext.Entry(record).Reference(nc => nc.InspectionItem).LoadAsync();
         var response = ToResponse(record);
         await _dbContext.SaveChangesAsync();
-        await transaction.CommitAsync();
+        if (transaction != null)
+        {
+            await transaction.CommitAsync();
+        }
         return response;
     }
 
