@@ -11,7 +11,7 @@ namespace BuildWise.Api.Controllers;
 
 [ApiController]
 [Route("api")]
-[Authorize(Roles = "ProcurementOfficer,ProcurementManager,Administrator")]
+[Authorize]
 public class PurchaseOrdersController : ControllerBase
 {
     private readonly ApplicationDbContext _db;
@@ -63,6 +63,7 @@ public class PurchaseOrdersController : ControllerBase
         [FromQuery] int pageSize = 50)
     {
         var query = _db.PurchaseOrders
+            .Include(po => po.Supplier)
             .Include(po => po.Quotation)
             .ThenInclude(q => q.Supplier)
             .Include(po => po.Items)
@@ -70,6 +71,9 @@ public class PurchaseOrdersController : ControllerBase
             .ThenInclude(qi => qi.MaterialRequestItem)
             .ThenInclude(mri => mri.Material)
             .AsQueryable();
+
+        if (User.IsInRole("ReceivingOfficer") && !User.IsInRole("ProcurementOfficer") && !User.IsInRole("ProcurementManager") && !User.IsInRole("Administrator"))
+            query = query.Where(p => p.Status == PurchaseOrderStatus.Confirmed || p.Status == PurchaseOrderStatus.InProgress || p.Status == PurchaseOrderStatus.Completed);
 
         if (!string.IsNullOrWhiteSpace(status) && Enum.TryParse<PurchaseOrderStatus>(status, true, out var poStatus))
         {
@@ -103,6 +107,7 @@ public class PurchaseOrdersController : ControllerBase
     public async Task<ActionResult<PurchaseOrderDto>> GetById(int id)
     {
         var po = await _db.PurchaseOrders
+            .Include(p => p.Supplier)
             .Include(p => p.Quotation)
             .ThenInclude(q => q.Supplier)
             .Include(p => p.Items)
@@ -114,6 +119,8 @@ public class PurchaseOrdersController : ControllerBase
         if (po is null)
             return NotFound($"Purchase Order #{id} not found.");
 
+        if (User.IsInRole("ReceivingOfficer") && !User.IsInRole("ProcurementOfficer") && !User.IsInRole("ProcurementManager") && !User.IsInRole("Administrator")
+            && po.Status is PurchaseOrderStatus.Created or PurchaseOrderStatus.Cancelled) return Forbid();
         return Ok(MapToPurchaseOrderDto(po));
     }
 
@@ -121,14 +128,24 @@ public class PurchaseOrdersController : ControllerBase
     /// Update purchase order status (Confirmed, InProgress, Completed, Cancelled).
     /// </summary>
     [HttpPatch("purchase-orders/{id:int}/status")]
+    [Authorize(Roles = "ProcurementOfficer,ProcurementManager,Administrator")]
     public async Task<IActionResult> UpdateStatus(int id, [FromBody] UpdatePurchaseOrderStatusDto dto)
     {
         var po = await _db.PurchaseOrders.FindAsync(id);
         if (po is null)
             return NotFound($"Purchase Order #{id} not found.");
 
-        if (!Enum.TryParse<PurchaseOrderStatus>(dto.Status, true, out var newStatus))
+        if (!Enum.TryParse<PurchaseOrderStatus>(dto.Status, true, out var newStatus) || !Enum.IsDefined(newStatus))
             return BadRequest($"Invalid status '{dto.Status}'. Allowed: Confirmed, InProgress, Completed, Cancelled.");
+
+        // Procurement confirms or cancels; receiving owns progress/completion.
+        var allowed = po.Status switch
+        {
+            PurchaseOrderStatus.Created => newStatus is PurchaseOrderStatus.Confirmed or PurchaseOrderStatus.Cancelled,
+            PurchaseOrderStatus.Confirmed => newStatus == PurchaseOrderStatus.Cancelled,
+            _ => false
+        };
+        if (!allowed) return BadRequest($"Cannot change order from {po.Status} to {newStatus}.");
 
         var oldStatus = po.Status;
         po.Status = newStatus;

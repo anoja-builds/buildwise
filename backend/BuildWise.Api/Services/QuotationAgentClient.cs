@@ -79,7 +79,7 @@ public class QuotationAgentClient
 
     public AgentRecommendationDto ExecuteFallbackAnalysis(AgentAnalyzePayload payload)
     {
-        var warnings = new List<string>();
+        var warnings = new List<string> { "Agent service unavailable: C# deterministic fallback used; no external AI provider call." };
         var eligible = new List<(AgentQuotationInput Quotation, bool CoversAll)>();
 
         foreach (var q in payload.quotations)
@@ -107,7 +107,7 @@ public class QuotationAgentClient
                 }
             }
 
-            eligible.Add((q, coversAll));
+            if (coversAll) eligible.Add((q, coversAll));
         }
 
         var ranked = eligible
@@ -123,7 +123,9 @@ public class QuotationAgentClient
                 RecommendedSupplierName: null,
                 Rationale: "No eligible quotations met the procurement criteria.",
                 RankedAlternatives: new List<RankedAlternativeDto>(),
-                Warnings: warnings
+                Warnings: warnings,
+                ExecutionMode: "CSharpDeterministicFallback",
+                ToolsUsed: []
             );
         }
 
@@ -149,7 +151,9 @@ public class QuotationAgentClient
             RecommendedSupplierName: top.Quotation.supplier_name,
             Rationale: rationale,
             RankedAlternatives: alternatives,
-            Warnings: warnings
+            Warnings: warnings,
+                ExecutionMode: "CSharpDeterministicFallback",
+                ToolsUsed: []
         );
     }
 }

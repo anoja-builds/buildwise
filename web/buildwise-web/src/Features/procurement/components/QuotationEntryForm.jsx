@@ -19,7 +19,7 @@ export default function QuotationEntryForm({ requestDetail, onCreated }) {
   const [submitting, setSubmitting] = useState(false)
 
   useEffect(() => {
-    procurementApi.listSuppliers({ status: 'Active', pageSize: 200 }).then((data) => setSuppliers(data.items)).catch(() => setSuppliers([]))
+    procurementApi.listSuppliers({ status: 'Active', pageSize: 200 }).then((data) => setSuppliers(data.items)).catch(err => setError(err.message || 'Could not load suppliers.'))
   }, [])
 
   const items = requestDetail?.items || []

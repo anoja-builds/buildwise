@@ -9,14 +9,19 @@ enum ProcurementStatus {
   quotationsInProgress,
   awaitingApproval,
   purchaseOrderCreated,
-  rejected;
+  rejected,
+  revisionRequested,
+  failed;
 
   static ProcurementStatus fromApi(String value) => switch (value) {
     'QuotationsInProgress' => ProcurementStatus.quotationsInProgress,
     'AwaitingApproval' => ProcurementStatus.awaitingApproval,
     'PurchaseOrderCreated' => ProcurementStatus.purchaseOrderCreated,
     'Rejected' => ProcurementStatus.rejected,
-    _ => ProcurementStatus.notStarted,
+    'NotStarted' => ProcurementStatus.notStarted,
+    'RevisionRequested' => ProcurementStatus.revisionRequested,
+    'Failed' => ProcurementStatus.failed,
+    _ => throw FormatException('Unknown procurement status: $value'),
   };
 }
 
@@ -25,17 +30,20 @@ class ProcurementStatusInfo {
     required this.materialRequestId,
     required this.status,
     this.purchaseOrderId,
+    this.purchaseOrderStatus,
   });
 
   final int materialRequestId;
   final ProcurementStatus status;
   final int? purchaseOrderId;
+  final String? purchaseOrderStatus;
 
   factory ProcurementStatusInfo.fromJson(Map<String, dynamic> json) =>
       ProcurementStatusInfo(
         materialRequestId: json['materialRequestId'] as int,
         status: ProcurementStatus.fromApi(json['status'] as String),
         purchaseOrderId: json['purchaseOrderId'] as int?,
+        purchaseOrderStatus: json['purchaseOrderStatus'] as String?,
       );
 }
 

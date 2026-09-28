@@ -37,7 +37,8 @@ public class DeliveriesController : ControllerBase
             .Include(d => d.Items)
                 .ThenInclude(di => di.PurchaseOrderItem)
                     .ThenInclude(poi => poi!.Material)
-            .Where(d => d.Status == DeliveryStatus.Scheduled || d.Status == DeliveryStatus.InTransit)
+            .Where(d => (d.Status == DeliveryStatus.Scheduled || d.Status == DeliveryStatus.InTransit)
+                && (d.PurchaseOrder!.Status == PurchaseOrderStatus.Confirmed || d.PurchaseOrder.Status == PurchaseOrderStatus.InProgress))
             .OrderByDescending(d => d.CreatedAt)
             .ToListAsync();
 
@@ -181,6 +182,9 @@ public class DeliveriesController : ControllerBase
             return BadRequest("Purchase Order not found.");
         }
 
+        if (purchaseOrder.Status is not (PurchaseOrderStatus.Confirmed or PurchaseOrderStatus.InProgress))
+            return BadRequest("Only confirmed or in-progress purchase orders can be scheduled.");
+
         var delivery = new Delivery
         {
             PurchaseOrderId = dto.PurchaseOrderId,
@@ -234,8 +238,8 @@ public class DeliveriesController : ControllerBase
             return BadRequest("This delivery has already been processed.");
         if (delivery.PurchaseOrder == null || delivery.PurchaseOrder.Items.Count == 0)
             return BadRequest("Delivery must belong to a purchase order with items.");
-        if (delivery.PurchaseOrder.Status == PurchaseOrderStatus.Cancelled)
-            return BadRequest("Cannot receive a cancelled purchase order.");
+        if (delivery.PurchaseOrder.Status is not (PurchaseOrderStatus.Confirmed or PurchaseOrderStatus.InProgress))
+            return BadRequest("Only confirmed or in-progress purchase orders can be received.");
         if (!await _dbContext.Users.AnyAsync(u => u.Id == actorId && u.IsActive))
             return Forbid();
 

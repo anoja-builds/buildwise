@@ -21,6 +21,13 @@ public class ProcurementWorkflowController : ControllerBase
         _logger = logger;
     }
 
+    [HttpGet("material-requests/{requestId:int}/procurement-workflow")]
+    public async Task<IActionResult> GetLatestWorkflow(int requestId)
+    {
+        var workflow = await _workflowService.GetLatestWorkflowAsync(requestId);
+        return Ok(workflow);
+    }
+
     /// <summary>
     /// Starts the Quotation & Supplier Analysis Agent workflow for an approved material request (§4 / §7).
     /// </summary>
@@ -92,7 +99,8 @@ public class ProcurementWorkflowController : ControllerBase
                 workflowId = approval.AgentWorkflowId,
                 decision = approval.Decision.ToString(),
                 comment = approval.Comment,
-                decisionDate = approval.DecisionDate
+                decisionDate = approval.DecisionDate,
+                purchaseOrderId = (await _workflowService.GetWorkflowDetailsAsync(workflowId))?.PurchaseOrderId
             });
         }
         catch (ArgumentException ex)

@@ -26,7 +26,9 @@ public record AgentRecommendationDto(
     string? RecommendedSupplierName,
     string Rationale,
     List<RankedAlternativeDto> RankedAlternatives,
-    List<string> Warnings
+    List<string> Warnings,
+    string ExecutionMode = "Unknown",
+    List<string>? ToolsUsed = null
 );
 
 public record ProcurementValidationResultDto(
@@ -64,5 +66,6 @@ public record ProcurementWorkflowDetailsDto(
     ProcurementValidationResultDto? Validation,
     List<AgentWorkflowStepDto> Steps,
     DateTime CreatedAt,
-    DateTime UpdatedAt
+    DateTime UpdatedAt,
+    int? PurchaseOrderId = null
 );

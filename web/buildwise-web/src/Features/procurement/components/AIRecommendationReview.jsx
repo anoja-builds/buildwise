@@ -25,6 +25,9 @@ export default function AIRecommendationReview({ workflow }) {
           {validation && <StatusBadge status={validation.isValid ? 'success' : 'danger'}>{validation.isValid ? 'Deterministic validation passed' : 'Deterministic validation failed'}</StatusBadge>}
         </div>
 
+        <p role="status">Analysis mode: {recommendation?.executionMode === 'ProviderBacked' ? 'Live AI provider rationale with deterministic selection' : recommendation?.executionMode?.includes('Fallback') ? `${recommendation.executionMode}: no successful external AI call` : 'Not recorded'}</p>
+        {workflow.finalOutcome && <p>{workflow.finalOutcome}</p>}
+        <p>{workflow.objective}</p>
         {!recommendation || !recommendation.recommendedSupplierId ? (
           <EmptyState title="No eligible recommendation" message="The agent could not recommend a winner — check warnings and validation errors below." />
         ) : (
@@ -81,6 +84,8 @@ export default function AIRecommendationReview({ workflow }) {
                 <div>
                   <p><strong>{step.stepName}</strong> <span className="muted">({step.agentRole})</span></p>
                   <span className="activity-time">{step.status}{step.completedAt ? ` · ${new Date(step.completedAt).toLocaleString()}` : ''}</span>
+                  {step.structuredResult && <details><summary>Structured output / plan</summary><pre style={{ whiteSpace: 'pre-wrap' }}>{step.structuredResult}</pre></details>}
+                  {step.validationResult && <details><summary>Validation result</summary><pre style={{ whiteSpace: 'pre-wrap' }}>{step.validationResult}</pre></details>}
                   {step.errorMessage && <div className="field__error">{step.errorMessage}</div>}
                 </div>
               </li>

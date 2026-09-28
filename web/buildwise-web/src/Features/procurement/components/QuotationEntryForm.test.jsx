@@ -1,7 +1,12 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import QuotationEntryForm from './QuotationEntryForm'
+
+vi.mock('../services/procurementApi', () => ({ procurementApi: { listSuppliers: vi.fn(), createQuotation: vi.fn() } }))
+import { procurementApi } from '../services/procurementApi'
+import { MOCK } from '../services/procurementFixtures.test-data'
+beforeEach(() => { vi.clearAllMocks(); procurementApi.listSuppliers.mockResolvedValue({ items: MOCK.suppliers.filter(s => s.status === 'Active') }) })
 
 const requestDetail = {
   id: 101,

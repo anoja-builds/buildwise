@@ -35,7 +35,7 @@ export default function QuotationComparisonView({ comparison, onRunAnalysis, run
                 {comparison.quotations.map((q) => {
                   const offer = row.offers.find((o) => o.quotationId === q.id)
                   if (!offer) return <td key={q.id} className="offer-cell offer-cell--ineligible">Not quoted</td>
-                  const ineligible = offer.supplierStatus !== 'Active'
+                  const ineligible = offer.supplierStatus !== 'Active' || !offer.coversFullQuantity || q.validUntil < new Date().toISOString().slice(0, 10)
                   return (
                     <td key={q.id} className={`offer-cell ${ineligible ? 'offer-cell--ineligible' : ''}`}>
                       <div className="offer-cell__price">{offer.unitPrice.toLocaleString()} / {row.unit}</div>
@@ -48,6 +48,10 @@ export default function QuotationComparisonView({ comparison, onRunAnalysis, run
                 })}
               </tr>
             ))}
+            <tr>
+              <td><strong>Validity</strong></td>
+              {comparison.quotations.map(q => <td key={q.id}>Valid until {q.validUntil}{q.validUntil < new Date().toISOString().slice(0, 10) ? ' (Expired)' : ''}</td>)}
+            </tr>
             <tr>
               <td><strong>Total</strong></td>
               {comparison.quotations.map((q) => <td key={q.id}><strong>{q.totalAmount.toLocaleString()}</strong></td>)}

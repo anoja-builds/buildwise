@@ -250,3 +250,34 @@ if __name__ == "__main__":
     print("[PASS] test_prompt_injection_in_supplier_name_is_inert passed")
     print("ALL AGENT TESTS PASSED SUCCESSFULLY!")
 
+
+
+def test_partial_only_is_never_recommended_or_ranked():
+    response = client.post("/analyze", json={
+        "material_request_id": 8, "requested_quantities": {"44": 250},
+        "quotations": [{"quotation_id": 33, "supplier_id": 12, "supplier_name": "Partial supplier",
+            "supplier_status": "Active", "quantity_offered": {"44": 200}, "unit_prices": {"44": 2},
+            "total_amount": 400, "valid": True}]
+    })
+    assert response.status_code == 200
+    assert response.json()["recommended_quotation_id"] is None
+    assert response.json()["ranked_alternatives"] == []
+    assert "200/250" in " ".join(response.json()["warnings"])
+
+
+def test_execution_provenance_is_explicit_for_fallback_and_provider():
+    payload = {"material_request_id": 8, "requested_quantities": {"44": 250},
+        "quotations": [{"quotation_id": 33, "supplier_id": 12, "supplier_name": "Supplier",
+            "supplier_status": "Active", "quantity_offered": {"44": 250}, "unit_prices": {"44": 2},
+            "total_amount": 500, "valid": True}]}
+    with patch.object(quotation_agent, "_anthropic_client", None):
+        result = client.post("/analyze", json=payload).json()
+    assert result["execution_mode"] == "PythonDeterministicFallback"
+    assert result["tools_used"] == ["filter_eligible", "rank_by_total"]
+    assert "no successful external AI" in " ".join(result["warnings"])
+    mock = MagicMock()
+    mock.messages.create.return_value.content = [MagicMock(text="Mock provider explanation.")]
+    with patch.object(quotation_agent, "_anthropic_client", mock):
+        result = client.post("/analyze", json=payload).json()
+    assert result["execution_mode"] == "ProviderBacked"
+    assert result["recommended_quotation_id"] == 33

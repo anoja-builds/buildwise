@@ -25,6 +25,29 @@ public class MaterialRequestsController : ControllerBase
         _planningAgentService = planningAgentService;
     }
 
+    [HttpGet("/api/material-requests/{id:int}/procurement-status")]
+    [Authorize(Roles = "SiteEngineer,Administrator")]
+    public async Task<IActionResult> GetProcurementStatus(int id)
+    {
+        if (!User.TryGetUserId(out var actorId)) return Unauthorized();
+        var request = await _dbContext.MaterialRequests.AsNoTracking().SingleOrDefaultAsync(r => r.Id == id);
+        if (request == null) return NotFound();
+        if (request.RequestedByUserId != actorId && !User.IsInRole("Administrator")) return Forbid();
+        var order = await _dbContext.PurchaseOrders.AsNoTracking()
+            .Where(p => p.Status != PurchaseOrderStatus.Cancelled && p.Quotation != null && p.Quotation.MaterialRequestId == id)
+            .OrderByDescending(p => p.Id).FirstOrDefaultAsync();
+        var workflow = await _dbContext.AgentWorkflows.AsNoTracking()
+            .Where(w => w.MaterialRequestId == id && w.Steps.Any(s => s.AgentRole == "QuotationSupplierAnalysisAgent"))
+            .OrderByDescending(w => w.CreatedAt).ThenByDescending(w => w.Id).FirstOrDefaultAsync();
+        var status = order != null ? "PurchaseOrderCreated"
+            : request.Status == MaterialRequestStatus.Rejected || workflow?.ApprovalStatus == AgentApprovalStatus.Rejected ? "Rejected"
+            : workflow?.Status == WorkflowStatus.AwaitingApproval ? "AwaitingApproval"
+            : workflow?.ApprovalStatus == AgentApprovalStatus.RevisionRequested ? "RevisionRequested"
+            : workflow?.Status == WorkflowStatus.Failed ? "Failed"
+            : await _dbContext.Quotations.AnyAsync(q => q.MaterialRequestId == id) ? "QuotationsInProgress" : "NotStarted";
+        return Ok(new BuildWise.Api.DTOs.ProcurementStatusDto(id, status, order?.Id, order?.Status.ToString()));
+    }
+
     [HttpGet("options")]
     [Authorize(Roles = "SiteEngineer,ProjectManager,Administrator")]
     public async Task<IActionResult> GetOptions()
@@ -44,6 +67,7 @@ public class MaterialRequestsController : ControllerBase
     {
         var query = _dbContext.MaterialRequests
             .Include(r => r.Project)
+            .Include(r => r.Quotations)
             .Include(r => r.Items)
                 .ThenInclude(i => i.Material)
             .AsQueryable();
@@ -71,6 +95,7 @@ public class MaterialRequestsController : ControllerBase
             Status = r.Status.ToString(),
             r.CreatedAt,
             ItemsCount = r.Items.Count,
+            QuotationCount = r.Quotations.Count,
             Items = r.Items.Select(i => new
             {
                 i.Id,
@@ -91,6 +116,7 @@ public class MaterialRequestsController : ControllerBase
     {
         var r = await _dbContext.MaterialRequests
             .Include(r => r.Project)
+            .Include(r => r.Quotations)
             .Include(r => r.Items)
                 .ThenInclude(i => i.Material)
             .FirstOrDefaultAsync(req => req.Id == id);

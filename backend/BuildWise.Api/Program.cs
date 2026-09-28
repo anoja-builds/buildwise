@@ -102,6 +102,9 @@ builder.Services.AddCors(options =>
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
+    // Legacy and structured procurement DTOs share names in different namespaces.
+    var defaultSchemaId = new Swashbuckle.AspNetCore.SwaggerGen.SchemaGeneratorOptions().SchemaIdSelector;
+    c.CustomSchemaIds(type => $"{type.Namespace}.{defaultSchemaId(type)}".Replace('+', '.'));
     c.SwaggerDoc("v1", new() { Title = "BuildWise API", Version = "v1", Description = "Supplier, Quotation & Procurement Management, Delivery & Receiving, and shared authentication" });
 
     c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme

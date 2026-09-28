@@ -112,8 +112,8 @@ public class ProcurementValidationService
         }
 
         // Rule 6: Recalculate quotation total amount (must match sum of quantity * unit_price)
-        var calculatedTotal = quotation.Items.Sum(i => i.Quantity * i.UnitPrice);
-        if (Math.Abs(calculatedTotal - quotation.TotalAmount) > 0.01m)
+        var calculatedTotal = decimal.Round(quotation.Items.Sum(i => i.Quantity * i.UnitPrice), 2, MidpointRounding.AwayFromZero);
+        if (Math.Abs(calculatedTotal - quotation.TotalAmount) != 0)
         {
             result.Errors.Add($"Quotation total mismatch: recorded total is {quotation.TotalAmount}, but calculated sum is {calculatedTotal}.");
         }
@@ -174,6 +174,9 @@ public class ProcurementValidationService
             result.Errors.Add($"Workflow #{workflowId} does not exist.");
             return result;
         }
+
+        if (workflow.PurchaseOrderId.HasValue)
+            result.Errors.Add($"Workflow #{workflowId} already created Purchase Order #{workflow.PurchaseOrderId}. A new approval is required for a replacement order.");
 
         // Rule 8: Blocked until an agent_approvals row exists with decision = Approved
         var hasApprovedDecision = workflow.Approvals

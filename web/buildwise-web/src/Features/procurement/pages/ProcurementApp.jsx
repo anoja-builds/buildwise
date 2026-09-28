@@ -1,4 +1,3 @@
-import { useEffect, useState } from 'react'
 import '../procurement.css'
 import ProcurementDashboard from './ProcurementDashboard'
 import SupplierList from './SupplierList'
@@ -7,7 +6,6 @@ import ApprovedRequestsQueue from './ApprovedRequestsQueue'
 import RequestWorkspace from './RequestWorkspace'
 import PurchaseOrderList from './PurchaseOrderList'
 import PurchaseOrderDetail from './PurchaseOrderDetail'
-import { procurementApi, isUsingMockData } from '../services/procurementApi'
 import { useAuth } from '../../../auth/AuthContext'
 
 /// One procurement screen. The sidebar (AppLayout) decides which section is
@@ -26,13 +24,7 @@ export default function ProcurementApp({
   onNavigate,
 }) {
   const { hasRole } = useAuth()
-  const role = hasRole('ProcurementManager') ? 'Manager' : hasRole('ProcurementOfficer') ? 'Officer' : 'ReadOnly'
-  const [mockMode, setMockMode] = useState(false)
-
-  useEffect(() => {
-    procurementApi.listSuppliers().catch(() => {}).finally(() => setMockMode(isUsingMockData()))
-  }, [])
-
+  const role = (hasRole('ProcurementManager') || hasRole('Administrator')) ? 'Manager' : hasRole('ProcurementOfficer') ? 'Officer' : 'ReadOnly'
   let content
   if (section === 'Suppliers') {
     content = supplierId
@@ -52,9 +44,8 @@ export default function ProcurementApp({
 
   return (
     <div className="stack">
-      {role === 'ReadOnly' && <div className="proc-mock-banner">Your account has no Procurement Officer or Procurement Manager role — you can view procurement screens but cannot record quotations, run AI analysis, or approve recommendations.</div>}
-      {mockMode && <div className="proc-mock-banner">Backend or agent service not reachable — showing demo data so the UI stays interactive. Start BuildWise.Api to see live data.</div>}
-      {content}
+      {role === 'ReadOnly' && <div className="proc-mock-banner">Your account has no Procurement Officer or Procurement Manager role — procurement data and actions require an authorized account.</div>}
+      {role !== 'ReadOnly' && content}
     </div>
   )
 }

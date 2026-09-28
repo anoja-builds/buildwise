@@ -3,7 +3,7 @@ import { Button, Card, ErrorState, LoadingState, PageHeader, SelectInput, Status
 import { procurementApi } from '../services/procurementApi'
 import { statusTone } from '../components/statusTone'
 
-const NEXT_STATUS = { Created: ['Confirmed', 'Cancelled'], Confirmed: ['InProgress', 'Cancelled'], InProgress: ['Completed', 'Cancelled'], Completed: [], Cancelled: [] }
+const NEXT_STATUS = { Created: ['Confirmed', 'Cancelled'], Confirmed: ['Cancelled'], InProgress: [], Completed: [], Cancelled: [] }
 
 export default function PurchaseOrderDetail({ orderId, onBack }) {
   const [order, setOrder] = useState(null)

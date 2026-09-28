@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart' hide ErrorWidget;
 
 import '../../../core/widgets/widgets.dart';
@@ -30,7 +32,8 @@ class MaterialRequestProcurementView extends StatefulWidget {
 }
 
 class _MaterialRequestProcurementViewState
-    extends State<MaterialRequestProcurementView> {
+    extends State<MaterialRequestProcurementView>
+    with WidgetsBindingObserver {
   late final ProcurementStatusService _service =
       widget.service ?? ProcurementStatusService();
   late final NotificationService _notifications =
@@ -41,14 +44,29 @@ class _MaterialRequestProcurementViewState
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _future = _load(notifyOnChange: false);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && mounted) _refresh();
   }
 
   Future<ProcurementStatusInfo> _load({required bool notifyOnChange}) async {
     final info = await _service.getStatus(widget.materialRequestId);
 
-    if (notifyOnChange && _lastNotifiedStatus != null && _lastNotifiedStatus != info.status) {
-      await _notifyStatusChange(info);
+    if (notifyOnChange &&
+        _lastNotifiedStatus != null &&
+        _lastNotifiedStatus != info.status) {
+      // Device permission prompts must not delay or hide the fetched status.
+      unawaited(_notifyStatusChange(info).catchError((Object _) {}));
     }
     _lastNotifiedStatus = info.status;
 
@@ -61,13 +79,15 @@ class _MaterialRequestProcurementViewState
         await _notifications.showProcurementUpdate(
           id: widget.materialRequestId,
           title: 'Procurement recommendation awaiting approval',
-          body: 'Request #${info.materialRequestId} has a recommendation ready for manager review.',
+          body:
+              'Request #${info.materialRequestId} has a recommendation ready for manager review.',
         );
       case ProcurementStatus.purchaseOrderCreated:
         await _notifications.showProcurementUpdate(
           id: widget.materialRequestId,
           title: 'Purchase Order created',
-          body: 'Request #${info.materialRequestId} — PO #${info.purchaseOrderId} has been created.',
+          body:
+              'Request #${info.materialRequestId} — PO #${info.purchaseOrderId} has been created.',
         );
       default:
         break;
@@ -75,7 +95,9 @@ class _MaterialRequestProcurementViewState
   }
 
   void _refresh() {
-    setState(() => _future = _load(notifyOnChange: true));
+    setState(() {
+      _future = _load(notifyOnChange: true);
+    });
   }
 
   @override

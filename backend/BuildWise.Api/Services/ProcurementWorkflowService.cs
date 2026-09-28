@@ -54,6 +54,9 @@ public class ProcurementWorkflowService
             .Include(q => q.Items)
             .ToListAsync();
 
+        if (await _db.PurchaseOrders.AnyAsync(p => p.Quotation != null && p.Quotation.MaterialRequestId == materialRequestId && p.Status != PurchaseOrderStatus.Cancelled))
+            throw new InvalidOperationException("This request already has a purchase order.");
+
         if (quotations.Count == 0)
             throw new InvalidOperationException($"No active or submitted quotations recorded for request #{materialRequestId}.");
 
@@ -107,8 +110,8 @@ public class ProcurementWorkflowService
             supplier_id: q.SupplierId,
             supplier_name: q.Supplier?.Name ?? $"Supplier #{q.SupplierId}",
             supplier_status: q.Supplier?.Status.ToString() ?? "Unknown",
-            quantity_offered: q.Items.ToDictionary(i => i.MaterialRequestItemId.ToString(), i => i.Quantity),
-            unit_prices: q.Items.ToDictionary(i => i.MaterialRequestItemId.ToString(), i => i.UnitPrice),
+            quantity_offered: q.Items.GroupBy(i => i.MaterialRequestItemId).ToDictionary(g => g.Key.ToString(), g => g.Sum(i => i.Quantity)),
+            unit_prices: q.Items.GroupBy(i => i.MaterialRequestItemId).ToDictionary(g => g.Key.ToString(), g => g.First().UnitPrice),
             total_amount: q.TotalAmount,
             valid: q.ValidUntil >= today
         )).ToList();
@@ -162,7 +165,7 @@ public class ProcurementWorkflowService
             var validationStep = new AgentWorkflowStep
             {
                 AgentWorkflowId = workflow.Id,
-                AgentRole = "ProcurementValidationAgent",
+                AgentRole = "DeterministicValidation",
                 StepName = "Deterministic business-rule validation",
                 StepOrder = 3,
                 Status = WorkflowStepStatus.Running,
@@ -254,6 +257,15 @@ public class ProcurementWorkflowService
         }
     }
 
+    public async Task<ProcurementWorkflowDetailsDto?> GetLatestWorkflowAsync(int requestId)
+    {
+        var id = await _db.AgentWorkflows.Where(w => w.MaterialRequestId == requestId
+                && w.Steps.Any(s => s.AgentRole == AnalysisAgentRole))
+            .OrderByDescending(w => w.CreatedAt).ThenByDescending(w => w.Id)
+            .Select(w => (int?)w.Id).FirstOrDefaultAsync();
+        return id.HasValue ? await GetWorkflowDetailsAsync(id.Value) : null;
+    }
+
     public async Task<ProcurementWorkflowDetailsDto?> GetWorkflowDetailsAsync(int workflowId)
     {
         var workflow = await _db.AgentWorkflows
@@ -324,12 +336,18 @@ public class ProcurementWorkflowService
             validation,
             stepDtos,
             workflow.CreatedAt,
-            workflow.UpdatedAt
+            workflow.UpdatedAt,
+            workflow.PurchaseOrderId
         );
     }
 
     public async Task<AgentApproval> RecordDecisionAsync(int workflowId, WorkflowDecisionDto dto)
     {
+        var requestId = await _db.AgentWorkflows.Where(w => w.Id == workflowId)
+            .Select(w => w.MaterialRequestId).SingleOrDefaultAsync();
+        if (requestId is null) throw new ArgumentException($"Procurement workflow #{workflowId} not found.");
+        await using var requestLock = await ProcurementRequestLock.AcquireAsync(_db, requestId.Value);
+
         var workflow = await _db.AgentWorkflows
             .Include(w => w.Steps)
             .FirstOrDefaultAsync(w => w.Id == workflowId);
@@ -390,11 +408,17 @@ public class ProcurementWorkflowService
             await _db.SaveChangesAsync();
         }
 
+        if (requestLock != null) await requestLock.CommitAsync();
         return approval;
     }
 
     public async Task<PurchaseOrder> CreatePurchaseOrderFromWorkflowAsync(int workflowId)
     {
+        var requestId = await _db.AgentWorkflows.Where(w => w.Id == workflowId)
+            .Select(w => w.MaterialRequestId).SingleOrDefaultAsync();
+        if (requestId is null) throw new ArgumentException($"Procurement workflow #{workflowId} not found.");
+        await using var requestLock = await ProcurementRequestLock.AcquireAsync(_db, requestId.Value);
+
         var workflow = await _db.AgentWorkflows
             .Include(w => w.Steps)
             .FirstOrDefaultAsync(w => w.Id == workflowId);
@@ -402,7 +426,9 @@ public class ProcurementWorkflowService
         if (workflow is null)
             throw new ArgumentException($"Workflow #{workflowId} not found.");
 
-        return await CreatePurchaseOrderInternalAsync(workflow);
+        var order = await CreatePurchaseOrderInternalAsync(workflow);
+        if (requestLock != null) await requestLock.CommitAsync();
+        return order;
     }
 
     private async Task<PurchaseOrder> CreatePurchaseOrderInternalAsync(AgentWorkflow workflow)
@@ -413,7 +439,7 @@ public class ProcurementWorkflowService
             throw new InvalidOperationException($"Cannot create Purchase Order: {string.Join("; ", valResult.Errors)}");
 
         // 2. Retrieve winning recommendation from structured_result
-        var lastStep = workflow.Steps.LastOrDefault(s => !string.IsNullOrEmpty(s.StructuredResult));
+        var lastStep = workflow.Steps.OrderBy(s => s.StepOrder).LastOrDefault(s => s.AgentRole == AnalysisAgentRole && !string.IsNullOrEmpty(s.StructuredResult));
         if (lastStep is null)
             throw new InvalidOperationException("No recommendation payload found in workflow steps.");
 
@@ -422,7 +448,8 @@ public class ProcurementWorkflowService
             throw new InvalidOperationException("Recommended quotation ID not present in workflow result.");
 
         var winnerQuotation = await _db.Quotations
-            .Include(q => q.Items)
+            .Include(q => q.Items).ThenInclude(i => i.MaterialRequestItem)
+            .Include(q => q.MaterialRequest)
             .Include(q => q.Supplier)
             .FirstOrDefaultAsync(q => q.Id == recommendation.RecommendedQuotationId.Value);
 
@@ -443,7 +470,7 @@ public class ProcurementWorkflowService
         // (The in-memory provider used by unit tests doesn't support
         // transactions at all, so only start one against a real relational
         // database — Postgres in every real environment.)
-        var useTransaction = _db.Database.IsRelational();
+        var useTransaction = _db.Database.IsRelational() && _db.Database.CurrentTransaction == null;
         var transaction = useTransaction ? await _db.Database.BeginTransactionAsync() : null;
         PurchaseOrder po;
         try
@@ -458,6 +485,7 @@ public class ProcurementWorkflowService
             {
                 QuotationId = winnerQuotation.Id,
                 SupplierId = winnerQuotation.SupplierId,
+                ProjectId = winnerQuotation.MaterialRequest.ProjectId,
                 OrderDate = today,
                 ExpectedDeliveryDate = today.AddDays(7),
                 Status = PurchaseOrderStatus.Created,
@@ -465,6 +493,7 @@ public class ProcurementWorkflowService
                 Items = winnerQuotation.Items.Select(qi => new PurchaseOrderItem
                 {
                     QuotationItemId = qi.Id,
+                    MaterialId = qi.MaterialRequestItem.MaterialId,
                     OrderedQuantity = qi.Quantity,
                     UnitPrice = qi.UnitPrice
                 }).ToList()
@@ -484,6 +513,9 @@ public class ProcurementWorkflowService
                 loser.Status = QuotationStatus.Rejected;
             }
 
+            await _db.SaveChangesAsync();
+            workflow.PurchaseOrderId = po.Id;
+            workflow.FinalOutcome = $"Manager approved. Purchase Order #{po.Id} created; awaiting confirmation.";
             await _db.SaveChangesAsync();
             if (transaction is not null)
                 await transaction.CommitAsync();

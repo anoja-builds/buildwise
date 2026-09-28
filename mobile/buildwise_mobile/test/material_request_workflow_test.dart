@@ -38,8 +38,9 @@ void main() {
     Map<String, dynamic>? submitted;
     final client = MockClient((request) async {
       expect(request.headers['Authorization'], 'Bearer site-jwt');
-      if (request.url.path.endsWith('/options'))
+      if (request.url.path.endsWith('/options')){
         return http.Response(jsonEncode(options), 200);
+      }
       submitted = jsonDecode(request.body) as Map<String, dynamic>;
       return http.Response('{}', 201);
     });

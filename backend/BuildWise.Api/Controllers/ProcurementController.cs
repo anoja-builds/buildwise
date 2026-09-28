@@ -62,6 +62,7 @@ public class ProcurementController : ControllerBase
     {
         var materialRequest = await _dbContext.MaterialRequests.FindAsync(dto.MaterialRequestId);
         if (materialRequest == null) return BadRequest("Material Request not found.");
+        if (materialRequest.Status != MaterialRequestStatus.Approved) return BadRequest("The material request must be approved.");
 
         var rfq = new Rfq
         {
@@ -107,6 +108,14 @@ public class ProcurementController : ControllerBase
             .FirstOrDefaultAsync(mr => mr.Id == dto.MaterialRequestId);
 
         if (materialRequest == null) return BadRequest("Invalid Material Request ID.");
+        if (materialRequest.Status != MaterialRequestStatus.Approved) return BadRequest("The material request must be approved.");
+        if (dto.Items.Count == 0 || dto.Items.Any(i => i.Quantity <= 0 || i.UnitPrice < 0 || !materialRequest.Items.Any(r => r.MaterialId == i.MaterialId)))
+            return BadRequest("Every quotation item must reference the request with valid quantities and prices.");
+        if (dto.Items.Select(i => i.MaterialId).Distinct().Count() != dto.Items.Count)
+            return BadRequest("Duplicate materials are not allowed.");
+        if (dto.ValidityDate.Date < dto.QuotationDate.Date) return BadRequest("Validity must not precede quotation date.");
+        if (dto.TransportCharge != 0 || dto.TaxAmount != 0)
+            return BadRequest("Record charges within line-item prices; quotation totals must match the item sum.");
 
         var totalItemsAmount = dto.Items.Sum(i => i.Quantity * i.UnitPrice);
         var totalAmount = totalItemsAmount + dto.TransportCharge + dto.TaxAmount;
@@ -258,6 +267,11 @@ public class ProcurementController : ControllerBase
     {
         if (!User.TryGetUserId(out var actorId)) return Unauthorized();
 
+        var requestId = await _dbContext.ProcurementRecommendations.Where(r => r.Id == id)
+            .Select(r => (int?)r.MaterialRequestId).SingleOrDefaultAsync();
+        if (requestId is null) return NotFound("Procurement recommendation not found.");
+        await using var requestLock = await ProcurementRequestLock.AcquireAsync(_dbContext, requestId.Value);
+
         var rec = await _dbContext.ProcurementRecommendations
             .Include(r => r.MaterialRequest)
                 .ThenInclude(mr => mr!.Items)
@@ -327,6 +341,7 @@ public class ProcurementController : ControllerBase
         rec.UpdatedAt = DateTime.UtcNow;
         // One SaveChanges makes the decision, order, items and delivery atomic.
         await _dbContext.SaveChangesAsync();
+        if (requestLock != null) await requestLock.CommitAsync();
         return Ok(new { Message = $"Recommendation {dto.Decision}.", Status = dto.Decision.ToString(),
             PurchaseOrderId = po?.Id, DeliveryId = delivery?.Id });
     }

@@ -88,10 +88,10 @@ public class SecurityAuthorizationTests : IAsyncLifetime
         db.ProcurementRecommendations.Add(new ProcurementRecommendation { MaterialRequestId = scenario.Request.Id,
             RecommendedSupplier = supplier, RecommendedQuotation = quotation });
         db.AgentWorkflows.Add(new AgentWorkflow { MaterialRequestId = scenario.Request.Id,
-            Status = WorkflowStatus.AwaitingApproval, Steps = [new AgentWorkflowStep {
+            Status = WorkflowStatus.AwaitingApproval, Steps = [new AgentWorkflowStep { AgentRole = "QuotationSupplierAnalysisAgent",
                 StructuredResult = System.Text.Json.JsonSerializer.Serialize(new BuildWise.Api.DTOs.AgentRecommendationDto(
                     1, 1, "Active supplier", "Best quote", [], [])) }] });
-        var receiptOrder = new PurchaseOrder { Supplier = supplier,
+        var receiptOrder = new PurchaseOrder { Supplier = supplier, Status = PurchaseOrderStatus.Confirmed,
             Items = [new PurchaseOrderItem { OrderedQuantity = 10, MaterialId = scenario.Material.Id }] };
         db.Deliveries.Add(new Delivery { PurchaseOrder = receiptOrder,
             Items = [new DeliveryItem { PurchaseOrderItem = receiptOrder.Items.Single() }] });

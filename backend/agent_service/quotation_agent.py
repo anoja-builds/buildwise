@@ -72,6 +72,8 @@ class Recommendation(BaseModel):
     rationale: str
     ranked_alternatives: List[RankedAlternative]
     warnings: List[str]
+    execution_mode: str = "PythonDeterministicFallback"
+    tools_used: List[str] = Field(default_factory=lambda: ["filter_eligible", "rank_by_total"])
 
 
 def sanitize_text(text: str, max_length: int = 200) -> str:
@@ -121,7 +123,8 @@ def filter_eligible(quotations: List[QuotationInput], requested_quantities: Dict
             # Default to full coverage if no itemized requirements passed
             covers_all = True
 
-        eligible.append((q, covers_all, clean_name))
+        if covers_all:
+            eligible.append((q, covers_all, clean_name))
 
     return eligible, warnings
 
@@ -193,16 +196,6 @@ def analyze(req: AnalyzeRequest, timeout_s: float = 10.0):
         # Apply the hard eligibility filter: Active supplier AND valid quotation.
         eligible, warnings = filter_eligible(req.quotations, req.requested_quantities)
         
-        # Resilient fallback: only re-evaluate quotations that still satisfy the hard
-        # eligibility rules (Active supplier AND valid quotation). Suspended/inactive
-        # suppliers and expired quotations are never resurrected here.
-        if not eligible and req.quotations:
-            eligible = [
-                (q, True, sanitize_text(q.supplier_name))
-                for q in req.quotations
-                if q.supplier_status == "Active" and q.valid
-            ]
-
         ranked = rank_by_total(eligible)
 
         if time.time() - start > timeout_s:
@@ -260,7 +253,8 @@ def analyze(req: AnalyzeRequest, timeout_s: float = 10.0):
             recommended_supplier_name=top_name,
             rationale=rationale,
             ranked_alternatives=alternatives,
-            warnings=warnings
+            warnings=warnings + ([] if llm_rationale else ["Deterministic fallback: no successful external AI provider call."]),
+            execution_mode="ProviderBacked" if llm_rationale else "PythonDeterministicFallback"
         )
 
     except HTTPException:

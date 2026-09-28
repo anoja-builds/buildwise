@@ -13,6 +13,16 @@ class ProcurementStatusWidget extends StatelessWidget {
   final ProcurementStatusInfo info;
 
   static const _copy = <ProcurementStatus, (String, String, IconData)>{
+    ProcurementStatus.failed: (
+      'Procurement analysis failed',
+      'The office must review the failed analysis before proceeding.',
+      Icons.error_outline,
+    ),
+    ProcurementStatus.revisionRequested: (
+      'Revision requested',
+      'The manager requested a revised procurement recommendation.',
+      Icons.edit_note,
+    ),
     ProcurementStatus.notStarted: (
       'Procurement not started',
       'Quotations have not been requested for this material request yet.',
@@ -30,7 +40,7 @@ class ProcurementStatusWidget extends StatelessWidget {
     ),
     ProcurementStatus.purchaseOrderCreated: (
       'Purchase Order created',
-      'The purchase order has been created and procurement is complete.',
+      'The purchase order has been created. Confirmation and delivery are tracked separately.',
       Icons.check_circle_outline,
     ),
     ProcurementStatus.rejected: (
@@ -41,6 +51,8 @@ class ProcurementStatusWidget extends StatelessWidget {
   };
 
   static const _tones = <ProcurementStatus, StatusTone>{
+    ProcurementStatus.failed: StatusTone.danger,
+    ProcurementStatus.revisionRequested: StatusTone.warning,
     ProcurementStatus.notStarted: StatusTone.neutral,
     ProcurementStatus.quotationsInProgress: StatusTone.info,
     ProcurementStatus.awaitingApproval: StatusTone.warning,
@@ -52,7 +64,8 @@ class ProcurementStatusWidget extends StatelessWidget {
   Widget build(BuildContext context) {
     final (title, message, icon) = _copy[info.status]!;
     final tone = _tones[info.status]!;
-    final label = info.status == ProcurementStatus.purchaseOrderCreated &&
+    final label =
+        info.status == ProcurementStatus.purchaseOrderCreated &&
             info.purchaseOrderId != null
         ? 'Purchase Order Created (PO #${info.purchaseOrderId})'
         : title;
@@ -76,6 +89,8 @@ class ProcurementStatusWidget extends StatelessWidget {
                       alignment: Alignment.centerLeft,
                       child: StatusChip(label: label, tone: tone),
                     ),
+                    if (info.purchaseOrderStatus != null)
+                      Text('Order status: ${info.purchaseOrderStatus}'),
                     const SizedBox(height: 8),
                     Text(
                       message,

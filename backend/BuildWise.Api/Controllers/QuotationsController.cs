@@ -84,6 +84,16 @@ public class QuotationsController : ControllerBase
         if (dto.Items == null || dto.Items.Count == 0)
             return BadRequest("At least one quotation item is required.");
 
+        if (dto.QuotationDate == default || dto.ValidUntil < dto.QuotationDate)
+            return BadRequest("Valid-until must be on or after the quotation date.");
+        if (dto.Items.Select(i => i.MaterialRequestItemId).Distinct().Count() != dto.Items.Count)
+            return BadRequest("Each request item may appear only once.");
+        if (dto.Items.Any(i => decimal.Round(i.Quantity, 2) != i.Quantity || decimal.Round(i.UnitPrice, 2) != i.UnitPrice
+            || i.Quantity > 9999999999.99m || i.UnitPrice > 999999999999.99m))
+            return BadRequest("Quantities and prices must fit the supported two-decimal precision.");
+        if (await _db.PurchaseOrders.AnyAsync(p => p.Quotation != null && p.Quotation.MaterialRequestId == requestId && p.Status != PurchaseOrderStatus.Cancelled))
+            return BadRequest("This request already has a purchase order and is locked.");
+
         var validItemIds = request.Items.Select(i => i.Id).ToHashSet();
         foreach (var item in dto.Items)
         {
@@ -96,7 +106,8 @@ public class QuotationsController : ControllerBase
         }
 
         // Calculate total deterministically on the server (§3.1 #4)
-        var totalAmount = dto.Items.Sum(i => i.Quantity * i.UnitPrice);
+        var totalAmount = decimal.Round(dto.Items.Sum(i => i.Quantity * i.UnitPrice), 2, MidpointRounding.AwayFromZero);
+        if (totalAmount > 999999999999.99m) return BadRequest("Quotation total is too large.");
 
         var quotation = new Quotation
         {

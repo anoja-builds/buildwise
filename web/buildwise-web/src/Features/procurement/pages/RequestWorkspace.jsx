@@ -21,12 +21,14 @@ export default function RequestWorkspace({ requestId, role, onBack, onViewPurcha
   const [notice, setNotice] = useState('')
 
   const loadCore = async () => {
-    const [detail, compareData] = await Promise.all([
+    const [detail, compareData, latest] = await Promise.all([
       procurementApi.getMaterialRequest(requestId),
-      procurementApi.compareQuotations(requestId)
+      procurementApi.compareQuotations(requestId),
+      procurementApi.getLatestWorkflow(requestId)
     ])
     setRequestDetail(detail)
     setComparison(compareData)
+    setWorkflow(latest)
   }
 
   const load = async () => {
@@ -76,12 +78,12 @@ export default function RequestWorkspace({ requestId, role, onBack, onViewPurcha
     setDeciding(true)
     setError(null)
     try {
-      await procurementApi.recordDecision(workflow.id, decision, comment)
+      const result = await procurementApi.recordDecision(workflow.id, decision, comment)
       const refreshed = await procurementApi.getWorkflow(workflow.id)
       setWorkflow(refreshed)
       if (decision === 'Approve') {
         setCreatingPo(true)
-        const po = await procurementApi.createPurchaseOrderFromWorkflow(workflow.id)
+        const po = await procurementApi.getPurchaseOrder(result.purchaseOrderId)
         setNotice(`Purchase Order #${po.id} created for ${po.supplierName}.`)
         await loadCore()
         setCreatingPo(false)
@@ -125,10 +127,12 @@ export default function RequestWorkspace({ requestId, role, onBack, onViewPurcha
         <div className="stack">
           <Card>
             <div className="actions">
-              <Button onClick={handleRunAnalysis} disabled={runningAnalysis}>{runningAnalysis ? 'Running AI analysis…' : workflow ? 'Re-run AI Analysis' : 'Run AI Analysis'}</Button>
+              <Button onClick={handleRunAnalysis} disabled={runningAnalysis || Boolean(workflow?.purchaseOrderId)}>{runningAnalysis ? 'Running AI analysis…' : workflow ? 'Re-run AI Analysis' : 'Run AI Analysis'}</Button>
               {creatingPo && <span className="muted">Creating purchase order…</span>}
             </div>
           </Card>
+          <Button variant="secondary" onClick={load}>Refresh workflow</Button>
+          {workflow?.purchaseOrderId && <Button onClick={() => onViewPurchaseOrder?.(workflow.purchaseOrderId)}>View Purchase Order #{workflow.purchaseOrderId}</Button>}
           <AIRecommendationReview workflow={workflow} />
           {workflow && <ProcurementApprovalPanel workflow={workflow} role={role} onDecide={handleDecision} deciding={deciding || creatingPo} />}
         </div>
