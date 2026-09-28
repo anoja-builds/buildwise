@@ -17,6 +17,4 @@ public class Rfq : BaseEntity
     public DateTime? Deadline { get; set; }
 
     public ICollection<RfqSupplier> Suppliers { get; set; } = new List<RfqSupplier>();
-
-    public ICollection<Quotation> Quotations { get; set; } = new List<Quotation>();
 }

@@ -196,9 +196,10 @@ public class ProcurementValidationService
         // Rule 10: Idempotency check: Cannot create duplicate non-cancelled PO for the same material request
         var existingPo = await _db.PurchaseOrders
             .Include(po => po.Quotation)
-            .FirstOrDefaultAsync(po => po.Status != PurchaseOrderStatus.Cancelled &&
-                ((po.Quotation != null && po.Quotation.MaterialRequestId == workflow.MaterialRequestId) ||
-                 _db.ProcurementRecommendations.Any(r => r.MaterialRequestId == workflow.MaterialRequestId && r.GeneratedPurchaseOrderId == po.Id)));
+            .FirstOrDefaultAsync(po =>
+                po.Status != PurchaseOrderStatus.Cancelled &&
+                po.Quotation != null &&
+                po.Quotation.MaterialRequestId == workflow.MaterialRequestId);
 
         if (existingPo != null)
         {
