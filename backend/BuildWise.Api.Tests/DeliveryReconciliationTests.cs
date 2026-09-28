@@ -72,7 +72,7 @@ public class DeliveryReconciliationTests
         var poId = po.Id;
         var itemId = item.Id;
         var actorId = user.Id;
-        var controller = new DeliveriesController(db, new DeliveryRiskAgentService(db, new ConfigurationBuilder().Build()))
+        var controller = new DeliveriesController(db, new DeliveryRiskAgentService(db, new ConfigurationBuilder().Build()), new DeliveryDiscrepancyAgentService(db))
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext {
                 User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, actorId.ToString()),

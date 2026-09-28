@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { deliveryService } from '../services/deliveryService';
 import DeliveryRiskPanel from '../components/DeliveryRiskPanel';
+import DeliveryDiscrepancyPanel from '../components/DeliveryDiscrepancyPanel';
 import RecordDeliveryForm from './RecordDeliveryForm';
 
 export default function DeliveryDashboard() {
@@ -13,6 +14,8 @@ export default function DeliveryDashboard() {
   const [activeDelivery, setActiveDelivery] = useState(null);
   // Selection for showing AI risk assessment on a specific Purchase Order
   const [activePoForRisk, setActivePoForRisk] = useState(null);
+  // Selection for showing Discrepancy Agent analysis on a received delivery
+  const [activeDeliveryForDiscrepancy, setActiveDeliveryForDiscrepancy] = useState(null);
 
   const loadData = async () => {
     setLoading(true);
@@ -124,6 +127,22 @@ export default function DeliveryDashboard() {
         </div>
       )}
 
+      {/* active Discrepancy Agent panel */}
+      {activeDeliveryForDiscrepancy && (
+        <div style={{ marginBottom: '30px' }}>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '-10px' }}>
+            <button 
+              className="btn btn--secondary" 
+              onClick={() => setActiveDeliveryForDiscrepancy(null)}
+              style={{ padding: '2px 8px', fontSize: '11px', zIndex: 10 }}
+            >
+              ✕ Close Discrepancy Panel
+            </button>
+          </div>
+          <DeliveryDiscrepancyPanel deliveryId={activeDeliveryForDiscrepancy} />
+        </div>
+      )}
+
       <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr', gap: '20px' }}>
         {/* Left Side: Expected and History Lists */}
         <div>
@@ -189,6 +208,7 @@ export default function DeliveryDashboard() {
                     <th style={{ padding: '10px' }}>Reconciled By</th>
                     <th style={{ padding: '10px' }}>Status</th>
                     <th style={{ padding: '10px' }}>Details / Remarks</th>
+                    <th style={{ padding: '10px' }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -226,6 +246,17 @@ export default function DeliveryDashboard() {
                             </div>
                           ))}
                         </div>
+                      </td>
+                      <td style={{ padding: '10px' }}>
+                        {(del.status === 'Received' || del.status === 'DiscrepancyReported' || del.status === 'PartiallyReceived') && (
+                          <button
+                            className="btn btn--secondary"
+                            style={{ padding: '4px 10px', fontSize: '11px' }}
+                            onClick={() => setActiveDeliveryForDiscrepancy(del.id)}
+                          >
+                            🔍 Discrepancy Agent
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}

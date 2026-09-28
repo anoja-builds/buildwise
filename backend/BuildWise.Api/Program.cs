@@ -41,8 +41,9 @@ builder.Services.AddScoped<ProcurementWorkflowService>();
 
 builder.Services.AddScoped<IEmailService, SmtpEmailService>();
 
-// Component 3 service: delivery risk analysis over confirmed purchase orders.
+// Component 3 services: delivery risk analysis and receiving discrepancy agent.
 builder.Services.AddScoped<DeliveryRiskAgentService>();
+builder.Services.AddScoped<DeliveryDiscrepancyAgentService>();
 builder.Services.AddScoped<QualityInspectionService>();
 builder.Services.AddScoped<NonConformanceService>();
 builder.Services.AddScoped<QualityRiskEvidenceService>();
