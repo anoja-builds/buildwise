@@ -76,7 +76,7 @@ public class DeliveryReconciliationTests
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext {
                 User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, actorId.ToString()),
-                    new Claim(ClaimTypes.Role, "ReceivingOfficer")], "Test")) } }
+                    new Claim(ClaimTypes.Role, "SiteEngineer")], "Test")) } }
         };
         ReceiveDeliveryDto Payload(decimal received, decimal damaged = 0) => new() {
             ReceivedByUserId = 999, Items = [new ReceiveDeliveryItemDto { PurchaseOrderItemId = itemId,

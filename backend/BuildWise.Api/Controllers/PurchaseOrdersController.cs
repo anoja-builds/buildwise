@@ -52,10 +52,10 @@ public class PurchaseOrdersController : ControllerBase
 
     /// <summary>
     /// List purchase orders with search, status filtering, and pagination.
-    /// Exposes read-only purchase orders to Component 3 once status >= Confirmed.
+    /// Procurement-only detail; site receiving uses the limited Delivery API.
     /// </summary>
     [HttpGet("purchase-orders")]
-    [Authorize(Roles = "ProcurementOfficer,ProcurementManager,Administrator,ReceivingOfficer")]
+    [Authorize(Roles = "ProcurementOfficer,ProcurementManager,Administrator")]
     public async Task<ActionResult<PagedResultDto<PurchaseOrderDto>>> GetAll(
         [FromQuery] string? status,
         [FromQuery] string? search,
@@ -71,9 +71,6 @@ public class PurchaseOrdersController : ControllerBase
             .ThenInclude(qi => qi.MaterialRequestItem)
             .ThenInclude(mri => mri.Material)
             .AsQueryable();
-
-        if (User.IsInRole("ReceivingOfficer") && !User.IsInRole("ProcurementOfficer") && !User.IsInRole("ProcurementManager") && !User.IsInRole("Administrator"))
-            query = query.Where(p => p.Status == PurchaseOrderStatus.Confirmed || p.Status == PurchaseOrderStatus.InProgress || p.Status == PurchaseOrderStatus.Completed);
 
         if (!string.IsNullOrWhiteSpace(status) && Enum.TryParse<PurchaseOrderStatus>(status, true, out var poStatus))
         {
@@ -103,7 +100,7 @@ public class PurchaseOrdersController : ControllerBase
     /// Get purchase order detail with items and linked quotation.
     /// </summary>
     [HttpGet("purchase-orders/{id:int}")]
-    [Authorize(Roles = "ProcurementOfficer,ProcurementManager,Administrator,ReceivingOfficer")]
+    [Authorize(Roles = "ProcurementOfficer,ProcurementManager,Administrator")]
     public async Task<ActionResult<PurchaseOrderDto>> GetById(int id)
     {
         var po = await _db.PurchaseOrders
@@ -119,8 +116,6 @@ public class PurchaseOrdersController : ControllerBase
         if (po is null)
             return NotFound($"Purchase Order #{id} not found.");
 
-        if (User.IsInRole("ReceivingOfficer") && !User.IsInRole("ProcurementOfficer") && !User.IsInRole("ProcurementManager") && !User.IsInRole("Administrator")
-            && po.Status is PurchaseOrderStatus.Created or PurchaseOrderStatus.Cancelled) return Forbid();
         return Ok(MapToPurchaseOrderDto(po));
     }
 

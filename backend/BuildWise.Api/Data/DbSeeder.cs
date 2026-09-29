@@ -24,8 +24,6 @@ public static class DbSeeder
 
     private static async Task SeedUsersAsync(ApplicationDbContext db)
     {
-        if (await db.Users.AnyAsync()) return;
-
         var roles = await db.Roles.ToDictionaryAsync(r => r.Name, r => r);
         var hasher = new PasswordHasher<User>();
 
@@ -33,10 +31,8 @@ public static class DbSeeder
         [
             ("Ada Administrator", "admin@buildwise.demo", "Administrator"),
             ("Sam SiteEngineer", "site.engineer@buildwise.demo", "SiteEngineer"),
-            ("Paul ProjectManager", "project.manager@buildwise.demo", "ProjectManager"),
             ("Priya Officer", "procurement.officer@buildwise.demo", "ProcurementOfficer"),
             ("Mira Manager", "procurement.manager@buildwise.demo", "ProcurementManager"),
-            ("Ramya Receiving", "receiving.officer@buildwise.demo", "ReceivingOfficer"),
             ("Quinn Inspector", "quality.inspector@buildwise.demo", "QualityInspector")
         ];
 
@@ -44,18 +40,32 @@ public static class DbSeeder
         {
             if (!roles.TryGetValue(roleName, out var role)) continue;
 
-            var user = new User
-            {
-                FullName = name,
-                Email = email,
-                IsActive = true,
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
-            };
-            user.PasswordHash = hasher.HashPassword(user, DemoPassword);
-            user.UserRoles.Add(new UserRole { Role = role });
+            var existingUser = await db.Users
+                .Include(u => u.UserRoles)
+                .FirstOrDefaultAsync(u => u.Email == email);
 
-            db.Users.Add(user);
+            if (existingUser == null)
+            {
+                var user = new User
+                {
+                    FullName = name,
+                    Email = email,
+                    IsActive = true,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                };
+                user.PasswordHash = hasher.HashPassword(user, DemoPassword);
+                user.UserRoles.Add(new UserRole { Role = role });
+
+                db.Users.Add(user);
+            }
+            else
+            {
+                if (!existingUser.UserRoles.Any(ur => ur.RoleId == role.Id))
+                {
+                    existingUser.UserRoles.Add(new UserRole { UserId = existingUser.Id, RoleId = role.Id });
+                }
+            }
         }
 
         await db.SaveChangesAsync();

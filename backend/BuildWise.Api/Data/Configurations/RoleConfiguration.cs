@@ -18,6 +18,8 @@ public class RoleConfiguration : IEntityTypeConfiguration<Role>
 
         builder.HasIndex(r => r.Name).IsUnique();
 
+        // Legacy role rows remain until existing user assignments are safely migrated.
+        // They grant no business endpoint access in the five-role application.
         builder.HasData(
             new Role { Id = 1, Name = "Administrator" },
             new Role { Id = 2, Name = "SiteEngineer" },

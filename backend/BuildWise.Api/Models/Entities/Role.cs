@@ -2,7 +2,7 @@ namespace BuildWise.Api.Models.Entities;
 
 /// <summary>
 /// Shared application role (Core/shared per the team ERD). Examples: SiteEngineer,
-/// ProjectManager, ProcurementOfficer, ProcurementManager, ReceivingOfficer,
+/// ProcurementOfficer, ProcurementManager,
 /// QualityInspector, Administrator.
 /// </summary>
 public class Role

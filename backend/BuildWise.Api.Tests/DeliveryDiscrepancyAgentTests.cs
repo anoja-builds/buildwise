@@ -373,7 +373,7 @@ public class DeliveryDiscrepancyAgentTests
                 {
                     User = new ClaimsPrincipal(new ClaimsIdentity([
                         new Claim(ClaimTypes.NameIdentifier, userId.ToString()),
-                        new Claim(ClaimTypes.Role, "ReceivingOfficer")
+                        new Claim(ClaimTypes.Role, "SiteEngineer")
                     ], "Test"))
                 }
             }

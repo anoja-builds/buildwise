@@ -119,6 +119,8 @@ public class QualityAuthorizationTests : IAsyncLifetime
             yield return [endpoint.Method, endpoint.Path, "", HttpStatusCode.Unauthorized];
             yield return [endpoint.Method, endpoint.Path, "ProcurementOfficer", HttpStatusCode.Forbidden];
             yield return [endpoint.Method, endpoint.Path, "ReceivingOfficer", HttpStatusCode.Forbidden];
+            yield return [endpoint.Method, endpoint.Path, "SiteEngineer", HttpStatusCode.Forbidden];
+            yield return [endpoint.Method, endpoint.Path, "ProcurementManager", HttpStatusCode.Forbidden];
         }
     }
 
@@ -152,6 +154,8 @@ public class QualityAuthorizationTests : IAsyncLifetime
     [InlineData("", HttpStatusCode.Unauthorized)]
     [InlineData("ProcurementOfficer", HttpStatusCode.Forbidden)]
     [InlineData("ReceivingOfficer", HttpStatusCode.Forbidden)]
+    [InlineData("SiteEngineer", HttpStatusCode.Forbidden)]
+    [InlineData("ProcurementManager", HttpStatusCode.Forbidden)]
     public async Task History_requires_quality_role(string role, HttpStatusCode expected)
     {
         if (role.Length > 0) SignIn(role);

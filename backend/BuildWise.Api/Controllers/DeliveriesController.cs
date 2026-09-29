@@ -29,7 +29,7 @@ public class DeliveriesController : ControllerBase
     }
 
     [HttpGet("expected")]
-    [Authorize(Roles = "ReceivingOfficer,Administrator,ProcurementOfficer,ProcurementManager,QualityInspector,ProjectManager")]
+    [Authorize(Roles = "SiteEngineer,ProcurementOfficer,ProcurementManager,QualityInspector,Administrator")]
     public async Task<IActionResult> GetExpectedDeliveries()
     {
         var deliveries = await _dbContext.Deliveries
@@ -45,6 +45,7 @@ public class DeliveriesController : ControllerBase
             .OrderByDescending(d => d.CreatedAt)
             .ToListAsync();
 
+        var priorUsable = await GetPriorUsableQuantities();
         var result = deliveries.Select(d => new
         {
             d.Id,
@@ -62,6 +63,9 @@ public class DeliveriesController : ControllerBase
                 MaterialName = di.PurchaseOrderItem?.Material?.Name,
                 MaterialUnit = di.PurchaseOrderItem?.Material?.Unit,
                 OrderedQuantity = di.PurchaseOrderItem?.OrderedQuantity ?? 0,
+                PreviouslyReceivedUsableQuantity = priorUsable.GetValueOrDefault(di.PurchaseOrderItemId),
+                OutstandingQuantity = Math.Max(0, (di.PurchaseOrderItem?.OrderedQuantity ?? 0)
+                    - priorUsable.GetValueOrDefault(di.PurchaseOrderItemId)),
                 di.ReceivedQuantity,
                 di.DamagedQuantity,
                 di.Notes
@@ -72,7 +76,7 @@ public class DeliveriesController : ControllerBase
     }
 
     [HttpGet("history")]
-    [Authorize(Roles = "ReceivingOfficer,Administrator,ProcurementOfficer,ProcurementManager,QualityInspector,ProjectManager")]
+    [Authorize(Roles = "SiteEngineer,ProcurementOfficer,ProcurementManager,QualityInspector,Administrator")]
     public async Task<IActionResult> GetDeliveryHistory()
     {
         var deliveries = await _dbContext.Deliveries
@@ -119,7 +123,7 @@ public class DeliveriesController : ControllerBase
     }
 
     [HttpGet("{id}")]
-    [Authorize(Roles = "ReceivingOfficer,Administrator,ProcurementOfficer,ProcurementManager,QualityInspector,ProjectManager")]
+    [Authorize(Roles = "SiteEngineer,ProcurementOfficer,ProcurementManager,QualityInspector,Administrator")]
     public async Task<IActionResult> GetDeliveryById(int id)
     {
         var delivery = await _dbContext.Deliveries
@@ -138,6 +142,7 @@ public class DeliveriesController : ControllerBase
             return NotFound("Delivery record not found.");
         }
 
+        var priorUsable = await GetPriorUsableQuantities(id);
         var result = new
         {
             delivery.Id,
@@ -161,6 +166,9 @@ public class DeliveriesController : ControllerBase
                 MaterialName = di.PurchaseOrderItem?.Material?.Name,
                 MaterialUnit = di.PurchaseOrderItem?.Material?.Unit,
                 OrderedQuantity = di.PurchaseOrderItem?.OrderedQuantity ?? 0,
+                PreviouslyReceivedUsableQuantity = priorUsable.GetValueOrDefault(di.PurchaseOrderItemId),
+                OutstandingQuantity = Math.Max(0, (di.PurchaseOrderItem?.OrderedQuantity ?? 0)
+                    - priorUsable.GetValueOrDefault(di.PurchaseOrderItemId)),
                 di.ReceivedQuantity,
                 di.DamagedQuantity,
                 ShortageQuantity = (di.PurchaseOrderItem?.OrderedQuantity ?? 0) - di.ReceivedQuantity,
@@ -173,7 +181,7 @@ public class DeliveriesController : ControllerBase
     }
 
     [HttpPost]
-    [Authorize(Roles = "ProcurementOfficer,ProcurementManager,Administrator,ReceivingOfficer")]
+    [Authorize(Roles = "ProcurementOfficer,ProcurementManager,Administrator")]
     public async Task<IActionResult> ScheduleDelivery([FromBody] CreateDeliveryDto dto)
     {
         var purchaseOrder = await _dbContext.PurchaseOrders
@@ -221,7 +229,7 @@ public class DeliveriesController : ControllerBase
     }
 
     [HttpPost("{id}/receive")]
-    [Authorize(Roles = "ReceivingOfficer,Administrator")]
+    [Authorize(Roles = "SiteEngineer,Administrator")]
     public async Task<IActionResult> ReceiveDelivery(int id, [FromBody] ReceiveDeliveryDto dto)
     {
         if (!User.TryGetUserId(out var actorId)) return Unauthorized();
@@ -311,7 +319,7 @@ public class DeliveriesController : ControllerBase
     }
 
     [HttpPost("{id}/evidence")]
-    [Authorize(Roles = "ReceivingOfficer,Administrator")]
+    [Authorize(Roles = "SiteEngineer,Administrator")]
     public async Task<IActionResult> AddPhotographicEvidence(int id, [FromBody] EvidenceDto dto)
     {
         var delivery = await _dbContext.Deliveries.FindAsync(id);
@@ -328,7 +336,7 @@ public class DeliveriesController : ControllerBase
     }
 
     [HttpGet("schedules")]
-    [Authorize(Roles = "ReceivingOfficer,Administrator,ProcurementOfficer,ProcurementManager,QualityInspector,ProjectManager")]
+    [Authorize(Roles = "SiteEngineer,ProcurementOfficer,ProcurementManager,QualityInspector,Administrator")]
     public async Task<IActionResult> GetSchedules()
     {
         var schedules = await _dbContext.DeliverySchedules
@@ -339,11 +347,16 @@ public class DeliveriesController : ControllerBase
             .OrderBy(s => s.ScheduledDate)
             .ToListAsync();
 
-        return Ok(schedules);
+        return Ok(schedules.Select(s => new
+        {
+            s.Id, s.PurchaseOrderId, s.ScheduledDate, s.ScheduledTimeSlot, s.Status, s.Notes,
+            SupplierName = s.PurchaseOrder?.Supplier?.Name,
+            ProjectName = s.PurchaseOrder?.Project?.Name
+        }));
     }
 
     [HttpPost("schedule")]
-    [Authorize(Roles = "ProcurementOfficer,ProcurementManager,Administrator,ReceivingOfficer")]
+    [Authorize(Roles = "ProcurementOfficer,ProcurementManager,Administrator")]
     public async Task<IActionResult> CreateSchedule([FromBody] ScheduleDeliveryDto dto)
     {
         var schedule = new DeliverySchedule
@@ -364,7 +377,7 @@ public class DeliveriesController : ControllerBase
     }
 
     [HttpGet("issues")]
-    [Authorize(Roles = "ReceivingOfficer,Administrator,ProcurementOfficer,ProcurementManager,QualityInspector,ProjectManager")]
+    [Authorize(Roles = "SiteEngineer,ProcurementOfficer,ProcurementManager,QualityInspector,Administrator")]
     public async Task<IActionResult> GetIssues()
     {
         var issues = await _dbContext.DeliveryIssues
@@ -373,11 +386,17 @@ public class DeliveriesController : ControllerBase
             .OrderByDescending(i => i.ReportedAt)
             .ToListAsync();
 
-        return Ok(issues);
+        return Ok(issues.Select(i => new
+        {
+            i.Id, i.DeliveryId, i.DeliveryItemId, i.IssueType, i.Description, i.Severity,
+            i.Status, i.Resolution, i.ReportedByUserId, i.ReportedAt, i.ResolvedAt,
+            DeliveryReference = i.Delivery?.DeliveryReference,
+            ReportedBy = i.ReportedByUser?.FullName
+        }));
     }
 
     [HttpPost("report-issue")]
-    [Authorize(Roles = "ReceivingOfficer,Administrator")]
+    [Authorize(Roles = "SiteEngineer,Administrator")]
     public async Task<IActionResult> ReportIssue([FromBody] ReportIssueDto dto)
     {
         if (!User.TryGetUserId(out var actorId)) return Unauthorized();
@@ -403,7 +422,7 @@ public class DeliveriesController : ControllerBase
     }
 
     [HttpPost("evaluate-risk/{purchaseOrderId}")]
-    [Authorize(Roles = "ProcurementOfficer,ProcurementManager,Administrator,ReceivingOfficer")]
+    [Authorize(Roles = "ProcurementOfficer,ProcurementManager,Administrator")]
     public async Task<IActionResult> EvaluateDeliveryRisk(int purchaseOrderId, [FromQuery] int? userId)
     {
         if (!User.TryGetUserId(out var actorId)) return Unauthorized();
@@ -424,7 +443,7 @@ public class DeliveriesController : ControllerBase
     }
 
     [HttpPost("{id}/risk-analysis")]
-    [Authorize(Roles = "ProcurementOfficer,ProcurementManager,Administrator,ReceivingOfficer")]
+    [Authorize(Roles = "ProcurementOfficer,ProcurementManager,Administrator")]
     public async Task<IActionResult> AnalyzeDeliveryRisk(int id, [FromQuery] int? userId)
     {
         if (!User.TryGetUserId(out var actorId)) return Unauthorized();
@@ -448,7 +467,7 @@ public class DeliveriesController : ControllerBase
     /// Distinct from risk-analysis: this analyzes ACTUAL quantity discrepancies after receiving.
     /// </summary>
     [HttpPost("{id}/discrepancy-analysis")]
-    [Authorize(Roles = "ReceivingOfficer,Administrator,ProcurementOfficer,ProcurementManager,QualityInspector,ProjectManager")]
+    [Authorize(Roles = "SiteEngineer,ProcurementOfficer,ProcurementManager,QualityInspector,Administrator")]
     public async Task<IActionResult> AnalyzeDiscrepancies(int id)
     {
         if (!User.TryGetUserId(out var actorId)) return Unauthorized();
@@ -476,7 +495,7 @@ public class DeliveriesController : ControllerBase
     /// Get the discrepancy analysis workflow history for a delivery.
     /// </summary>
     [HttpGet("{id}/discrepancy-history")]
-    [Authorize(Roles = "ReceivingOfficer,Administrator,ProcurementOfficer,ProcurementManager,QualityInspector,ProjectManager")]
+    [Authorize(Roles = "SiteEngineer,ProcurementOfficer,ProcurementManager,QualityInspector,Administrator")]
     public async Task<IActionResult> GetDiscrepancyHistory(int id)
     {
         if (!User.TryGetUserId(out _)) return Unauthorized();
@@ -490,5 +509,17 @@ public class DeliveriesController : ControllerBase
         {
             return StatusCode(500, $"Error retrieving discrepancy history: {ex.Message}");
         }
+    }
+    // Match ReceiveDelivery's usable-quantity rule; never expose procurement entities.
+    private async Task<Dictionary<int, decimal>> GetPriorUsableQuantities(int excludeDeliveryId = 0)
+    {
+        return await _dbContext.DeliveryItems.AsNoTracking()
+            .Where(i => i.DeliveryId != excludeDeliveryId
+                && (i.Delivery!.Status == DeliveryStatus.Received
+                    || i.Delivery.Status == DeliveryStatus.PartiallyReceived
+                    || i.Delivery.Status == DeliveryStatus.DiscrepancyReported))
+            .GroupBy(i => i.PurchaseOrderItemId)
+            .Select(g => new { Id = g.Key, Quantity = g.Sum(i => i.ReceivedQuantity - i.DamagedQuantity) })
+            .ToDictionaryAsync(i => i.Id, i => i.Quantity);
     }
 }

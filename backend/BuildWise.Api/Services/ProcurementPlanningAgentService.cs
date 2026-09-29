@@ -83,41 +83,32 @@ public class ProcurementPlanningAgentService
             Timestamp = DateTime.UtcNow
         };
 
-        // Record agent execution step in Db
-        var workflow = await _dbContext.AgentWorkflows
-            .FirstOrDefaultAsync(w => w.MaterialRequestId == requestId)
-            ?? new AgentWorkflow
+        // Every execution has its own audit record; never overwrite a procurement workflow.
+        var now = DateTime.UtcNow;
+        var workflow = new AgentWorkflow
+        {
+            MaterialRequestId = requestId,
+            InitiatedByUserId = userId ?? request.RequestedByUserId,
+            Objective = $"Procurement Plan for MR-{requestId:D4}",
+            Status = WorkflowStatus.Completed,
+            StartedAt = now,
+            CompletedAt = now,
+            CreatedAt = now,
+            UpdatedAt = now,
+            Steps = [new AgentWorkflowStep
             {
-                MaterialRequestId = requestId,
-                InitiatedByUserId = userId ?? request.RequestedByUserId,
-                Objective = $"Procurement Plan for MR-{requestId:D4}",
-                Status = WorkflowStatus.Running,
-                StartedAt = DateTime.UtcNow,
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
-            };
-
-        if (workflow.Id == 0)
-        {
-            _dbContext.AgentWorkflows.Add(workflow);
-            await _dbContext.SaveChangesAsync();
-        }
-
-        var step = new AgentWorkflowStep
-        {
-            AgentWorkflowId = workflow.Id,
-            AgentRole = "Procurement Planning Agent",
-            StepName = "Requirement Analysis & Plan Generation",
-            StepOrder = 1,
-            Status = WorkflowStepStatus.Completed,
-            StructuredResultJson = JsonSerializer.Serialize(planOutput),
-            StartedAt = DateTime.UtcNow,
-            CompletedAt = DateTime.UtcNow,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
+                AgentRole = "Procurement Planning Agent",
+                StepName = "Requirement Analysis & Plan Generation",
+                StepOrder = 1,
+                Status = WorkflowStepStatus.Completed,
+                StructuredResultJson = JsonSerializer.Serialize(planOutput),
+                StartedAt = now,
+                CompletedAt = now,
+                CreatedAt = now,
+                UpdatedAt = now
+            }]
         };
-
-        _dbContext.AgentWorkflowSteps.Add(step);
+        _dbContext.AgentWorkflows.Add(workflow);
         await _dbContext.SaveChangesAsync();
 
         return planOutput;
