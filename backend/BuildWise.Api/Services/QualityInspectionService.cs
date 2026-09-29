@@ -35,7 +35,8 @@ public class QualityInspectionService
     {
         return await _dbContext.Deliveries.AsNoTracking()
             .Where(d => EligibleStatuses.Contains(d.Status) && d.Items.Any(di => di.ReceivedQuantity > 0)
-                && !_dbContext.Inspections.Any(i => i.DeliveryId == d.Id))
+                && !_dbContext.Inspections.Any(i => i.DeliveryId == d.Id &&
+                    (i.Status != InspectionStatus.Completed || i.OverallDecision == InspectionDecision.Accepted)))
             .OrderBy(d => d.Id)
             .Select(d => new PendingInspectionDeliveryDto
             {
@@ -90,8 +91,12 @@ public class QualityInspectionService
         if (!await _dbContext.DeliveryItems.AnyAsync(di => di.DeliveryId == delivery.Id && di.ReceivedQuantity > 0))
             throw Invalid("Delivery must contain at least one item with positive received quantity.");
 
-        if (await _dbContext.Inspections.AnyAsync(i => i.DeliveryId == delivery.Id))
-            throw Conflict("This delivery already has an inspection.");
+        if (await _dbContext.Inspections.AnyAsync(i => i.DeliveryId == delivery.Id &&
+            i.Status != InspectionStatus.Completed))
+            throw Conflict("This delivery already has an active inspection.");
+        if (await _dbContext.Inspections.AnyAsync(i => i.DeliveryId == delivery.Id &&
+            i.Status == InspectionStatus.Completed && i.OverallDecision == InspectionDecision.Accepted))
+            throw Conflict("This delivery has already been fully inspected and accepted.");
 
         var now = DateTime.UtcNow;
         var inspection = new Inspection

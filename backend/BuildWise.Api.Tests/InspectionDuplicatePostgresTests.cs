@@ -198,7 +198,7 @@ public class InspectionDuplicatePostgresTests : IAsyncLifetime
     [InspectionPostgresTheory]
     [InlineData(DeliveryStatus.Received)]
     [InlineData(DeliveryStatus.DiscrepancyReported)]
-    public async Task Completed_delivery_is_not_pending_and_cannot_be_inspected_again(DeliveryStatus status)
+    public async Task Completed_accepted_delivery_is_not_pending_and_cannot_be_inspected_again(DeliveryStatus status)
     {
         var delivery = await SeedDelivery(status);
         var available = await SeedDelivery(status);
@@ -220,7 +220,7 @@ public class InspectionDuplicatePostgresTests : IAsyncLifetime
         Assert.Equal(available.Id, Assert.Single(pending).DeliveryId);
         using var duplicate = await Start(delivery.Id);
         Assert.Equal(HttpStatusCode.Conflict, duplicate.StatusCode);
-        Assert.Equal("This delivery already has an inspection.",
+        Assert.Equal("This delivery has already been fully inspected and accepted.",
             (await duplicate.Content.ReadFromJsonAsync<ProblemDetails>())!.Detail);
         await using var db = CreateDb();
         var persisted = Assert.Single(await db.Inspections.Include(i => i.Items)
