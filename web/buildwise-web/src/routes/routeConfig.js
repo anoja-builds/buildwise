@@ -2,9 +2,9 @@
 // Sources: backend/BuildWise.Api/Controllers/{name}Controller.cs.
 export const procurementRoles = ['ProcurementOfficer', 'ProcurementManager', 'Administrator']
 export const qualityRoles = ['QualityInspector', 'Administrator']
-export const purchaseOrderRoles = [...procurementRoles, 'ReceivingOfficer']
-export const deliveryRoles = [...purchaseOrderRoles, 'QualityInspector', 'ProjectManager']
-const materialRoles = ['SiteEngineer', 'ProjectManager', ...procurementRoles]
+export const purchaseOrderRoles = procurementRoles
+export const deliveryRoles = ['SiteEngineer', ...procurementRoles, 'QualityInspector']
+const materialRoles = ['SiteEngineer', ...procurementRoles]
 
 export const routeConfig = [
   { label: 'Dashboard', path: '/dashboard', allowedRoles: procurementRoles, screen: 'procurement', section: 'Dashboard' },
@@ -14,7 +14,6 @@ export const routeConfig = [
   { label: 'Quotations', path: '/quotations', allowedRoles: procurementRoles, screen: 'procurement', section: 'Approved Requests' },
   { label: 'Request workspace', path: '/quotations/:id', allowedRoles: procurementRoles, screen: 'procurement', section: 'Approved Requests', nav: false },
   { label: 'Procurement', path: '/procurement', allowedRoles: procurementRoles, screen: 'procurement', section: 'Dashboard' },
-  // PurchaseOrders GET includes ReceivingOfficer; PATCH does not.
   { label: 'Purchase Orders', path: '/purchase-orders', allowedRoles: purchaseOrderRoles, screen: 'procurement', section: 'Purchase Orders' },
   { label: 'Purchase order details', path: '/purchase-orders/:id', allowedRoles: purchaseOrderRoles, screen: 'procurement', section: 'Purchase Orders', nav: false },
   { label: 'Deliveries', path: '/deliveries', allowedRoles: deliveryRoles, screen: 'deliveries' },
@@ -38,7 +37,6 @@ export const visibleRoutes = (roles) => routeConfig.filter((route) => route.nav 
 export function landingPath(roles) {
   if (roles.includes('Administrator')) return '/dashboard'
   if (roles.includes('SiteEngineer')) return '/material-requests'
-  if (roles.includes('ReceivingOfficer')) return '/deliveries'
   if (roles.includes('QualityInspector')) return '/quality-inspections'
   if (roles.some((role) => procurementRoles.includes(role))) return '/procurement'
   return visibleRoutes(roles)[0]?.path || '/access-denied'

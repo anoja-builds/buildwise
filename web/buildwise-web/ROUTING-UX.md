@@ -39,24 +39,21 @@ quality workflows. Dialogs and in-page controls remain component state.
 | --- | --- | --- |
 | Administrator | Dashboard, Material Requests, Suppliers, Quotations, Procurement, Purchase Orders, Deliveries, Quality Inspections, Non-Conformances | Dashboard |
 | ProcurementOfficer / ProcurementManager | Dashboard, Material Requests, Suppliers, Quotations, Procurement, Purchase Orders, Deliveries | Procurement |
-| SiteEngineer | Material Requests | Material Requests |
-| ReceivingOfficer | Purchase Orders, Deliveries | Deliveries |
+| SiteEngineer | Material Requests, Deliveries | Material Requests |
 | QualityInspector | Deliveries, Quality Inspections, Non-Conformances | Quality Inspections |
-| ProjectManager | Material Requests, Deliveries | Material Requests |
 | Unknown / no roles | None | Access Denied |
 
 For multiple roles, visibility is the union. Landing precedence is Administrator,
-SiteEngineer, ReceivingOfficer, QualityInspector, procurement roles, then the first
+SiteEngineer, QualityInspector, procurement roles, then the first
 permitted entry. A requested deep link takes precedence and still passes the guard.
 
 Sources in `backend/BuildWise.Api/Controllers` (read only):
 
 - MaterialRequestsController: GET list/detail role attributes.
-- SuppliersController, QuotationsController, ProcurementController and
+- SuppliersController, QuotationsController and
   ProcurementWorkflowController: procurement roles on controllers.
-- PurchaseOrdersController: GET includes ReceivingOfficer; PATCH excludes it.
-  Receiving-only accounts see read-only detail; record/status restrictions remain
-  enforced by the existing server.
+- PurchaseOrdersController: procurement roles and Administrator only.
+  SiteEngineer uses limited Delivery API context without pricing or quotations.
 - DeliveriesController: expected/history GET roles; schedule/risk roles and
   receiving roles control matching buttons.
 - InspectionsController, NonConformancesController, QualityRiskAgentController:
@@ -105,7 +102,7 @@ Other files reported by git status were already modified/untracked before this t
 
 ## Verification and release checklist
 
-Automated React tests cover unauthenticated redirects, all seven role menus and
+Automated React tests cover unauthenticated redirects, five application role menus, legacy-role denial and
 landings, multi-role union, unauthorized deep links, route IDs, actual AuthProvider
 session persistence through navigation/remount, sign-out, start/complete/NCR URL
 loading, and read-only purchase-order behavior. Existing workflow tests retained.
@@ -132,7 +129,7 @@ host configuration is outside this frontend-only change. Verify a direct request
 and refresh on `/purchase-orders/42` before release.
 See https://reactrouter.com/how-to/spa for SPA hosting requirements.
 
-## Results
+## Historical results (before final RBAC/recovery changes)
 
 - `npx.cmd vitest run`: 144 tests passed across 18 files.
 - `npm.cmd run build`: passed.

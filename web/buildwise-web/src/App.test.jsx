@@ -37,12 +37,10 @@ describe('route authentication and navigation', () => {
 
   it.each([
     ['Administrator', '/dashboard', ['Dashboard', 'Material Requests', 'Suppliers', 'Quotations', 'Procurement', 'Purchase Orders', 'Deliveries', 'Quality Inspections', 'Non-Conformances']],
-    ['SiteEngineer', '/material-requests', ['Material Requests']],
-    ['ReceivingOfficer', '/deliveries', ['Purchase Orders', 'Deliveries']],
+    ['SiteEngineer', '/material-requests', ['Material Requests', 'Deliveries']],
     ['QualityInspector', '/quality-inspections', ['Deliveries', 'Quality Inspections', 'Non-Conformances']],
     ['ProcurementOfficer', '/procurement', ['Dashboard', 'Material Requests', 'Suppliers', 'Quotations', 'Procurement', 'Purchase Orders', 'Deliveries']],
     ['ProcurementManager', '/procurement', ['Dashboard', 'Material Requests', 'Suppliers', 'Quotations', 'Procurement', 'Purchase Orders', 'Deliveries']],
-    ['ProjectManager', '/material-requests', ['Material Requests', 'Deliveries']],
   ])('%s receives the permitted navigation and landing page', (role, path, labels) => {
     session([role]); mount()
     expect(navLabels()).toEqual(labels)
@@ -87,7 +85,7 @@ describe('route authentication and navigation', () => {
   })
 
   it('login returns to an authorized deep link', async () => {
-    vi.spyOn(authApi, 'login').mockResolvedValue({ token: 'new-token', user: { fullName: 'New User', roles: ['ReceivingOfficer'] } })
+    vi.spyOn(authApi, 'login').mockResolvedValue({ token: 'new-token', user: { fullName: 'New User', roles: ['ProcurementOfficer'] } })
     mount('/purchase-orders/42')
     fireEvent.change(screen.getByLabelText(/Email/), { target: { value: 'test@example.test' } })
     fireEvent.change(screen.getByLabelText(/Password/), { target: { value: 'password' } })
@@ -95,8 +93,8 @@ describe('route authentication and navigation', () => {
     expect(await screen.findByRole('heading', { name: 'Purchase Orders workspace 42' })).toBeInTheDocument()
   })
 
-  it('handles unknown roles without a redirect loop', () => {
-    session(['Unknown']); mount()
+  it.each(['Unknown', 'ProjectManager', 'ReceivingOfficer'])('denies inactive role %s without a redirect loop', (role) => {
+    session([role]); mount()
     expect(screen.getByRole('heading', { name: 'Access Denied' })).toBeInTheDocument()
     expect(within(screen.getByRole('navigation')).queryAllByRole('link')).toHaveLength(0)
   })

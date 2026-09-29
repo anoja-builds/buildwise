@@ -10,7 +10,7 @@ export default function RecordDeliveryForm({ delivery, onCancel, onSuccess }) {
       materialName: item.materialName,
       materialUnit: item.materialUnit,
       orderedQuantity: item.orderedQuantity,
-      receivedQuantity: item.orderedQuantity, // Default to full delivery
+      receivedQuantity: item.outstandingQuantity ?? item.orderedQuantity, // Remaining usable quantity
       damagedQuantity: 0,
       notes: ''
     }))
@@ -37,7 +37,6 @@ export default function RecordDeliveryForm({ delivery, onCancel, onSuccess }) {
     try {
       // Reconcile received quantities
       const payload = {
-        receivedByUserId: 2, // Simulate Ramya Fernando (Receiving Officer)
         notes: notes,
         items: itemsData.map(i => ({
           purchaseOrderItemId: i.purchaseOrderItemId,

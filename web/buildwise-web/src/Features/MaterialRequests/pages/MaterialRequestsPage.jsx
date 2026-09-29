@@ -6,8 +6,9 @@ import CreateMaterialRequestModal from '../components/CreateMaterialRequestModal
 
 export default function MaterialRequestsPage() {
   const { hasRole } = useAuth();
-  const canApprove = hasRole('ProjectManager') || hasRole('Administrator');
+  const canApprove = hasRole('ProcurementManager') || hasRole('Administrator');
   const canCreate = hasRole('SiteEngineer') || hasRole('Administrator');
+  const canPlan = canCreate || canApprove;
   const [reviewing, setReviewing] = useState(null);
   const [decision, setDecision] = useState('Approved');
   const [savingDecision, setSavingDecision] = useState(false);
@@ -119,7 +120,7 @@ export default function MaterialRequestsPage() {
         </select>
       </div>
 
-      {selectedRequestIdForPlan && (
+      {canPlan && selectedRequestIdForPlan && (
         <div style={{ marginBottom: '24px' }}>
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '-10px' }}>
             <button 
@@ -192,13 +193,13 @@ export default function MaterialRequestsPage() {
                           setReviewing(r); setDecision('Approved'); setDecisionError(''); setNotice('');
                         }}>Review request #{r.id}</button>
                       )}
-                      <button 
+                      {canPlan && <button
                         className="btn btn--secondary" 
                         style={{ padding: '4px 10px', fontSize: '12px' }}
                         onClick={() => setSelectedRequestIdForPlan(r.id)}
                       >
                         🤖 Run AI Plan
-                      </button>
+                      </button>}
                     </td>
                   </tr>
                 ))

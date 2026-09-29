@@ -10,7 +10,7 @@ import RecordDeliveryForm from './RecordDeliveryForm';
 export default function DeliveryDashboard() {
   const { roles } = useAuth();
   const canSchedule = purchaseOrderRoles.some(role => roles.includes(role));
-  const canReceive = roles.includes('ReceivingOfficer') || roles.includes('Administrator');
+  const canReceive = roles.includes('SiteEngineer') || roles.includes('Administrator');
   const [expected, setExpected] = useState([]);
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);

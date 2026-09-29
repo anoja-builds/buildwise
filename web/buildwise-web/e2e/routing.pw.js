@@ -19,8 +19,8 @@ async function fits(page) {
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)
 }
 
-test('receiving navigation, modal, direct refresh and history retain session', async ({ page }, testInfo) => {
-  await signIn(page, ['ReceivingOfficer'], '/')
+test('procurement navigation, modal, direct refresh and history retain session', async ({ page }, testInfo) => {
+  await signIn(page, ['ProcurementOfficer'], '/deliveries')
   await expect(page).toHaveURL(/\/deliveries$/)
   await expect(page.getByText('DEL-001', { exact: true })).toBeVisible()
   await fits(page)
@@ -35,7 +35,7 @@ test('receiving navigation, modal, direct refresh and history retain session', a
   await page.getByRole('button', { name: 'View', exact: true }).click()
   await expect(page).toHaveURL(/\/purchase-orders\/42$/)
   await expect(page.getByRole('heading', { name: 'Order information' })).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Update status' })).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: 'Update status' })).toBeVisible()
   await page.reload()
   await expect(page.getByRole('heading', { name: 'Order information' })).toBeVisible()
   await page.goBack()
@@ -67,7 +67,13 @@ test('site engineer landing and material table fit the viewport', async ({ page 
   await signIn(page, ['SiteEngineer'], '/')
   await expect(page).toHaveURL(/\/material-requests$/)
   await expect(page.getByRole('heading', { name: 'Material Request & Approval Management' })).toBeVisible()
-  await expect(page.getByRole('navigation').getByRole('link')).toHaveCount(1)
+  await expect(page.getByRole('navigation').getByRole('link')).toHaveCount(2)
   await fits(page)
   await page.screenshot({ path: testInfo.outputPath('site-engineer-materials.png'), fullPage: true, animations: 'disabled' })
+  await page.getByRole('link', { name: 'Deliveries', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Receive', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: '+ Schedule Delivery', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('link', { name: 'Purchase Orders', exact: true })).toHaveCount(0)
+  await page.goto('/purchase-orders/42')
+  await expect(page.getByRole('heading', { name: 'Access Denied' })).toBeVisible()
 })

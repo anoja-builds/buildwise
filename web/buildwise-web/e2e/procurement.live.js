@@ -23,7 +23,7 @@ test('Flutter request → React approval, quotations and PO confirmation', async
       .getByRole('button', { name: 'Open workspace' }).click()
     await expect(page.getByText(`MATERIAL REQUEST #${requestId}`, { exact: true })).toBeVisible()
   }
-  await login('project.manager@buildwise.demo')
+  await login('procurement.manager@buildwise.demo')
   await nav('Material Requests')
   await page.getByRole('button', { name: `Review request #${requestId}`, exact: true }).click()
   await page.getByRole('button', { name: 'Confirm decision', exact: true }).click()

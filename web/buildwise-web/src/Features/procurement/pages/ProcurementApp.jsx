@@ -18,7 +18,7 @@ export default function ProcurementApp({
 }) {
   const { hasRole } = useAuth()
   const role = (hasRole('ProcurementManager') || hasRole('Administrator')) ? 'Manager' : hasRole('ProcurementOfficer') ? 'Officer' : 'ReadOnly'
-  const canRead = role !== 'ReadOnly' || (section === 'Purchase Orders' && hasRole('ReceivingOfficer'))
+  const canRead = role !== 'ReadOnly'
   let content
   if (section === 'Suppliers') {
     content = supplierId

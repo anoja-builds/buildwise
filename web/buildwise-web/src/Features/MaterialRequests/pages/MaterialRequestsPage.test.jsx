@@ -11,14 +11,14 @@ vi.mock('../components/ProcurementPlanningPanel', () => ({ default: () => null }
 vi.mock('../components/CreateMaterialRequestModal', () => ({ default: () => null }));
 const pending = { id: 42, projectName: 'Live project', reason: 'Site demand', status: 'PendingApproval', requiredDate: '2026-10-01', items: [{ materialName: 'Live material', quantity: 12, materialUnit: 'kg' }] };
 beforeEach(() => {
-  roles = ['ProjectManager'];
+  roles = ['ProcurementManager'];
   vi.clearAllMocks();
   materialRequestService.getRequests.mockResolvedValue([pending]);
   materialRequestService.approveRequest.mockResolvedValue({ status: 'Approved' });
 });
 
 describe('material request decisions', () => {
-  it.each(['ProjectManager', 'Administrator'])('allows %s to review and refreshes persisted status', async role => {
+  it.each(['ProcurementManager', 'Administrator'])('allows %s to review and refreshes persisted status', async role => {
     roles = [role];
     const user = userEvent.setup();
     render(<MaterialRequestsPage />);
@@ -31,7 +31,7 @@ describe('material request decisions', () => {
     expect(screen.queryByRole('button', { name: 'Review request #42' })).not.toBeInTheDocument();
   });
 
-  it.each(['SiteEngineer', 'ProcurementOfficer', 'ReceivingOfficer'])('does not expose approval for %s', async role => {
+  it.each(['SiteEngineer', 'ProcurementOfficer', 'QualityInspector', 'ProjectManager', 'ReceivingOfficer'])('does not expose approval for %s', async role => {
     roles = [role];
     render(<MaterialRequestsPage />);
     await screen.findByText('Live project');
@@ -57,4 +57,11 @@ describe('material request decisions', () => {
     await user.selectOptions(screen.getByRole('combobox'), 'PendingApproval');
     await waitFor(() => expect(materialRequestService.getRequests).toHaveBeenLastCalledWith('PendingApproval'));
   });
+});
+
+it.each(['ProcurementOfficer', 'QualityInspector', 'ProjectManager', 'ReceivingOfficer'])('hides Agent 1 for %s', async role => {
+  roles = [role];
+  render(<MaterialRequestsPage />);
+  await screen.findByText('Live project');
+  expect(screen.queryByRole('button', { name: /Run AI Plan/ })).not.toBeInTheDocument();
 });

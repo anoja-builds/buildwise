@@ -64,6 +64,22 @@ describe('DeliveryDashboard - Schedule Delivery Integration', () => {
     deliveryService.scheduleDelivery.mockResolvedValue({ id: 3, deliveryReference: 'DEL-2026-003', status: 'Scheduled' });
   });
 
+  it.each([
+    ['SiteEngineer', true, false],
+    ['QualityInspector', false, false],
+    ['ProcurementOfficer', false, true],
+    ['ProcurementManager', false, true],
+    ['Administrator', true, true],
+  ])('%s sees only permitted delivery actions', async (role, receive, schedule) => {
+    useAuth.mockReturnValue({ roles: [role] });
+    render(<DeliveryDashboard />);
+    await screen.findByText('DEL-2026-001');
+    expect(Boolean(screen.queryByRole('button', { name: 'Receive', exact: true }))).toBe(receive);
+    expect(Boolean(screen.queryByRole('button', { name: /Schedule Delivery/ }))).toBe(schedule);
+    expect(Boolean(screen.queryByRole('button', { name: 'AI Risk Check' }))).toBe(schedule);
+    expect(deliveryService.getConfirmedPOs).not.toHaveBeenCalled();
+  });
+
   it('renders the Schedule Delivery button in the header', async () => {
     render(<DeliveryDashboard />);
     const scheduleButton = await screen.findByRole('button', { name: /\+ Schedule Delivery/i });
