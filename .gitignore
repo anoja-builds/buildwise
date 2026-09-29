@@ -59,3 +59,7 @@ logs/
 # Python
 __pycache__/
 *.pyc
+
+# Local test artifacts
+.pytest_cache/
+TestResults/

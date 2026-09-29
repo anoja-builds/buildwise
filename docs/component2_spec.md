@@ -13,7 +13,7 @@
 | **Procurement Officer** | Create/edit/deactivate suppliers, record quotations against approved material requests, enter quotation items, start the Quotation & Supplier Analysis Agent workflow, view comparisons and AI recommendations, cannot approve procurement or create a PO themselves. |
 | **Procurement Manager** | Everything a Procurement Officer can view, plus: review the AI recommendation, structured rationale, warnings and validation results, and record **Approve / Reject / Request Revision** on the agent workflow. Only their approval unlocks purchase-order creation. |
 | **Site Engineer / Site Officer** | Read-only, and only for their own project: sees procurement status of their material request (e.g. "Procurement in progress", "PO created") via Flutter — no supplier or quotation detail. |
-| **Administrator** | User/role administration only (shared component, not owned by Component 2), but implicitly controls who can act as Procurement Officer/Manager via `roles`/`user_roles`. |
+| **Administrator** | Shared user/role administration plus the procurement operations already explicitly allowed by ASP.NET endpoint attributes. The five-role refactor preserves those existing permissions; navigation does not grant additional business actions or bypass human approval. |
 | **Quality Inspector** | No access to this component. |
 
 Role checks are enforced server-side on every endpoint via the shared JWT/role middleware (Component 2 does not re-implement authentication, only authorizes against roles already issued).

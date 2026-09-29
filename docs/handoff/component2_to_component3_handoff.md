@@ -2,7 +2,7 @@
 
 **From:** Component 2 (Supplier, Quotation & Procurement Management) · **To:** Component 3 (Delivery & Material Receiving)
 **Branch:** `feature/supplier-procurement` · **Latest code commit:** `6161ecc` · **Date:** 2026-09-20
-**Status:** purchase-order tables and read API are complete and verified end-to-end, so Component 3 can start building delivery workflows against them now.
+**Status:** current authorization contract updated for the five-role model on 2026-09-28. The original branch/commit/date above are historical handoff evidence.
 
 ## 1. What is ready for you
 
@@ -26,71 +26,56 @@
 | `ordered_quantity` | numeric — **use this as the expected quantity per delivery** |
 | `unit_price` | numeric — price agreed at award time |
 
-## 2. Read API
+## 2. Current API contract (2026-09-28)
 
-| Method | Route | Roles | Notes |
-|---|---|---|---|
-| GET | `/api/purchase-orders?status=Confirmed&search=&page=1&pageSize=50` | ProcurementOfficer, ProcurementManager, Administrator, **ReceivingOfficer** | paged list (`total`, `page`, `pageSize`, `items`); `status` filter is case-insensitive; `search` matches supplier name or PO id |
-| GET | `/api/purchase-orders/{id}` | Officer, Manager, Administrator, **ReceivingOfficer** | detail with items, supplier name, material name and unit |
-| POST | `/api/procurement-workflow/{workflowId}/purchase-order` | Officer, Manager, Administrator | explicit/manual trigger; the normal path is automatic on Manager Approve |
-| PATCH | `/api/purchase-orders/{id}/status` | Officer, Manager, Administrator **only** | `ReceivingOfficer` correctly receives **403** — status changes are procurement-owned by design |
+The approved Scenario supersedes the older handoff authorization model.
+SiteEngineer is the site-receiving actor; ProcurementManager reviews material
+requests. Refer to [the integrated delivery contract](component3-handoff.md)
+for the endpoint permission matrix.
 
-`ReceivingOfficer` is already a seeded role (`roles.id = 6`), so no schema work is needed to grant read access.
+SiteEngineer reads `GET /api/Deliveries/expected` and
+`GET /api/Deliveries/{id}`, then submits quantities to
+`POST /api/Deliveries/{id}/receive`. These responses contain limited PO/material
+context, including `orderedQuantity`, `previouslyReceivedUsableQuantity` and
+`outstandingQuantity`. No pricing or quotation data is exposed.
 
-### Response shape (`GET /api/purchase-orders/{id}`)
+Full `GET /api/purchase-orders` and `GET /api/purchase-orders/{id}` remain available
+only to ProcurementOfficer, ProcurementManager and Administrator. PO creation
+from an approved workflow allows ProcurementManager and Administrator, while
+status PATCH allows procurement roles and Administrator subject to state rules.
+SiteEngineer cannot access any of these full procurement endpoints.
 
-```json
-{
-  "id": 2,
-  "quotationId": 3,
-  "materialRequestId": 1,
-  "supplierId": 1,
-  "supplierName": "Supplier A Building Materials",
-  "orderDate": "2026-09-19",
-  "expectedDeliveryDate": "2026-09-26",
-  "status": "Created",
-  "totalAmount": 525000.00,
-  "createdAt": "2026-09-19T05:05:12Z",
-  "updatedAt": "2026-09-19T05:05:12Z",
-  "items": [
-    {
-      "id": 3,
-      "quotationItemId": 4,
-      "materialName": "Cement (50kg bag)",
-      "unit": "bag",
-      "orderedQuantity": 250.00,
-      "unitPrice": 2100.00,
-      "lineTotal": 525000.00
-    }
-  ]
-}
-```
-
-Field names are camelCase (System.Text.Json web defaults), so the contract is identical for React, Flutter and any .NET client you write. Authentication is the shared JWT from `POST /api/auth/login`; pass it as `Authorization: Bearer <token>`.
+React and Flutter use the same ASP.NET JWT. Flutter shows Requests/Deliveries for
+SiteEngineer and Deliveries/Quality for QualityInspector. UI visibility does not
+replace API authorization. Existing Administrator endpoint permissions are preserved.
 
 ## 3. How a purchase order comes into existence (so you can seed or reproduce one)
 
 1. A `material_request` reaches `status = Approved` (Component 1).
 2. A Procurement Officer records quotations for eligible suppliers, then starts the workflow: `POST /api/material-requests/{id}/procurement-workflow`.
 3. The Quotation & Supplier Analysis Agent recommends a supplier (spec §10), and ASP.NET Core independently re-validates the recommendation against every business rule in spec §5.
-4. If validation passes, the workflow moves to `AwaitingApproval`; a Procurement Manager calls `POST /api/procurement-workflow/{id}/decision` with `Approve` (the endpoint is Manager-only, `403` for the Officer).
+4. If validation passes, the workflow moves to `AwaitingApproval`; a Procurement Manager calls `POST /api/procurement-workflow/{id}/decision` with `Approve` (the endpoint allows ProcurementManager and Administrator, `403` for the Officer).
 5. On `Approve`, the PO and its items are created in a single transaction, the winning quotation becomes `Selected`, losing quotations become `Rejected`, and the requester is notified (email, or a log entry when SMTP is unconfigured).
 
 A PO can never exist without an `Approved` `agent_approvals` row, and a second non-cancelled PO for the same material request is blocked (§5.8, §5.10).
 
-## 4. What Component 2 asks of Component 3
+## 4. Component boundaries
 
-- **Read, don't write.** Do not insert or update `purchase_orders` / `purchase_order_items`. If a delivery workflow needs a PO `Confirmed`, `InProgress`, `Completed` or `Cancelled`, ask Component 2 (or call the PATCH endpoint from an Officer/Manager session) rather than writing the table directly — the audit trail depends on that path.
-- **Don't alter `quotations`, `quotation_items`, or the shared `agent_workflows` / `agent_workflow_steps` / `agent_approvals` structure.** Per the spec's Integration Notes and the ERD change-control note, column changes need team agreement.
-- **Spec's read-only boundary.** Component 2 exposes POs as read-only for reconciliation once a PO is `Confirmed` or later; the current code leaves newly created POs at `Created` until an Officer moves them on. If your flow needs `Confirmed` before deliveries can be recorded, say so and we will set that status on approval instead.
-- **Foreign keys.** Link your `deliveries` rows to `purchase_order_id`, and your delivery lines to `purchase_order_items.id` (line-level quantities come from `ordered_quantity` / `unit_price`). Confirm the exact column names on your side before migrating so both components agree on the direction of the FK.
+- Component 2 owns order creation, pricing, quotation selection, confirmation and cancellation.
+- Component 3 reads order items internally and owns receipt-driven PO progress/completion.
+  A received delivery cannot be resubmitted; over-receipt and invalid damaged quantities fail.
+- Delivery scheduling requires a Confirmed or InProgress PO. Newly created POs must first
+  be confirmed by procurement; do not change approval/state rules to skip this step.
+- Keep shared workflow/audit table structures and human approval gates intact.
+- Link deliveries to the PO and each delivery item to its PO item. Clients obtain material
+  and quantity context from the Delivery API, without calling the full PO API.
 
 ## 5. Fastest way to verify from your machine
 
 ```powershell
-# 1. API + agent service (two terminals)
-cd C:\Users\L O Q\Downloads\buildwise-component2\backend\BuildWise.Api ; dotnet run
-cd C:\Users\L O Q\Downloads\buildwise-component2\backend\agent_service ; uvicorn quotation_agent:app --port 8001
+# 1. API + agent service (two terminals, both from the repository root)
+dotnet run --project backend/BuildWise.Api
+python -m uvicorn quotation_agent:app --app-dir backend/agent_service --port 8001
 
 # 2. Login (seeded demo accounts, password Passw0rd!)
 $tok = (Invoke-RestMethod -Method Post -Uri http://localhost:5078/api/auth/login `
@@ -111,7 +96,7 @@ The seeded scenario (spec §11) is: Suppliers A (Active), B (Suspended), C (Acti
 
 ## 6. Known gaps and open questions for you
 
-1. **No `ReceivingOfficer` demo account is seeded.** Register one with `POST /api/auth/register` (role `ReceivingOfficer`) or extend `DbSeeder` demo accounts — roles themselves are already seeded.
+1. **Demo users:** fresh databases seed the five application roles. Development seeding backfills missing demo accounts/assignments while preserving existing passwords; it does not remap legacy roles. Public registration permits only SiteEngineer; other assignments require controlled administration.
 2. **No "partially received" PO status exists** in the ERD enum (`Created/Confirmed/InProgress/Completed/Cancelled`). If deliveries need it, raise it as an ERD change so we add it consistently instead of you tracking it in `deliveries` alone.
 3. **`expected_delivery_date` is fixed at `order_date + 7 days`** and is not editable yet; tell us if the Manager should set it during approval.
 4. **Tracing a PO line back to the material request** goes `purchase_order_items.quotation_item_id → quotation_items.material_request_item_id → material_request_items.material_id`; `material_request_id` and `supplier_id` are also exposed directly on the PO DTO.

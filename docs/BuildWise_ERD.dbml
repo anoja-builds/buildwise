@@ -129,7 +129,7 @@ Table roles {
   id integer [pk, increment]
   name varchar(100) [not null, unique]
 
-  Note: 'Examples: SiteEngineer, ProjectManager, ProcurementOfficer, ReceivingOfficer, QualityInspector'
+  Note: 'Application roles: SiteEngineer, ProcurementOfficer, ProcurementManager, QualityInspector, Administrator. Legacy rows are retained until an approved data migration.'
 }
 
 Table user_roles {
