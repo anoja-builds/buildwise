@@ -53,12 +53,6 @@ public class ApplicationDbContext : DbContext
 
     public DbSet<Approval> Approvals => Set<Approval>();
 
-    public DbSet<Rfq> Rfqs => Set<Rfq>();
-
-    public DbSet<RfqSupplier> RfqSuppliers => Set<RfqSupplier>();
-
-    public DbSet<ProcurementRecommendation> ProcurementRecommendations => Set<ProcurementRecommendation>();
-
     public DbSet<AgentWorkflow> AgentWorkflows => Set<AgentWorkflow>();
 
     public DbSet<AgentWorkflowStep> AgentWorkflowSteps => Set<AgentWorkflowStep>();

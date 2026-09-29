@@ -80,7 +80,8 @@ public class ProcurementIntegrationTests : IAsyncLifetime
                 services.AddDbContext<ApplicationDbContext>(o => o.UseNpgsql(_connection));
                 services.AddSingleton<JwtTokenService>(); services.AddScoped<AuthService>();
                 services.AddScoped<ProcurementWorkflowService>(); services.AddScoped<ProcurementValidationService>();
-                services.AddScoped<ProcurementPlanningAgentService>(); services.AddScoped<SupplierEvaluationAgentService>();
+                services.AddScoped<ProcurementPlanningAgentService>();
+                services.AddScoped<DeliveryDiscrepancyAgentService>();
                 services.AddScoped<DeliveryRiskAgentService>(); services.AddSingleton<IEmailService, NoOpEmailService>();
                 services.AddHttpClient<QuotationAgentClient>(c => c.BaseAddress = new Uri(Environment.GetEnvironmentVariable("BUILDWISE_TEST_AGENT_URL")!));
                 services.AddControllers().AddApplicationPart(typeof(AuthController).Assembly).AddJsonOptions(o => {
@@ -124,7 +125,7 @@ public class ProcurementIntegrationTests : IAsyncLifetime
     }
     private async Task<(int WorkflowId, int QuoteId)> Prepare(HttpClient site, HttpClient officer, int requestId)
     {
-        var pm = await Login("project.manager@buildwise.demo");
+        var pm = await Login("procurement.manager@buildwise.demo");
         Assert.Equal(HttpStatusCode.OK, (await pm.PostAsJsonAsync($"/api/MaterialRequests/{requestId}/approve", new { decision = "Approved" })).StatusCode);
         var queue = await Json(await officer.GetAsync("/api/MaterialRequests?status=Approved"));
         Assert.Contains(queue.EnumerateArray(), r => r.GetProperty("id").GetInt32() == requestId);
@@ -190,15 +191,44 @@ public class ProcurementIntegrationTests : IAsyncLifetime
         var poId = result.GetProperty("purchaseOrderId").GetInt32();
         Assert.Equal(HttpStatusCode.BadRequest, (await manager.PostAsJsonAsync($"/api/procurement-workflow/{workflowId}/purchase-order", new {})).StatusCode);
         Assert.Equal(1, await db.PurchaseOrders.CountAsync());
-        var receiver = await Login("receiving.officer@buildwise.demo");
-        Assert.Empty((await Json(await receiver.GetAsync("/api/purchase-orders"))).GetProperty("items").EnumerateArray());
+        Assert.Equal(HttpStatusCode.Forbidden, (await site.GetAsync("/api/purchase-orders")).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await officer.PatchAsJsonAsync($"/api/purchase-orders/{poId}/status", new { status = "Completed" })).StatusCode);
         Assert.Equal(HttpStatusCode.NoContent, (await officer.PatchAsJsonAsync($"/api/purchase-orders/{poId}/status", new { status = "Confirmed" })).StatusCode);
-        var visible = await Json(await receiver.GetAsync($"/api/purchase-orders/{poId}"));
+        Assert.Equal(HttpStatusCode.Forbidden, (await site.GetAsync($"/api/purchase-orders/{poId}")).StatusCode);
+        var visible = await Json(await manager.GetAsync($"/api/purchase-orders/{poId}"));
         Assert.Equal("Confirmed", visible.GetProperty("status").GetString());
         Assert.Equal(HttpStatusCode.NoContent, (await officer.PatchAsJsonAsync($"/api/purchase-orders/{poId}/status", new { status = "Cancelled" })).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await manager.PostAsJsonAsync($"/api/procurement-workflow/{workflowId}/purchase-order", new {})).StatusCode);
         Assert.Equal(1, await db.PurchaseOrders.CountAsync());
+    }
+
+    [ProcurementPostgresTheory]
+    [InlineData(0)]
+    public async Task Site_receives_procurement_order_using_only_delivery_context(int _)
+    {
+        var site = await Login("site.engineer@buildwise.demo");
+        var officer = await Login("procurement.officer@buildwise.demo");
+        var manager = await Login("procurement.manager@buildwise.demo");
+        var requestId = await NewRequest(site);
+        var (workflow, _) = await Prepare(site, officer, requestId);
+        var approved = await Json(await manager.PostAsJsonAsync($"/api/procurement-workflow/{workflow}/decision", new { decision = "Approve" }));
+        var poId = approved.GetProperty("purchaseOrderId").GetInt32();
+        Assert.Equal(HttpStatusCode.NoContent, (await officer.PatchAsJsonAsync($"/api/purchase-orders/{poId}/status", new { status = "Confirmed" })).StatusCode);
+        var scheduled = await Json(await officer.PostAsJsonAsync("/api/Deliveries", new { purchaseOrderId = poId, deliveryReference = "RBAC-RECEIPT" }));
+        var id = scheduled.GetProperty("id").GetInt32();
+        var expected = await Json(await site.GetAsync("/api/Deliveries/expected"));
+        var delivery = Assert.Single(expected.EnumerateArray());
+        Assert.Equal(id, delivery.GetProperty("id").GetInt32());
+        Assert.DoesNotContain("unitPrice", delivery.ToString());
+        Assert.DoesNotContain("quotationId", delivery.ToString());
+        var items = delivery.GetProperty("items").EnumerateArray().Select(i => new {
+            purchaseOrderItemId = i.GetProperty("purchaseOrderItemId").GetInt32(),
+            receivedQuantity = i.GetProperty("outstandingQuantity").GetDecimal(), damagedQuantity = 0
+        }).ToArray();
+        Assert.Equal(HttpStatusCode.OK, (await site.PostAsJsonAsync($"/api/Deliveries/{id}/receive", new { items })).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await site.GetAsync($"/api/purchase-orders/{poId}")).StatusCode);
+        await using var db = Db();
+        Assert.Equal(PurchaseOrderStatus.Completed, (await db.PurchaseOrders.SingleAsync()).Status);
     }
 
     [ProcurementPostgresTheory]
@@ -228,22 +258,27 @@ public class ProcurementIntegrationTests : IAsyncLifetime
     [ProcurementPostgresTheory]
     [InlineData(true)]
     [InlineData(false)]
-    public async Task Concurrent_approval_paths_create_at_most_one_order(bool legacyRace)
+    public async Task Concurrent_workflow_approvals_create_at_most_one_order(bool anotherWorkflow)
     {
         var site = await Login("site.engineer@buildwise.demo");
         var officer = await Login("procurement.officer@buildwise.demo");
         var manager = await Login("procurement.manager@buildwise.demo");
         var id = await NewRequest(site);
         var (workflow, quote) = await Prepare(site, officer, id);
-        int recId;
-        await using (var db = Db()) {
-            var q = await db.Quotations.SingleAsync(q => q.Id == quote);
-            var rec = new ProcurementRecommendation { MaterialRequestId = id, RecommendedQuotationId = quote, RecommendedSupplierId = q.SupplierId };
-            db.ProcurementRecommendations.Add(rec); await db.SaveChangesAsync(); recId = rec.Id;
+        var secondWorkflow = workflow;
+        if (anotherWorkflow)
+        {
+            await using var db = Db();
+            var original = await db.AgentWorkflows.Include(w => w.Steps).SingleAsync(w => w.Id == workflow);
+            var second = new AgentWorkflow { MaterialRequestId = id, InitiatedByUserId = original.InitiatedByUserId,
+                Status = WorkflowStatus.AwaitingApproval, Steps = [new AgentWorkflowStep {
+                    AgentRole = "QuotationSupplierAnalysisAgent",
+                    StructuredResult = original.Steps.Single(s => s.AgentRole == "QuotationSupplierAnalysisAgent").StructuredResult }] };
+            db.AgentWorkflows.Add(second);
+            await db.SaveChangesAsync();
+            secondWorkflow = second.Id;
         }
-        var paths = legacyRace
-            ? new[] { $"/api/procurement-workflow/{workflow}/decision", $"/api/Procurement/recommendations/{recId}/approve" }
-            : new[] { $"/api/procurement-workflow/{workflow}/decision", $"/api/procurement-workflow/{workflow}/decision" };
+        var paths = new[] { $"/api/procurement-workflow/{workflow}/decision", $"/api/procurement-workflow/{secondWorkflow}/decision" };
         var responses = await Task.WhenAll(paths.Select(path => manager.PostAsJsonAsync(path, new { decision = "Approved" })));
         Assert.Single(responses, r => r.StatusCode == HttpStatusCode.OK);
         Assert.Single(responses, r => r.StatusCode == HttpStatusCode.BadRequest);
@@ -262,7 +297,7 @@ public class ProcurementIntegrationTests : IAsyncLifetime
         var officer = await Login("procurement.officer@buildwise.demo");
         var id = await NewRequest(site);
         if (fault != "unapproved") {
-            var pm = await Login("project.manager@buildwise.demo");
+            var pm = await Login("procurement.manager@buildwise.demo");
             Assert.Equal(HttpStatusCode.OK, (await pm.PostAsJsonAsync($"/api/MaterialRequests/{id}/approve", new { decision = "Approved" })).StatusCode);
         }
         var detail = await Json(await officer.GetAsync($"/api/MaterialRequests/{id}"));
@@ -315,6 +350,20 @@ public class ProcurementIntegrationTests : IAsyncLifetime
         if (_host != null) { await _host.StopAsync(); _host.Dispose(); }
         if (!_created) return;
         await using var admin = new NpgsqlConnection(_adminConnection); await admin.OpenAsync();
-        await using var cmd = new NpgsqlCommand($"DROP DATABASE \"{_database}\" WITH (FORCE)", admin); await cmd.ExecuteNonQueryAsync();
+        // Dropping only this fixture's database must not require terminating other
+        // PostgreSQL processes (for example an autovacuum worker).
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                await using var cmd = new NpgsqlCommand($"DROP DATABASE \"{_database}\"", admin);
+                await cmd.ExecuteNonQueryAsync();
+                break;
+            }
+            catch (PostgresException ex) when (ex.SqlState == "55006" && attempt < 4)
+            {
+                await Task.Delay(250);
+            }
+        }
     }
 }

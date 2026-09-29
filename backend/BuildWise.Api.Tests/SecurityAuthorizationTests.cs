@@ -48,7 +48,6 @@ public class SecurityAuthorizationTests : IAsyncLifetime
                 services.AddScoped<ProcurementPlanningAgentService>();
                 services.AddScoped<DeliveryRiskAgentService>();
                 services.AddScoped<DeliveryDiscrepancyAgentService>();
-                services.AddScoped<SupplierEvaluationAgentService>();
                 services.AddScoped<ProcurementValidationService>();
                 services.AddScoped<ProcurementWorkflowService>();
                 services.AddSingleton<IEmailService, NoOpEmailService>();
@@ -86,8 +85,6 @@ public class SecurityAuthorizationTests : IAsyncLifetime
             ValidUntil = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(10)), TotalAmount = 500,
             Items = [new QuotationItem { MaterialRequestItemId = scenario.RequestItem.Id, Quantity = 250, UnitPrice = 2 }] };
         db.Quotations.Add(quotation);
-        db.ProcurementRecommendations.Add(new ProcurementRecommendation { MaterialRequestId = scenario.Request.Id,
-            RecommendedSupplier = supplier, RecommendedQuotation = quotation });
         db.AgentWorkflows.Add(new AgentWorkflow { MaterialRequestId = scenario.Request.Id,
             Status = WorkflowStatus.AwaitingApproval, Steps = [new AgentWorkflowStep { AgentRole = "QuotationSupplierAnalysisAgent",
                 StructuredResult = System.Text.Json.JsonSerializer.Serialize(new BuildWise.Api.DTOs.AgentRecommendationDto(
@@ -116,11 +113,11 @@ public class SecurityAuthorizationTests : IAsyncLifetime
             ("POST", "/api/MaterialRequests/1/submit", "ProcurementOfficer"),
             ("POST", "/api/MaterialRequests/1/approve", "SiteEngineer"),
             ("POST", "/api/MaterialRequests/1/plan", "ReceivingOfficer"),
-            ("GET", "/api/Deliveries/expected", "SiteEngineer"),
-            ("GET", "/api/Deliveries/history", "SiteEngineer"),
-            ("GET", "/api/Deliveries/1", "SiteEngineer"),
-            ("GET", "/api/Deliveries/schedules", "SiteEngineer"),
-            ("GET", "/api/Deliveries/issues", "SiteEngineer"),
+            ("GET", "/api/Deliveries/expected", "ReceivingOfficer"),
+            ("GET", "/api/Deliveries/history", "ReceivingOfficer"),
+            ("GET", "/api/Deliveries/1", "ReceivingOfficer"),
+            ("GET", "/api/Deliveries/schedules", "ReceivingOfficer"),
+            ("GET", "/api/Deliveries/issues", "ReceivingOfficer"),
             ("POST", "/api/Deliveries", "SiteEngineer"),
             ("POST", "/api/Deliveries/1/receive", "ProcurementOfficer"),
             ("POST", "/api/Deliveries/1/evidence", "ProcurementOfficer"),
@@ -128,14 +125,13 @@ public class SecurityAuthorizationTests : IAsyncLifetime
             ("POST", "/api/Deliveries/report-issue", "ProcurementOfficer"),
             ("POST", "/api/Deliveries/evaluate-risk/1", "SiteEngineer"),
             ("POST", "/api/Deliveries/1/risk-analysis", "SiteEngineer"),
-            ("GET", "/api/Procurement/rfqs", "SiteEngineer"),
-            ("POST", "/api/Procurement/rfqs", "SiteEngineer"),
-            ("POST", "/api/Procurement/quotations", "SiteEngineer"),
-            ("GET", "/api/Procurement/comparison/1", "SiteEngineer"),
-            ("POST", "/api/Procurement/1/evaluate", "SiteEngineer"),
-            ("GET", "/api/Procurement/recommendations", "SiteEngineer"),
-            ("GET", "/api/Procurement/purchase-orders", "SiteEngineer"),
-            ("POST", "/api/Procurement/recommendations/1/approve", "ProcurementOfficer"),
+            ("GET", "/api/purchase-orders", "SiteEngineer"),
+            ("GET", "/api/material-requests/1/quotations", "SiteEngineer"),
+            ("POST", "/api/material-requests/1/quotations", "SiteEngineer"),
+            ("GET", "/api/material-requests/1/quotations/compare", "SiteEngineer"),
+            ("GET", "/api/material-requests/1/procurement-workflow", "SiteEngineer"),
+            ("GET", "/api/procurement-workflow/1", "SiteEngineer"),
+            ("GET", "/api/procurement-workflow/1/history", "SiteEngineer"),
             ("POST", "/api/procurement-workflow/1/decision", "ProcurementOfficer"),
             ("POST", "/api/procurement-workflow/1/purchase-order", "ProcurementOfficer"),
             ("POST", "/api/material-requests/1/procurement-workflow", "SiteEngineer")
@@ -198,7 +194,7 @@ public class SecurityAuthorizationTests : IAsyncLifetime
     [Fact]
     public async Task Receipt_and_issue_use_JWT_actor()
     {
-        SignIn("ReceivingOfficer");
+        SignIn("SiteEngineer");
         using var receipt = await _client.PostAsJsonAsync("/api/Deliveries/1/receive", new { receivedByUserId = 999, items = new[] { new { purchaseOrderItemId = 1, receivedQuantity = 10, damagedQuantity = 0 } } });
         Assert.Equal(HttpStatusCode.OK, receipt.StatusCode);
         using var issue = await _client.PostAsJsonAsync("/api/Deliveries/report-issue", new { deliveryId = 1, reportedByUserId = 999, issueType = "Damage", description = "Test" });
@@ -212,21 +208,21 @@ public class SecurityAuthorizationTests : IAsyncLifetime
     [Theory]
     [InlineData("ProcurementManager")]
     [InlineData("Administrator")]
-    public async Task Alternative_approval_records_JWT_and_creates_linked_order_once(string role)
+    public async Task Workflow_approval_records_JWT_and_creates_linked_order_once(string role)
     {
         SignIn(role);
-        using var response = await _client.PostAsJsonAsync("/api/Procurement/recommendations/1/approve", new { userId = 999, decision = "Approved" });
+        using var response = await _client.PostAsJsonAsync("/api/procurement-workflow/1/decision", new { reviewedByUserId = 999, decision = "Approved" });
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         using var scope = _host.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-        var rec = await db.ProcurementRecommendations.SingleAsync();
-        Assert.Equal(77, rec.ApprovedByUserId);
+        Assert.Equal(77, (await db.AgentApprovals.SingleAsync()).ReviewedByUserId);
         var po = await db.PurchaseOrders.Include(p => p.Items).SingleAsync(p => p.QuotationId == 1);
         Assert.Equal(500, po.TotalAmount);
         Assert.Equal(1, Assert.Single(po.Items).MaterialId);
-        Assert.Equal(po.Id, rec.GeneratedPurchaseOrderId);
-        using var repeat = await _client.PostAsJsonAsync("/api/Procurement/recommendations/1/approve", new { decision = "Approved" });
+        Assert.Equal(po.Id, (await db.AgentWorkflows.SingleAsync()).PurchaseOrderId);
+        using var repeat = await _client.PostAsJsonAsync("/api/procurement-workflow/1/decision", new { decision = "Approved" });
         Assert.Equal(HttpStatusCode.BadRequest, repeat.StatusCode);
+        Assert.Equal(1, await db.AgentApprovals.CountAsync());
     }
 
     [Theory]
@@ -239,60 +235,56 @@ public class SecurityAuthorizationTests : IAsyncLifetime
     [InlineData("supplier")]
     [InlineData("duplicate")]
     [InlineData("decision")]
-    public async Task Alternative_approval_rejects_invalid_data_without_writes(string fault)
+    public async Task Workflow_approval_rejects_invalid_data_without_writes(string fault)
     {
         SignIn("ProcurementManager");
         using var scope = _host.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-        var rec = await db.ProcurementRecommendations.Include(r => r.RecommendedQuotation).ThenInclude(q => q!.Items)
-            .Include(r => r.RecommendedSupplier).Include(r => r.MaterialRequest).SingleAsync();
+        var quotation = await db.Quotations.Include(q => q.Items).Include(q => q.Supplier).SingleAsync();
         switch (fault)
         {
-            case "missing": rec.RecommendedQuotationId = null; rec.RecommendedQuotation = null; break;
-            case "expired": rec.RecommendedQuotation!.ValidUntil = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-1)); break;
-            case "inactive": rec.RecommendedSupplier!.Status = SupplierStatus.Inactive; break;
-            case "quantity": rec.RecommendedQuotation!.Items.Single().Quantity = 249; break;
-            case "total": rec.RecommendedQuotation!.TotalAmount = 501; break;
-            case "request": rec.RecommendedQuotation!.MaterialRequestId = 999; break;
-            case "supplier": rec.RecommendedQuotation!.SupplierId = 999; rec.RecommendedQuotation.Supplier = null; break;
+            case "missing":
+                (await db.AgentWorkflowSteps.SingleAsync()).StructuredResult = "{}";
+                break;
+            case "expired": quotation.ValidUntil = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-1)); break;
+            case "inactive": quotation.Supplier.Status = SupplierStatus.Inactive; break;
+            case "quantity": quotation.Items.Single().Quantity = 249; break;
+            case "total": quotation.TotalAmount = 501; break;
+            case "request": quotation.MaterialRequestId = 999; break;
+            case "supplier": quotation.SupplierId = 999; quotation.Supplier = null!; break;
             case "duplicate":
-                db.PurchaseOrders.Add(new PurchaseOrder { QuotationId = rec.RecommendedQuotationId!.Value, SupplierId = rec.RecommendedSupplierId,
+                db.PurchaseOrders.Add(new PurchaseOrder { QuotationId = quotation.Id, SupplierId = quotation.SupplierId,
                     OrderDate = DateOnly.FromDateTime(DateTime.UtcNow), TotalAmount = 500 });
                 break;
-            case "decision":
-            {
-                using var invalidDecision = await _client.PostAsJsonAsync("/api/Procurement/recommendations/1/approve", new { decision = "Invalid" });
-                Assert.Equal(HttpStatusCode.BadRequest, invalidDecision.StatusCode);
-                return;
-            }
         }
         await db.SaveChangesAsync();
         db.ChangeTracker.Clear();
         var count = await db.PurchaseOrders.CountAsync();
-        using var response = await _client.PostAsJsonAsync("/api/Procurement/recommendations/1/approve", new { decision = "Approved" });
+        using var response = await _client.PostAsJsonAsync("/api/procurement-workflow/1/decision",
+            new { decision = fault == "decision" ? "Invalid" : "Approved" });
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         db.ChangeTracker.Clear();
-        rec = await db.ProcurementRecommendations.SingleAsync();
-        Assert.Equal(RecommendationStatus.AwaitingApproval, rec.Status);
-        Assert.Null(rec.ApprovedByUserId);
+        Assert.Equal(WorkflowStatus.AwaitingApproval, (await db.AgentWorkflows.SingleAsync()).Status);
+        Assert.Empty(await db.AgentApprovals.ToListAsync());
         Assert.Equal(count, await db.PurchaseOrders.CountAsync());
     }
 
-    [Fact]
-    public async Task Workflow_review_records_JWT_reviewer()
+    [Theory]
+    [InlineData("Reject")]
+    [InlineData("RevisionRequested")]
+    public async Task Workflow_review_records_JWT_reviewer(string decision)
     {
         SignIn("ProcurementManager");
-        using var response = await _client.PostAsJsonAsync("/api/procurement-workflow/1/decision", new { decision = "Reject", reviewedByUserId = 999 });
+        using var response = await _client.PostAsJsonAsync("/api/procurement-workflow/1/decision", new { decision, reviewedByUserId = 999 });
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         using var scope = _host.Services.CreateScope();
         Assert.Equal(77, (await scope.ServiceProvider.GetRequiredService<ApplicationDbContext>().AgentApprovals.SingleAsync()).ReviewedByUserId);
     }
 
     [Theory]
-    [InlineData("/api/Procurement/recommendations/1/approve", "ProcurementManager")]
     [InlineData("/api/procurement-workflow/1/decision", "ProcurementManager")]
-    [InlineData("/api/Deliveries/1/receive", "ReceivingOfficer")]
-    [InlineData("/api/Deliveries/1/risk-analysis", "ReceivingOfficer")]
+    [InlineData("/api/Deliveries/1/receive", "SiteEngineer")]
+    [InlineData("/api/Deliveries/1/risk-analysis", "ProcurementOfficer")]
     [InlineData("/api/MaterialRequests/1/plan", "SiteEngineer")]
     public async Task Invalid_claim_cannot_fall_back_to_body_or_query(string path, string role)
     {
@@ -346,17 +338,30 @@ public class SecurityAuthorizationTests : IAsyncLifetime
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public async Task Orders_created_on_one_route_block_duplicates_on_the_other(bool alternativeFirst)
+    public async Task Workflow_order_blocks_repeat_and_second_workflow(bool anotherWorkflow)
     {
         SignIn("ProcurementManager");
-        var alternative = "/api/Procurement/recommendations/1/approve";
-        var workflow = "/api/procurement-workflow/1/decision";
-        using var first = await _client.PostAsJsonAsync(alternativeFirst ? alternative : workflow, new { decision = "Approved" });
-        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
-        using var second = await _client.PostAsJsonAsync(alternativeFirst ? workflow : alternative, new { decision = "Approved" });
-        Assert.Equal(HttpStatusCode.BadRequest, second.StatusCode);
+        var secondId = 1;
         using var scope = _host.Services.CreateScope();
-        Assert.Equal(1, await scope.ServiceProvider.GetRequiredService<ApplicationDbContext>().PurchaseOrders.CountAsync(p => p.QuotationId == 1));
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        if (anotherWorkflow)
+        {
+            var original = await db.AgentWorkflows.Include(w => w.Steps).SingleAsync();
+            var second = new AgentWorkflow { MaterialRequestId = original.MaterialRequestId,
+                Status = WorkflowStatus.AwaitingApproval, Steps = [new AgentWorkflowStep {
+                    AgentRole = "QuotationSupplierAnalysisAgent", StructuredResult = original.Steps.Single().StructuredResult }] };
+            db.AgentWorkflows.Add(second);
+            await db.SaveChangesAsync();
+            secondId = second.Id;
+        }
+        using var first = await _client.PostAsJsonAsync("/api/procurement-workflow/1/decision", new { decision = "Approved" });
+        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+        using var repeatedDecision = await _client.PostAsJsonAsync($"/api/procurement-workflow/{secondId}/decision", new { decision = "Approved" });
+        Assert.Equal(HttpStatusCode.BadRequest, repeatedDecision.StatusCode);
+        using var repeatedCreation = await _client.PostAsJsonAsync("/api/procurement-workflow/1/purchase-order", new { });
+        Assert.Equal(HttpStatusCode.BadRequest, repeatedCreation.StatusCode);
+        Assert.Equal(1, await db.PurchaseOrders.CountAsync(p => p.QuotationId == 1));
+        Assert.Equal(1, await db.AgentApprovals.CountAsync());
     }
 
     [Fact]
@@ -372,13 +377,13 @@ public class SecurityAuthorizationTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Project_manager_can_approve_pending_request_only()
+    public async Task Procurement_manager_can_approve_pending_request_only()
     {
         using var scope = _host.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         (await db.MaterialRequests.SingleAsync()).Status = MaterialRequestStatus.PendingApproval;
         await db.SaveChangesAsync();
-        SignIn("ProjectManager");
+        SignIn("ProcurementManager");
         using var response = await _client.PostAsJsonAsync("/api/MaterialRequests/1/approve", new { userId = 999, decision = "Approved" });
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         using var repeat = await _client.PostAsJsonAsync("/api/MaterialRequests/1/approve", new { decision = "Rejected" });
@@ -401,13 +406,126 @@ public class SecurityAuthorizationTests : IAsyncLifetime
         using var body = System.Text.Json.JsonDocument.Parse(await created.Content.ReadAsStringAsync());
         var id = body.RootElement.GetProperty("id").GetInt32();
         Assert.Equal("PendingApproval", body.RootElement.GetProperty("status").GetString());
-        SignIn("ProjectManager");
+        SignIn("ProcurementManager");
         using var approval = await _client.PostAsJsonAsync($"/api/materialrequests/{id}/approve", new { decision = "Approved" });
         Assert.Equal(HttpStatusCode.OK, approval.StatusCode);
         SignIn("SiteEngineer");
         using var detail = System.Text.Json.JsonDocument.Parse(await _client.GetStringAsync($"/api/materialrequests/{id}"));
         Assert.Equal("Approved", detail.RootElement.GetProperty("status").GetString());
         Assert.Equal(77, detail.RootElement.GetProperty("requestedByUserId").GetInt32());
+    }
+
+    [Theory]
+    [InlineData("SiteEngineer", "/api/suppliers", "POST")]
+    [InlineData("SiteEngineer", "/api/material-requests/1/quotations", "POST")]
+    [InlineData("SiteEngineer", "/api/purchase-orders", "GET")]
+    [InlineData("SiteEngineer", "/api/purchase-orders/1", "GET")]
+    [InlineData("SiteEngineer", "/api/purchase-orders/1/status", "PATCH")]
+    [InlineData("SiteEngineer", "/api/procurement-workflow/1/decision", "POST")]
+    [InlineData("SiteEngineer", "/api/procurement-workflow/1/purchase-order", "POST")]
+    [InlineData("ProcurementOfficer", "/api/MaterialRequests/1/approve", "POST")]
+    [InlineData("ProcurementOfficer", "/api/MaterialRequests/1/plan", "POST")]
+    [InlineData("QualityInspector", "/api/suppliers", "GET")]
+    [InlineData("QualityInspector", "/api/procurement-workflow/1/decision", "POST")]
+    [InlineData("QualityInspector", "/api/purchase-orders", "GET")]
+    [InlineData("ProjectManager", "/api/MaterialRequests/1/approve", "POST")]
+    [InlineData("ProjectManager", "/api/MaterialRequests", "GET")]
+    [InlineData("ReceivingOfficer", "/api/Deliveries/1/receive", "POST")]
+    [InlineData("ReceivingOfficer", "/api/purchase-orders", "GET")]
+    public async Task Five_role_boundaries_reject_unauthorized_actions(string role, string path, string method)
+    {
+        SignIn(role);
+        using var response = await _client.SendAsync(new HttpRequestMessage(new HttpMethod(method), path)
+            { Content = JsonContent.Create(new { }) });
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("SiteEngineer")]
+    [InlineData("ProcurementOfficer")]
+    [InlineData("ProcurementManager")]
+    [InlineData("QualityInspector")]
+    [InlineData("Administrator")]
+    public async Task Delivery_context_is_available_without_sensitive_navigation_properties(string role)
+    {
+        using (var scope = _host.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            db.DeliverySchedules.Add(new DeliverySchedule { PurchaseOrderId = 1 });
+            db.DeliveryIssues.Add(new DeliveryIssue { DeliveryId = 1, ReportedByUserId = 77 });
+            await db.SaveChangesAsync();
+        }
+        SignIn(role);
+        foreach (var path in new[] { "expected", "history", "1", "schedules", "issues", "1/discrepancy-history" })
+        {
+            using var response = await _client.GetAsync("/api/Deliveries/" + path);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var json = await response.Content.ReadAsStringAsync();
+            foreach (var forbidden in new[] { "unitPrice", "totalAmount", "quotationId", "passwordHash", "userRoles" })
+                Assert.DoesNotContain(forbidden, json, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    [Fact]
+    public async Task Engineer_can_submit_own_draft_and_record_damage_and_evidence()
+    {
+        SignIn("SiteEngineer");
+        using var created = await _client.PostAsJsonAsync("/api/MaterialRequests", new {
+            projectId = 1, reason = "Draft", submitImmediately = false,
+            items = new[] { new { materialId = 1, quantity = 1, unit = "Bags" } } });
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        using var body = System.Text.Json.JsonDocument.Parse(await created.Content.ReadAsStringAsync());
+        var id = body.RootElement.GetProperty("id").GetInt32();
+        using var submitted = await _client.PostAsJsonAsync($"/api/MaterialRequests/{id}/submit", new { });
+        Assert.Equal(HttpStatusCode.OK, submitted.StatusCode);
+        using var receipt = await _client.PostAsJsonAsync("/api/Deliveries/1/receive", new {
+            items = new[] { new { purchaseOrderItemId = 1, receivedQuantity = 10, damagedQuantity = 2 } } });
+        Assert.Equal(HttpStatusCode.OK, receipt.StatusCode);
+        using var evidence = await _client.PostAsJsonAsync("/api/Deliveries/1/evidence", new { imageUrl = "https://example.test/damage.jpg" });
+        Assert.Equal(HttpStatusCode.OK, evidence.StatusCode);
+        using var scope = _host.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        Assert.Equal(2, (await db.DeliveryItems.SingleAsync()).DamagedQuantity);
+        Assert.Equal(DeliveryStatus.DiscrepancyReported, (await db.Deliveries.SingleAsync()).Status);
+    }
+
+    [Fact]
+    public async Task Repeat_receiving_context_uses_remaining_usable_quantity()
+    {
+        using (var scope = _host.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            db.Deliveries.Add(new Delivery { PurchaseOrderId = 1, Status = DeliveryStatus.DiscrepancyReported,
+                Items = [new DeliveryItem { PurchaseOrderItemId = 1, ReceivedQuantity = 7, DamagedQuantity = 2 }] });
+            await db.SaveChangesAsync();
+        }
+        SignIn("SiteEngineer");
+        using var expected = System.Text.Json.JsonDocument.Parse(await _client.GetStringAsync("/api/Deliveries/expected"));
+        var item = expected.RootElement[0].GetProperty("items")[0];
+        Assert.Equal(5, item.GetProperty("previouslyReceivedUsableQuantity").GetDecimal());
+        Assert.Equal(5, item.GetProperty("outstandingQuantity").GetDecimal());
+        using var detail = System.Text.Json.JsonDocument.Parse(await _client.GetStringAsync("/api/Deliveries/1"));
+        Assert.Equal(5, detail.RootElement.GetProperty("items")[0].GetProperty("outstandingQuantity").GetDecimal());
+    }
+
+    [Theory]
+    [InlineData("ProcurementOfficer")]
+    [InlineData("ProcurementManager")]
+    [InlineData("Administrator")]
+    public async Task Procurement_roles_can_record_suppliers_and_quotations(string role)
+    {
+        SignIn(role);
+        using var supplier = await _client.PostAsJsonAsync("/api/suppliers", new { name = "New supplier" });
+        Assert.Equal(HttpStatusCode.Created, supplier.StatusCode);
+        using var quotation = await _client.PostAsJsonAsync("/api/material-requests/1/quotations", new {
+            supplierId = 1, quotationDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            validUntil = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(7)),
+            items = new[] { new { materialRequestItemId = 1, quantity = 250, unitPrice = 2 } } });
+        Assert.Equal(HttpStatusCode.OK, quotation.StatusCode);
+        using var scope = _host.Services.CreateScope();
+        Assert.Equal(2, await scope.ServiceProvider.GetRequiredService<ApplicationDbContext>().Quotations.CountAsync());
+        Assert.Equal(HttpStatusCode.OK, (await _client.GetAsync("/api/purchase-orders")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await _client.GetAsync("/api/MaterialRequests/1")).StatusCode);
     }
 
     public async Task DisposeAsync()

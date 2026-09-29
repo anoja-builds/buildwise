@@ -55,7 +55,6 @@ builder.Services.AddHttpClient<QualityRiskAgentClient>(client =>
 }).RemoveAllLoggers();
 
 builder.Services.AddScoped<ProcurementPlanningAgentService>();
-builder.Services.AddScoped<SupplierEvaluationAgentService>();
 
 // Shared authentication (Core, used by every component controllers, React and Flutter)
 builder.Services.AddSingleton<JwtTokenService>();
@@ -103,7 +102,7 @@ builder.Services.AddCors(options =>
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
-    // Legacy and structured procurement DTOs share names in different namespaces.
+    // Keep schema names unambiguous across API DTO namespaces.
     var defaultSchemaId = new Swashbuckle.AspNetCore.SwaggerGen.SchemaGeneratorOptions().SchemaIdSelector;
     c.CustomSchemaIds(type => $"{type.Namespace}.{defaultSchemaId(type)}".Replace('+', '.'));
     c.SwaggerDoc("v1", new() { Title = "BuildWise API", Version = "v1", Description = "Supplier, Quotation & Procurement Management, Delivery & Receiving, and shared authentication" });
