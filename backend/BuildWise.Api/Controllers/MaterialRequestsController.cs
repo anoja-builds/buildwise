@@ -49,7 +49,7 @@ public class MaterialRequestsController : ControllerBase
     }
 
     [HttpGet("options")]
-    [Authorize(Roles = "SiteEngineer,ProjectManager,Administrator")]
+    [Authorize(Roles = "SiteEngineer,Administrator")]
     public async Task<IActionResult> GetOptions()
     {
         var projects = await _dbContext.Projects.AsNoTracking()
@@ -62,7 +62,7 @@ public class MaterialRequestsController : ControllerBase
     }
 
     [HttpGet]
-    [Authorize(Roles = "SiteEngineer,ProjectManager,ProcurementOfficer,ProcurementManager,Administrator")]
+    [Authorize(Roles = "SiteEngineer,ProcurementOfficer,ProcurementManager,Administrator")]
     public async Task<IActionResult> GetRequests([FromQuery] string? status, [FromQuery] int? projectId)
     {
         var query = _dbContext.MaterialRequests
@@ -111,7 +111,7 @@ public class MaterialRequestsController : ControllerBase
     }
 
     [HttpGet("{id}")]
-    [Authorize(Roles = "SiteEngineer,ProjectManager,ProcurementOfficer,ProcurementManager,Administrator")]
+    [Authorize(Roles = "SiteEngineer,ProcurementOfficer,ProcurementManager,Administrator")]
     public async Task<IActionResult> GetRequestById(int id)
     {
         var r = await _dbContext.MaterialRequests
@@ -213,7 +213,7 @@ public class MaterialRequestsController : ControllerBase
     }
 
     [HttpPost("{id}/approve")]
-    [Authorize(Roles = "ProjectManager,Administrator")]
+    [Authorize(Roles = "ProcurementManager,Administrator")]
     public async Task<IActionResult> ApproveRequest(int id, [FromBody] ApproveMaterialRequestDto dto)
     {
         if (!User.TryGetUserId(out var actorId)) return Unauthorized();
@@ -238,14 +238,26 @@ public class MaterialRequestsController : ControllerBase
             request.Status = MaterialRequestStatus.PendingApproval;
         }
 
-        request.UpdatedAt = DateTime.UtcNow;
+        var now = DateTime.UtcNow;
+        request.UpdatedAt = now;
+        _dbContext.Approvals.Add(new Approval
+        {
+            MaterialRequestId = request.Id,
+            ApprovedByUserId = actorId,
+            Decision = dto.Decision,
+            Comment = dto.Comment,
+            DecisionDate = now,
+            CreatedAt = now,
+            UpdatedAt = now
+        });
+        // Persist the status and its history row atomically.
         await _dbContext.SaveChangesAsync();
 
         return Ok(new { Message = $"Request decision recorded: {dto.Decision}", Status = request.Status.ToString() });
     }
 
     [HttpPost("{id}/plan")]
-    [Authorize(Roles = "SiteEngineer,ProjectManager,ProcurementOfficer,ProcurementManager,Administrator")]
+    [Authorize(Roles = "SiteEngineer,ProcurementManager,Administrator")]
     public async Task<IActionResult> RunProcurementPlanningAgent(int id, [FromQuery] int? userId)
     {
         if (!User.TryGetUserId(out var actorId)) return Unauthorized();
