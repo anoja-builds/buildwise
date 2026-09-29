@@ -5,7 +5,15 @@ import 'create_material_request_screen.dart';
 import '../../procurement/screens/material_request_procurement_view.dart';
 
 class MaterialRequestListScreen extends StatefulWidget {
-  const MaterialRequestListScreen({super.key, this.service});
+  const MaterialRequestListScreen({
+    super.key,
+    this.service,
+    this.canCreate = true,
+    this.canViewProcurementStatus = true,
+  });
+
+  final bool canCreate;
+  final bool canViewProcurementStatus;
 
   final MaterialRequestService? service;
 
@@ -77,10 +85,24 @@ class _MaterialRequestListScreenState extends State<MaterialRequestListScreen>
                 elevation: 2,
                 margin: const EdgeInsets.only(bottom: 12),
                 child: ListTile(
-                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => Scaffold(
-                    appBar: AppBar(title: Text('Request #${item['id']}')),
-                    body: SingleChildScrollView(padding: const EdgeInsets.all(16), child: MaterialRequestProcurementView(materialRequestId: item['id'] as int)),
-                  ))),
+                  onTap: !widget.canViewProcurementStatus
+                      ? null
+                      : () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => Scaffold(
+                              appBar: AppBar(
+                                title: Text('Request #${item['id']}'),
+                              ),
+                              body: SingleChildScrollView(
+                                padding: const EdgeInsets.all(16),
+                                child: MaterialRequestProcurementView(
+                                  materialRequestId: item['id'] as int,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
                   leading: CircleAvatar(
                     backgroundColor:
                         item['priority'] == 'High' ||
@@ -141,19 +163,22 @@ class _MaterialRequestListScreenState extends State<MaterialRequestListScreen>
           );
         },
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () async {
-          final res = await Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => CreateMaterialRequestScreen(service: _service),
+      floatingActionButton: !widget.canCreate
+          ? null
+          : FloatingActionButton.extended(
+              onPressed: () async {
+                final res = await Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        CreateMaterialRequestScreen(service: _service),
+                  ),
+                );
+                if (res == true && mounted) _refresh();
+              },
+              icon: const Icon(Icons.add),
+              label: const Text('New Request'),
             ),
-          );
-          if (res == true && mounted) _refresh();
-        },
-        icon: const Icon(Icons.add),
-        label: const Text('New Request'),
-      ),
     );
   }
 }

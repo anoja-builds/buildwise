@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
+
 import '../services/delivery_service.dart';
 import 'receive_delivery_screen.dart';
 
 class DeliveryListScreen extends StatefulWidget {
-  const DeliveryListScreen({super.key});
+  const DeliveryListScreen({super.key, this.canReceive = false});
+
+  final bool canReceive;
 
   @override
   State<DeliveryListScreen> createState() => _DeliveryListScreenState();
@@ -43,17 +46,44 @@ class _DeliveryListScreenState extends State<DeliveryListScreen> {
                 margin: const EdgeInsets.all(8),
                 child: ListTile(
                   title: Text(delivery['deliveryReference'] ?? 'No Ref'),
-                  subtitle: Text('${delivery['supplierName']} - PO #${delivery['purchaseOrderId']}'),
+                  subtitle: Text(
+                    '${delivery['supplierName']} - PO #${delivery['purchaseOrderId']}',
+                  ),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () {
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (context) => ReceiveDeliveryScreen(delivery: delivery),
+                        builder: (context) => widget.canReceive
+                            ? ReceiveDeliveryScreen(delivery: delivery)
+                            : Scaffold(
+                                appBar: AppBar(
+                                  title: Text(
+                                    delivery['deliveryReference'] ?? 'Delivery',
+                                  ),
+                                ),
+                                body: ListView(
+                                  padding: const EdgeInsets.all(16),
+                                  children: [
+                                    Text('PO #${delivery['purchaseOrderId']}'),
+                                    Text('Status: ${delivery['status']}'),
+                                    for (final item
+                                        in (delivery['items'] as List? ?? []))
+                                      ListTile(
+                                        title: Text('${item['materialName']}'),
+                                        subtitle: Text(
+                                          'Ordered: ${item['orderedQuantity']} ${item['materialUnit']}',
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ),
                       ),
-                    ).then((_) => setState(() {
-                      _deliveries = _service.getExpectedDeliveries();
-                    }));
+                    ).then(
+                      (_) => setState(() {
+                        _deliveries = _service.getExpectedDeliveries();
+                      }),
+                    );
                   },
                 ),
               );

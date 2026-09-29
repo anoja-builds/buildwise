@@ -27,7 +27,7 @@ class _ReceiveDeliveryScreenState extends State<ReceiveDeliveryScreen> {
         'materialName': i['materialName'] ?? 'Unknown',
         'materialUnit': i['materialUnit'] ?? 'units',
         'orderedQuantity': i['orderedQuantity'],
-        'receivedQuantity': i['orderedQuantity'], // Default to full
+        'receivedQuantity': i['outstandingQuantity'] ?? i['orderedQuantity'], // Remaining quantity
         'damagedQuantity': 0.0,
       };
     }).toList();

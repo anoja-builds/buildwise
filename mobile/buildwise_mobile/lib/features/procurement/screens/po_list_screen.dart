@@ -57,7 +57,7 @@ class _PoListScreenState extends State<PoListScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const SizedBox(height: 4),
-                      Text('Project: ${po['projectName'] ?? 'Site'}'),
+                      Text('Material request #${po['materialRequestId']}'),
                       Text('Status: ${po['status']}', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.teal)),
                     ],
                   ),
