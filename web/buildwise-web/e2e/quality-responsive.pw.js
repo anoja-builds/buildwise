@@ -84,7 +84,8 @@ async function tableScrollsLocally(page) {
     element.scrollLeft = element.scrollWidth
     return { client: element.clientWidth, content: element.scrollWidth, left: element.scrollLeft, viewport: innerWidth }
   })
-  if (size.viewport <= 768) {
+  // Local scrolling depends on the card's available width, including the sidebar.
+  if (size.content > size.client + 1) {
     expect(size.content).toBeGreaterThan(size.client)
     expect(size.left, 'The last columns must remain reachable').toBeGreaterThan(0)
   } else {
@@ -118,8 +119,8 @@ test('history and inspection tables stay inside cards and navigation still works
   await expect(page.getByRole('button', { name: 'NCR #5', exact: true })).toBeVisible()
   await fitsViewport(page)
   if (page.viewportSize().width === 1440) {
-    expect((await page.locator('.sidebar').boundingBox()).width).toBe(268)
-    expect((await page.locator('.app-main').boundingBox()).x).toBe(268)
+    expect((await page.locator('.sidebar').boundingBox()).width).toBe(260)
+    expect((await page.locator('.app-main').boundingBox()).x).toBe(260)
   }
 })
 

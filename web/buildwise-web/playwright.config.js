@@ -1,7 +1,7 @@
 import { defineConfig } from '@playwright/test'
 
 // Layout tests use fixture responses, never a real API or database.
-const origin = 'http://127.0.0.1:5191'
+const origin = process.env.BUILDWISE_BROWSER_BASE_URL || 'http://127.0.0.1:5191'
 
 export default defineConfig({
   testDir: './e2e',
@@ -20,9 +20,11 @@ export default defineConfig({
   projects: [
     { name: 'phone-390', use: { viewport: { width: 390, height: 844 } } },
     { name: 'tablet-768', use: { viewport: { width: 768, height: 1024 } } },
+    { name: 'tablet-1024', use: { viewport: { width: 1024, height: 1000 } } },
+    { name: 'laptop-1280', use: { viewport: { width: 1280, height: 1000 } } },
     { name: 'desktop-1440', use: { viewport: { width: 1440, height: 1000 } } },
   ],
-  webServer: {
+  webServer: process.env.BUILDWISE_BROWSER_BASE_URL ? undefined : {
     command: 'npm run dev -- --host 127.0.0.1 --port 5191 --strictPort',
     url: origin,
     reuseExistingServer: false,

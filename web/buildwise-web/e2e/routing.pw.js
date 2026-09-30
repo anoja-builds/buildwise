@@ -66,7 +66,7 @@ test('administrator navigation fits and reduced motion disables page animation',
 test('site engineer landing and material table fit the viewport', async ({ page }, testInfo) => {
   await signIn(page, ['SiteEngineer'], '/')
   await expect(page).toHaveURL(/\/material-requests$/)
-  await expect(page.getByRole('heading', { name: 'Material Request & Approval Management' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Material Requests', exact: true })).toBeVisible()
   await expect(page.getByRole('navigation').getByRole('link')).toHaveCount(2)
   await fits(page)
   await page.screenshot({ path: testInfo.outputPath('site-engineer-materials.png'), fullPage: true, animations: 'disabled' })
