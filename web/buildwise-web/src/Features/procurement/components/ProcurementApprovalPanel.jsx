@@ -23,24 +23,60 @@ export default function ProcurementApprovalPanel({ workflow, role, onDecide, dec
   }
 
   return (
-    <Card title="Procurement Approval" subtitle="Only a Procurement Manager decision unlocks purchase order creation.">
+    <Card
+      title="Procurement Approval Decision"
+      subtitle="Human authorization panel. Final approval triggers purchase order generation; AI recommendations are non-binding."
+      className="human-approval"
+    >
       <div className="actions" style={{ marginBottom: 'var(--space-4)' }}>
         <StatusBadge status={statusTone(workflow.approvalStatus || 'Pending')}>{workflow.approvalStatus || 'Pending'}</StatusBadge>
       </div>
 
       {!isManager ? (
-        <p className="status-note">Sign in as Procurement Manager to Approve, Reject, or Request Revision on this workflow. Officers can view status only.</p>
+        <p className="status-note">
+          Sign in as Procurement Manager to Approve, Reject, or Request Revision on this workflow. Officers can view status only.
+        </p>
       ) : alreadyDecided ? (
-        <p className="status-note">This workflow has already been decided: <strong>{workflow.approvalStatus}</strong>.</p>
+        <p className="status-note">
+          This workflow has already been decided: <strong>{workflow.approvalStatus}</strong>.
+        </p>
       ) : workflow.status !== 'AwaitingApproval' ? (
-        <p className="status-note">This workflow is not yet awaiting approval (current status: {workflow.status}).</p>
+        <p className="status-note">
+          This workflow is not yet awaiting approval (current status: {workflow.status}).
+        </p>
       ) : (
         <div className="approval-panel__form">
-          <TextInput label="Comment" name="comment" multiline placeholder="Optional for Approve, required for Request Revision" value={comment} onChange={(e) => setComment(e.target.value)} error={error || undefined} />
+          <TextInput
+            label="Decision Justification / Review Comment"
+            name="comment"
+            multiline
+            placeholder="Optional for Approve, required for Request Revision"
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+            error={error || undefined}
+          />
           <div className="approval-panel__actions">
-            <Button variant="primary" disabled={!canDecide || deciding} onClick={() => handleDecision('Approve')}>Approve</Button>
-            <Button variant="danger" disabled={!canDecide || deciding} onClick={() => handleDecision('Reject')}>Reject</Button>
-            <Button variant="secondary" disabled={!canDecide || deciding} onClick={() => handleDecision('RevisionRequested')}>Request Revision</Button>
+            <Button
+              variant="primary"
+              disabled={!canDecide || deciding}
+              onClick={() => handleDecision('Approve')}
+            >
+              Approve
+            </Button>
+            <Button
+              variant="danger"
+              disabled={!canDecide || deciding}
+              onClick={() => handleDecision('Reject')}
+            >
+              Reject
+            </Button>
+            <Button
+              variant="secondary"
+              disabled={!canDecide || deciding}
+              onClick={() => handleDecision('RevisionRequested')}
+            >
+              Request Revision
+            </Button>
           </div>
         </div>
       )}
