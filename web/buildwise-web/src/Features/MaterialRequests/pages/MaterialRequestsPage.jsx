@@ -1,19 +1,46 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '../../../auth/AuthContext';
 import { materialRequestService } from '../services/materialRequestService';
 import ProcurementPlanningPanel from '../components/ProcurementPlanningPanel';
 import CreateMaterialRequestModal from '../components/CreateMaterialRequestModal';
+import { Button, Card, PageHeader, StatusBadge } from '../../../components/shared';
 
 export default function MaterialRequestsPage() {
   const { hasRole } = useAuth();
   const canApprove = hasRole('ProcurementManager') || hasRole('Administrator');
   const canCreate = hasRole('SiteEngineer') || hasRole('Administrator');
   const canPlan = canCreate || canApprove;
+
   const [reviewing, setReviewing] = useState(null);
   const [decision, setDecision] = useState('Approved');
   const [savingDecision, setSavingDecision] = useState(false);
   const [decisionError, setDecisionError] = useState('');
   const [notice, setNotice] = useState('');
+
+  const [requests, setRequests] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [selectedRequestIdForPlan, setSelectedRequestIdForPlan] = useState(null);
+
+  const loadRequests = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const data = await materialRequestService.getRequests(statusFilter);
+      setRequests(data);
+    } catch (err) {
+      setError(err.message || 'Failed to load material requests');
+    } finally {
+      setLoading(false);
+    }
+  }, [statusFilter]);
+
+  useEffect(() => {
+    loadRequests();
+  }, [loadRequests]);
 
   const recordDecision = async (event) => {
     event.preventDefault();
@@ -32,192 +59,261 @@ export default function MaterialRequestsPage() {
     }
   };
 
-  const [requests, setRequests] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
-  
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [selectedRequestIdForPlan, setSelectedRequestIdForPlan] = useState(null);
-
-  const loadRequests = async () => {
-    setLoading(true);
-    setError('');
-    try {
-      const data = await materialRequestService.getRequests(statusFilter);
-      setRequests(data);
-    } catch (err) {
-      setError(err.message || 'Failed to load material requests');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    loadRequests();
-  }, [statusFilter]);
-
-  const getBadgeClass = (status) => {
+  const getBadgeTone = (status) => {
     switch (status) {
-      case 'Draft': return 'badge--secondary';
-      case 'PendingApproval': return 'badge--info';
-      case 'RfqInProgress': return 'badge--warning';
-      case 'Approved': return 'badge--success';
-      case 'Rejected': return 'badge--danger';
-      case 'Ordered': return 'badge--success';
-      default: return 'badge--secondary';
+      case 'Draft': return 'neutral';
+      case 'PendingApproval': return 'warning';
+      case 'RfqInProgress': return 'info';
+      case 'Approved': return 'success';
+      case 'Rejected': return 'danger';
+      case 'Ordered': return 'success';
+      default: return 'neutral';
     }
   };
+
+  if (canCreate && showCreateModal) return <CreateMaterialRequestModal onClose={() => setShowCreateModal(false)} onSuccess={() => { setShowCreateModal(false); loadRequests(); }} />;
 
   return (
-    <div style={{ padding: '20px' }} className="fade-in">
-      <div className="page-header" style={{ marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div>
-          <h1 className="page-header__title">Material Request & Approval Management</h1>
-          <p className="page-header__subtitle">
-            Capture site material demand, enforce approval workflows, and run AI procurement planning.
-          </p>
+    <div className="stack" style={{ gap: '24px' }}>
+      <PageHeader
+        eyebrow="REQUISITION & APPROVALS"
+        title="Material Requests"
+        subtitle="Capture site material demand, enforce approval workflows, and run AI procurement planning."
+        actions={
+          canCreate ? (
+            <Button onClick={() => setShowCreateModal(true)}>
+              + Create New Material Request
+            </Button>
+          ) : null
+        }
+      />
+
+      {error && (
+        <div className="auth-error-banner" role="alert">
+          {error}
         </div>
-        {canCreate && <button className="btn btn--primary" onClick={() => setShowCreateModal(true)}>
-          + Create New Material Request
-        </button>}
-      </div>
-
-      {error && <div className="error-state" style={{ marginBottom: '20px' }}>⚠️ {error}</div>}
-
-      {notice && <p role="status">{notice}</p>}
-      {reviewing && (
-        <form onSubmit={recordDecision} className="card" aria-label="Review material request" style={{ padding: 20, marginBottom: 20 }}>
-          <h2>Review request #{reviewing.id}</h2>
-          <p>{reviewing.projectName}: {reviewing.reason}</p>
-          <label htmlFor="request-decision">Decision</label>
-          <select id="request-decision" value={decision} disabled={savingDecision} onChange={e => setDecision(e.target.value)}>
-            <option value="Approved">Approve</option>
-            <option value="Rejected">Reject</option>
-          </select>
-          {decisionError && <p role="alert">{decisionError}</p>}
-          <button className="btn btn--primary" disabled={savingDecision} type="submit">{savingDecision ? 'Saving decision...' : 'Confirm decision'}</button>
-          <button className="btn btn--secondary" disabled={savingDecision} type="button" onClick={() => setReviewing(null)}>Cancel</button>
-        </form>
       )}
 
-      {/* Filter and stats */}
-      <div style={{ display: 'flex', gap: '16px', marginBottom: '20px', alignItems: 'center' }}>
-        <label style={{ fontWeight: 'bold', fontSize: '13.5px' }}>Filter Status:</label>
-        <select 
-          className="form-control" 
-          value={statusFilter} 
-          onChange={(e) => setStatusFilter(e.target.value)}
-          style={{ width: '220px', padding: '8px' }}
+      {notice && (
+        <div
+          role="status"
+          style={{
+            padding: '10px 14px',
+            background: 'var(--color-success-100)',
+            color: 'var(--color-success-700)',
+            borderRadius: 'var(--radius-md)',
+            border: '1px solid rgb(22 163 74 / 0.2)',
+            fontSize: '13px',
+            fontWeight: 500
+          }}
         >
-          <option value="">All Statuses</option>
-          <option value="Draft">Draft</option>
-          <option value="PendingApproval">Pending Approval</option>
-          <option value="RfqInProgress">RFQ In Progress</option>
-          <option value="Approved">Approved</option>
-          <option value="Rejected">Rejected</option>
-          <option value="Ordered">Ordered</option>
-        </select>
+          ✓ {notice}
+        </div>
+      )}
+
+      {reviewing && (
+        <Card className="review-card" style={{ borderLeft: '4px solid var(--color-accent-600)', marginBottom: '20px' }}>
+          <form onSubmit={recordDecision} aria-label="Review material request">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px' }}>
+              <div>
+                <span className="page-header__eyebrow">HUMAN APPROVAL REQUIRED</span>
+                <h2 style={{ fontSize: '18px', fontWeight: 700, margin: '2px 0 4px' }}>
+                  Review request #{reviewing.id}
+                </h2>
+                <p style={{ color: 'var(--color-text-muted)', fontSize: '13px', margin: 0 }}>
+                  {reviewing.projectName}: {reviewing.reason}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="icon-button"
+                onClick={() => setReviewing(null)}
+                aria-label="Close review"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+              <label className="field" htmlFor="request-decision" style={{ minWidth: '200px' }}>
+                <span className="field__label">Decision</span>
+                <select
+                  id="request-decision"
+                  className="field__control"
+                  value={decision}
+                  disabled={savingDecision}
+                  onChange={(e) => setDecision(e.target.value)}
+                >
+                  <option value="Approved">Approve</option>
+                  <option value="Rejected">Reject</option>
+                </select>
+              </label>
+
+              <Button
+                type="submit"
+                disabled={savingDecision}
+              >
+                {savingDecision ? 'Saving decision...' : 'Confirm decision'}
+              </Button>
+              <Button
+                variant="secondary"
+                disabled={savingDecision}
+                type="button"
+                onClick={() => setReviewing(null)}
+              >
+                Cancel
+              </Button>
+            </div>
+
+            {decisionError && (
+              <p role="alert" style={{ color: 'var(--color-danger-700)', fontSize: '13px', marginTop: '12px', fontWeight: 500 }}>
+                {decisionError}
+              </p>
+            )}
+          </form>
+        </Card>
+      )}
+
+      {/* Filter and stats toolbar */}
+      <div className="toolbar">
+        <div className="toolbar__filters">
+          <label className="field">
+            <span className="field__label">Filter Status:</span>
+            <select
+              className="field__control"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+            >
+              <option value="">All Statuses</option>
+              <option value="Draft">Draft</option>
+              <option value="PendingApproval">Pending Approval</option>
+              <option value="RfqInProgress">RFQ In Progress</option>
+              <option value="Approved">Approved</option>
+              <option value="Rejected">Rejected</option>
+              <option value="Ordered">Ordered</option>
+            </select>
+          </label>
+        </div>
       </div>
 
       {canPlan && selectedRequestIdForPlan && (
-        <div style={{ marginBottom: '24px' }}>
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '-10px' }}>
-            <button 
-              className="btn btn--secondary" 
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '8px' }}>
+            <Button
+              variant="secondary"
               onClick={() => setSelectedRequestIdForPlan(null)}
-              style={{ padding: '2px 8px', fontSize: '11px', zIndex: 10 }}
+              style={{ fontSize: '12px', padding: '4px 10px' }}
             >
               ✕ Close AI Planning Panel
-            </button>
+            </Button>
           </div>
           <ProcurementPlanningPanel requestId={selectedRequestIdForPlan} />
         </div>
       )}
 
       {loading ? (
-        <div style={{ textAlign: 'center', padding: '40px' }}>
-          <div className="spinner"></div>
-          <p>Loading material requests...</p>
+        <div className="state">
+          <div className="state__content">
+            <div className="spinner" />
+            <p>Loading material requests…</p>
+          </div>
         </div>
       ) : (
-        <div className="card" style={{ padding: '20px' }}>
-          <table className="table" style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr style={{ background: '#f8f9fa', textAlign: 'left' }}>
-                <th style={{ padding: '10px' }}>ID / Ref</th>
-                <th style={{ padding: '10px' }}>Project</th>
-                <th style={{ padding: '10px' }}>Priority</th>
-                <th style={{ padding: '10px' }}>Required Date</th>
-                <th style={{ padding: '10px' }}>Status</th>
-                <th style={{ padding: '10px' }}>Requested Items</th>
-                <th style={{ padding: '10px' }}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {requests.length === 0 ? (
+        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+          <div className="table-wrap" style={{ border: 0, borderRadius: 0 }}>
+            <table className="data-table">
+              <thead>
                 <tr>
-                  <td colSpan="7" style={{ textAlign: 'center', padding: '20px', color: '#888' }}>
-                    No material requests found matching criteria.
-                  </td>
+                  <th>ID / Ref</th>
+                  <th>Project</th>
+                  <th>Priority</th>
+                  <th>Required Date</th>
+                  <th>Status</th>
+                  <th>Requested Items</th>
+                  <th style={{ textAlign: 'right' }}>Actions</th>
                 </tr>
-              ) : (
-                requests.map((r) => (
-                  <tr key={r.id} style={{ borderBottom: '1px solid #eee' }}>
-                    <td style={{ padding: '10px', fontWeight: 'bold' }}>
-                      MR-{r.id.toString().padStart(4, '0')}
-                      {r.revisionNumber > 1 && <span style={{ fontSize: '11px', color: '#888', marginLeft: '4px' }}>(Rev {r.revisionNumber})</span>}
-                    </td>
-                    <td style={{ padding: '10px' }}>{r.projectName}</td>
-                    <td style={{ padding: '10px' }}>
-                      <span className={`badge ${r.priority === 'High' || r.priority === 'Urgent' ? 'badge--danger' : 'badge--secondary'}`}>
-                        {r.priority}
-                      </span>
-                    </td>
-                    <td style={{ padding: '10px' }}>
-                      {new Date(r.requiredDate).toLocaleDateString()}
-                    </td>
-                    <td style={{ padding: '10px' }}>
-                      <span className={`badge ${getBadgeClass(r.status)}`}>{r.status}</span>
-                    </td>
-                    <td style={{ padding: '10px', fontSize: '12.5px' }}>
-                      {r.items && r.items.map((i, idx) => (
-                        <div key={idx}>
-                          • <strong>{i.quantity} {i.materialUnit ?? i.unit}</strong> {i.materialName}
-                        </div>
-                      ))}
-                    </td>
-                    <td style={{ padding: '10px' }}>
-                      {canApprove && r.status === 'PendingApproval' && (
-                        <button className="btn btn--primary" disabled={savingDecision} onClick={() => {
-                          setReviewing(r); setDecision('Approved'); setDecisionError(''); setNotice('');
-                        }}>Review request #{r.id}</button>
-                      )}
-                      {canPlan && <button
-                        className="btn btn--secondary" 
-                        style={{ padding: '4px 10px', fontSize: '12px' }}
-                        onClick={() => setSelectedRequestIdForPlan(r.id)}
-                      >
-                        🤖 Run AI Plan
-                      </button>}
+              </thead>
+              <tbody>
+                {requests.length === 0 ? (
+                  <tr>
+                    <td colSpan="7" style={{ textAlign: 'center', padding: '32px', color: 'var(--color-text-muted)' }}>
+                      No material requests found matching criteria.
                     </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                ) : (
+                  requests.map((r) => (
+                    <tr key={r.id}>
+                      <td style={{ fontWeight: 600 }}>
+                        MR-{r.id.toString().padStart(4, '0')}
+                        {r.revisionNumber > 1 && (
+                          <span style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginLeft: '4px' }}>
+                            (Rev {r.revisionNumber})
+                          </span>
+                        )}
+                      </td>
+                      <td>{r.projectName}</td>
+                      <td>
+                        <StatusBadge
+                          status={r.priority}
+                          tone={r.priority === 'High' || r.priority === 'Urgent' ? 'danger' : 'neutral'}
+                        >
+                          {r.priority ?? 'Not recorded'}
+                        </StatusBadge>
+                      </td>
+                      <td>
+                        {new Date(r.requiredDate).toLocaleDateString()}
+                      </td>
+                      <td>
+                        <StatusBadge
+                          status={r.status}
+                          tone={getBadgeTone(r.status)}
+                        >
+                          {r.status}
+                        </StatusBadge>
+                      </td>
+                      <td style={{ fontSize: '13px' }}>
+                        {r.items && r.items.map((i, idx) => (
+                          <div key={idx}>
+                            • <strong>{i.quantity} {i.materialUnit ?? i.unit}</strong> {i.materialName}
+                          </div>
+                        ))}
+                      </td>
+                      <td style={{ textAlign: 'right' }}>
+                        <div style={{ display: 'inline-flex', gap: '8px', justifyContent: 'flex-end' }}>
+                          {canApprove && r.status === 'PendingApproval' && (
+                            <Button
+                              size="sm"
+                              disabled={savingDecision}
+                              onClick={() => {
+                                setReviewing(r);
+                                setDecision('Approved');
+                                setDecisionError('');
+                                setNotice('');
+                              }}
+                            >
+                              Review request #{r.id}
+                            </Button>
+                          )}
+                          {canPlan && (
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => setSelectedRequestIdForPlan(r.id)}
+                            >
+                              🤖 Run AI Plan
+                            </Button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
-      {canCreate && showCreateModal && (
-        <CreateMaterialRequestModal 
-          onClose={() => setShowCreateModal(false)}
-          onSuccess={() => {
-            setShowCreateModal(false);
-            loadRequests();
-          }}
-        />
-      )}
     </div>
   );
 }

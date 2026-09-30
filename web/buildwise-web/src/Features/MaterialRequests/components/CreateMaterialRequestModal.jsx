@@ -1,151 +1,62 @@
-import React, { useState } from 'react';
-import { materialRequestService } from '../services/materialRequestService';
-
+﻿import { useEffect, useRef, useState } from 'react'
+import { materialRequestService } from '../services/materialRequestService'
+import { Button, Card, ErrorState, LoadingState, PageHeader, TextInput } from '../../../components/shared'
+const blankItem = () => ({ materialId: '', quantity: '', notes: '' })
 export default function CreateMaterialRequestModal({ onClose, onSuccess }) {
-  const [projectId, setProjectId] = useState('1');
-  const [requestedByUserId, setRequestedByUserId] = useState('1');
-  const [priority, setPriority] = useState('High');
-  const [requiredDate, setRequiredDate] = useState(
-    new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
-  );
-  const [reason, setReason] = useState('');
-  const [siteNotes, setSiteNotes] = useState('');
-
-  // Items list
-  const [items, setItems] = useState([
-    { materialId: 1, quantity: 250, unit: 'bags', notes: 'Grade 42.5 OPC Cement' }
-  ]);
-
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-
-  const handleAddItem = () => {
-    setItems([...items, { materialId: 1, quantity: 100, unit: 'bags', notes: '' }]);
-  };
-
-  const handleItemChange = (index, field, value) => {
-    const newItems = [...items];
-    newItems[index][field] = value;
-    setItems(newItems);
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    setError('');
-
-    try {
-      const payload = {
-        projectId: parseInt(projectId, 10),
-        requestedByUserId: parseInt(requestedByUserId, 10),
-        priority,
-        requiredDate: new Date(requiredDate).toISOString(),
-        reason,
-        siteNotes,
-        submitImmediately: true,
-        items: items.map(i => ({
-          materialId: parseInt(i.materialId, 10),
-          quantity: parseFloat(i.quantity),
-          unit: i.unit,
-          requiredDate: new Date(requiredDate).toISOString(),
-          notes: i.notes
-        }))
-      };
-
-      await materialRequestService.createRequest(payload);
-      if (onSuccess) onSuccess();
-    } catch (err) {
-      setError(err.message || 'Failed to submit request');
-    } finally {
-      setLoading(false);
+  const [options, setOptions] = useState(null)
+  const [optionsError, setOptionsError] = useState('')
+  const [revision, setRevision] = useState(0)
+  const [projectId, setProjectId] = useState('')
+  const [requiredDate, setRequiredDate] = useState('')
+  const [reason, setReason] = useState('')
+  const [items, setItems] = useState([blankItem()])
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const locked = useRef(false)
+  useEffect(() => {
+    let active = true
+    setOptions(null); setOptionsError('')
+    materialRequestService.getOptions().then(data => { if (active) setOptions(data) }, err => { if (active) setOptionsError(err.message) })
+    return () => { active = false }
+  }, [revision])
+  const updateItem = (index, field, value) => setItems(current => current.map((item, i) => i === index ? { ...item, [field]: value } : item))
+  const available = options?.projects?.length > 0 && options?.materials?.length > 0
+  async function submit(event) {
+    event.preventDefault()
+    if (locked.current || !available) return
+    if (!options.projects.some(p => String(p.id) === projectId) || items.some(i => !options.materials.some(m => String(m.id) === i.materialId) || !(Number(i.quantity) > 0))) {
+      setError('Select a project, active materials, and positive quantities.'); return
     }
-  };
-
-  return (
-    <div style={{
-      position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-      background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000
-    }}>
-      <div className="card fade-in" style={{ width: '600px', maxHeight: '90vh', overflowY: 'auto', padding: '24px', background: '#fff' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-          <h2 style={{ margin: 0 }}>Create Material Request</h2>
-          <button className="btn btn--secondary" onClick={onClose} style={{ padding: '4px 10px' }}>✕</button>
-        </div>
-
-        {error && <div style={{ background: '#f8d7da', color: '#721c24', padding: '10px', borderRadius: '4px', marginBottom: '15px' }}>⚠️ {error}</div>}
-
-        <form onSubmit={handleSubmit}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
-            <div>
-              <label style={{ fontWeight: 'bold', fontSize: '13px' }}>Project / Construction Site</label>
-              <select className="form-control" value={projectId} onChange={(e) => setProjectId(e.target.value)} style={{ width: '100%', padding: '8px', marginTop: '4px' }}>
-                <option value="1">Apartment Development - Colombo</option>
-                <option value="2">Kandy Highway Project</option>
-              </select>
-            </div>
-            <div>
-              <label style={{ fontWeight: 'bold', fontSize: '13px' }}>Priority Level</label>
-              <select className="form-control" value={priority} onChange={(e) => setPriority(e.target.value)} style={{ width: '100%', padding: '8px', marginTop: '4px' }}>
-                <option value="Low">Low</option>
-                <option value="Medium">Medium</option>
-                <option value="High">High</option>
-                <option value="Urgent">Urgent</option>
-              </select>
-            </div>
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
-            <div>
-              <label style={{ fontWeight: 'bold', fontSize: '13px' }}>Required By Date</label>
-              <input type="date" className="form-control" value={requiredDate} onChange={(e) => setRequiredDate(e.target.value)} style={{ width: '100%', padding: '8px', marginTop: '4px' }} required />
-            </div>
-            <div>
-              <label style={{ fontWeight: 'bold', fontSize: '13px' }}>Requested By Officer</label>
-              <select className="form-control" value={requestedByUserId} onChange={(e) => setRequestedByUserId(e.target.value)} style={{ width: '100%', padding: '8px', marginTop: '4px' }}>
-                <option value="1">Jordan Doe (Site Engineer)</option>
-                <option value="2">Ramya Fernando (Procurement Officer)</option>
-              </select>
-            </div>
-          </div>
-
-          <div style={{ marginBottom: '16px' }}>
-            <label style={{ fontWeight: 'bold', fontSize: '13px' }}>Purpose / Reason</label>
-            <input type="text" className="form-control" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Ground floor column concreting" style={{ width: '100%', padding: '8px', marginTop: '4px' }} required />
-          </div>
-
-          <div style={{ marginBottom: '20px' }}>
-            <label style={{ fontWeight: 'bold', fontSize: '13px' }}>Site Notes / Logistics Details</label>
-            <textarea className="form-control" value={siteNotes} onChange={(e) => setSiteNotes(e.target.value)} placeholder="e.g. Deliver to Gate B. Tower crane active until 4 PM." style={{ width: '100%', padding: '8px', marginTop: '4px', height: '60px' }} />
-          </div>
-
-          <div style={{ borderTop: '1px solid #ddd', paddingTop: '16px', marginBottom: '20px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-              <h4 style={{ margin: 0 }}>Material Items Required</h4>
-              <button type="button" className="btn btn--secondary" onClick={handleAddItem} style={{ fontSize: '12px', padding: '4px 8px' }}>+ Add Item</button>
-            </div>
-
-            {items.map((item, idx) => (
-              <div key={idx} style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 2fr', gap: '8px', marginBottom: '8px', alignItems: 'center' }}>
-                <select className="form-control" value={item.materialId} onChange={(e) => handleItemChange(idx, 'materialId', e.target.value)} style={{ padding: '6px' }}>
-                  <option value="1">OPC Cement</option>
-                  <option value="2">Reinforcement Steel</option>
-                  <option value="3">River Sand</option>
-                </select>
-                <input type="number" className="form-control" value={item.quantity} onChange={(e) => handleItemChange(idx, 'quantity', e.target.value)} placeholder="Qty" style={{ padding: '6px' }} min="1" required />
-                <input type="text" className="form-control" value={item.unit} onChange={(e) => handleItemChange(idx, 'unit', e.target.value)} placeholder="Unit" style={{ padding: '6px' }} required />
-                <input type="text" className="form-control" value={item.notes} onChange={(e) => handleItemChange(idx, 'notes', e.target.value)} placeholder="Item notes..." style={{ padding: '6px' }} />
-              </div>
-            ))}
-          </div>
-
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-            <button type="button" className="btn btn--secondary" onClick={onClose}>Cancel</button>
-            <button type="submit" className="btn btn--primary" disabled={loading}>
-              {loading ? 'Submitting...' : 'Submit Material Request'}
-            </button>
-          </div>
-        </form>
+    locked.current = true; setBusy(true); setError('')
+    try {
+      // ASP.NET derives requester identity exclusively from the authenticated JWT.
+      await materialRequestService.createRequest({ projectId: Number(projectId), requiredDate: new Date(requiredDate).toISOString(), reason: reason.trim(), submitImmediately: event.nativeEvent.submitter?.value !== 'draft', items: items.map(i => ({ materialId: Number(i.materialId), quantity: Number(i.quantity), unit: options.materials.find(m => String(m.id) === i.materialId).unit, notes: i.notes.trim() || null })) })
+      onSuccess?.()
+    } catch (err) { setError(err.message) }
+    finally { locked.current = false; setBusy(false) }
+  }
+  return <section className="stack request-create" aria-label="Create Material Request">
+    <PageHeader title="New Material Request" description="Create and submit a material request for on-site construction materials." />
+    {!options && !optionsError && <LoadingState message="Loading projects and materials..." />}
+    {optionsError && <ErrorState message={optionsError} onRetry={() => setRevision(v => v + 1)} />}
+    {options && !available && <Card title="No request options available"><p>An active project and material are required. Ask an administrator to update the catalogue.</p></Card>}
+    {error && <ErrorState message={error} />}
+    {available && <Card><form className="stack" onSubmit={submit}>
+      <div className="form-grid">
+        <label className="field"><span className="field__label">Project *</span><select className="field__control" aria-label="Project" required value={projectId} disabled={busy} onChange={e => setProjectId(e.target.value)}><option value="">Select project...</option>{options.projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
+        <TextInput label="Required Date" name="requiredDate" type="date" required value={requiredDate} disabled={busy} onChange={e => setRequiredDate(e.target.value)} />
       </div>
-    </div>
-  );
+      <TextInput label="Reason / Justification" name="reason" multiline required value={reason} disabled={busy} onChange={e => setReason(e.target.value)} />
+      <div className="request-items-header"><h3>Requested Materials</h3><Button variant="secondary" disabled={busy} onClick={() => setItems(current => [...current, blankItem()])}>+ Add Material</Button></div>
+      {items.map((item, index) => <div className="request-item-row" key={index}>
+        <label className="field"><span className="field__label">Material *</span><select className="field__control" aria-label={`Material ${index + 1}`} required disabled={busy} value={item.materialId} onChange={e => updateItem(index, 'materialId', e.target.value)}><option value="">Select material...</option>{options.materials.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select></label>
+        <TextInput label="Quantity" name={`quantity-${index}`} type="number" min="0.01" step="0.01" required disabled={busy} value={item.quantity} onChange={e => updateItem(index, 'quantity', e.target.value)} />
+        <TextInput label="Unit" name={`unit-${index}`} value={options.materials.find(m => String(m.id) === item.materialId)?.unit || ''} readOnly />
+        <TextInput label="Notes" name={`notes-${index}`} disabled={busy} value={item.notes} onChange={e => updateItem(index, 'notes', e.target.value)} />
+        <Button variant="secondary" aria-label={`Remove material ${index + 1}`} disabled={busy || items.length === 1} onClick={() => setItems(current => current.filter((_, i) => i !== index))}>×</Button>
+      </div>)}
+      <div className="form-actions"><Button variant="secondary" onClick={onClose} disabled={busy}>Cancel</Button><Button type="submit" value="draft" variant="secondary" disabled={busy}>Save as Draft</Button><Button type="submit" value="submit" disabled={busy}>{busy ? 'Saving...' : 'Submit for Approval'}</Button></div>
+    </form></Card>}
+    {!available && <Button variant="secondary" onClick={onClose}>Back to Material Requests</Button>}
+  </section>
 }

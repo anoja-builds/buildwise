@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { materialRequestService } from '../services/materialRequestService';
+import { Button, Card, StatusBadge } from '../../../components/shared';
 
 export default function ProcurementPlanningPanel({ requestId, onPlanningComplete }) {
   const [loading, setLoading] = useState(false);
@@ -21,55 +22,78 @@ export default function ProcurementPlanningPanel({ requestId, onPlanningComplete
   };
 
   return (
-    <div className="card" style={{ padding: '20px', borderLeft: '4px solid #2980b9', background: '#f4f8fb' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+    <Card className="ai-planning-card" style={{ borderLeft: '4px solid var(--color-accent-600)', background: 'var(--color-white)' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '16px', flexWrap: 'wrap' }}>
         <div>
-          <h4 style={{ margin: 0, color: '#1a5276', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span>🤖</span> Procurement Planning Agent (AI Agent 1)
-          </h4>
-          <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: '#566573' }}>
-            Analyzes site demand, lead time urgency, volume risks, and formulates RFQ strategy.
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+            <span style={{ fontSize: '16px' }}>🤖</span>
+            <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: 'var(--color-text)' }}>
+              Request Validation & Planning Agent (Agent 1)
+            </h3>
+            <StatusBadge status="Advisory" tone="warning" />
+          </div>
+          <p style={{ margin: 0, fontSize: '13px', color: 'var(--color-text-muted)' }}>
+            Analyzes project demand schedule, supplier lead-time constraints, and formulates automated procurement recommendations.
           </p>
         </div>
-        <button
-          className="btn btn--primary"
+        <Button
           onClick={handleRunAgent}
           disabled={loading}
-          style={{ background: '#2980b9', borderColor: '#2980b9' }}
         >
-          {loading ? 'Analyzing Demand...' : '⚡ Run AI Planning Analysis'}
-        </button>
+          {loading ? 'Analyzing Demand…' : '⚡ Run AI Planning Analysis'}
+        </Button>
+      </div>
+
+      <div style={{
+        marginTop: '12px',
+        padding: '8px 12px',
+        background: 'var(--color-warning-100)',
+        borderRadius: 'var(--radius-md)',
+        border: '1px solid rgb(217 119 6 / 0.2)',
+        fontSize: '12px',
+        color: 'var(--color-warning-700)',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '6px'
+      }}>
+        <span>ℹ️</span>
+        <span><strong>Advisory Notice:</strong> AI suggestions require Procurement Manager review. All recommendations are non-autonomous.</span>
       </div>
 
       {error && (
-        <div style={{ marginTop: '12px', padding: '10px', background: '#fadbd8', color: '#78281f', borderRadius: '4px', fontSize: '13px' }}>
-          ⚠️ {error}
+        <div className="auth-error-banner" style={{ marginTop: '12px' }} role="alert">
+          {error}
         </div>
       )}
 
       {plan && (
-        <div style={{ marginTop: '16px', borderTop: '1px dashed #aed6f1', paddingTop: '12px' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '12px' }}>
-            <div>
-              <strong style={{ fontSize: '12px', color: '#2874a6' }}>STRATEGY / RECOMMENDATION:</strong>
-              <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#1b4f72', marginTop: '2px' }}>
+        <div style={{ marginTop: '16px', borderTop: '1px solid var(--color-border)', paddingTop: '16px' }}>
+          <div className="grid grid--2" style={{ marginBottom: '16px' }}>
+            <div style={{ padding: '12px', background: 'var(--color-surface-muted)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}>
+              <span style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--color-accent-700)', display: 'block', marginBottom: '4px' }}>
+                RECOMMENDED ACTION
+              </span>
+              <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--color-text)' }}>
                 {plan.recommendedAction}
               </div>
             </div>
-            <div>
-              <strong style={{ fontSize: '12px', color: '#2874a6' }}>OBJECTIVE:</strong>
-              <div style={{ fontSize: '13px', color: '#2c3e50', marginTop: '2px' }}>
+
+            <div style={{ padding: '12px', background: 'var(--color-surface-muted)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}>
+              <span style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--color-text-muted)', display: 'block', marginBottom: '4px' }}>
+                PRIMARY OBJECTIVE
+              </span>
+              <div style={{ fontSize: '13px', color: 'var(--color-text)' }}>
                 {plan.objective}
               </div>
             </div>
           </div>
 
           {plan.riskFlags && plan.riskFlags.length > 0 && (
-            <div style={{ marginBottom: '12px', background: '#fef9e7', padding: '10px', borderRadius: '4px', border: '1px solid #f9e79f' }}>
-              <strong style={{ fontSize: '12px', color: '#b7950b', display: 'block', marginBottom: '4px' }}>
-                ⚠️ DETECTED RISK FLAGS:
+            <div style={{ marginBottom: '16px', background: 'var(--color-warning-100)', padding: '12px', borderRadius: 'var(--radius-md)', border: '1px solid rgb(217 119 6 / 0.25)' }}>
+              <strong style={{ fontSize: '12px', color: 'var(--color-warning-700)', display: 'block', marginBottom: '6px' }}>
+                ⚠️ DETECTED RISK FLAGS ({plan.riskFlags.length})
               </strong>
-              <ul style={{ margin: 0, paddingLeft: '18px', fontSize: '12px', color: '#7d6608' }}>
+              <ul style={{ margin: 0, paddingLeft: '18px', fontSize: '12px', color: 'var(--color-warning-700)' }}>
                 {plan.riskFlags.map((risk, i) => (
                   <li key={i}>{risk}</li>
                 ))}
@@ -77,18 +101,18 @@ export default function ProcurementPlanningPanel({ requestId, onPlanningComplete
             </div>
           )}
 
-          {plan.steps && (
-            <div style={{ fontSize: '12.5px', color: '#34495e' }}>
-              <strong>Execution Steps Formulated:</strong>
-              <ol style={{ margin: '4px 0 0 0', paddingLeft: '18px' }}>
+          {plan.steps && plan.steps.length > 0 && (
+            <div style={{ fontSize: '13px', color: 'var(--color-text)' }}>
+              <strong style={{ display: 'block', marginBottom: '6px' }}>Execution Sequence Formulated:</strong>
+              <ol style={{ margin: 0, paddingLeft: '20px', color: 'var(--color-text-muted)' }}>
                 {plan.steps.map((step, i) => (
-                  <li key={i}>{step}</li>
+                  <li key={i} style={{ marginBottom: '4px' }}>{step}</li>
                 ))}
               </ol>
             </div>
           )}
         </div>
       )}
-    </div>
+    </Card>
   );
 }

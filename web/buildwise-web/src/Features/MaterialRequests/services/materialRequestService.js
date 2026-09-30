@@ -19,6 +19,12 @@ function handleUnauthorized(res) {
 }
 
 export const materialRequestService = {
+  async getOptions() {
+    const res = await fetch(`${API_BASE_URL}/materialrequests/options`, { headers: getHeaders() });
+    handleUnauthorized(res);
+    if (!res.ok) throw new Error('Failed to load projects and materials. Please retry.');
+    return await res.json();
+  },
   async getRequests(status = '', projectId = '') {
     let url = `${API_BASE_URL}/materialrequests`;
     const params = new URLSearchParams();
