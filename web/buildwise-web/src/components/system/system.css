@@ -1,0 +1,84 @@
+/* BuildWise System States — 403, 404, 500, Session Expired */
+
+.system-state-page {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: calc(100vh - 120px);
+  padding: 40px 24px;
+}
+
+.system-state-card {
+  max-width: 480px;
+  width: 100%;
+  text-align: center;
+  padding: 40px 32px;
+}
+
+.session-expired-card {
+  max-width: 440px;
+  min-height: 358px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+}
+
+.system-state-icon {
+  font-size: 3rem;
+  margin-bottom: 20px;
+}
+
+.system-state-icon.danger {
+  color: #DC2626;
+}
+
+.system-state-icon.warning {
+  color: #D97706;
+}
+
+.system-state-title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--bw-text-primary, #1E1E1E);
+  margin: 0 0 12px 0;
+}
+
+.system-state-desc {
+  font-size: 0.9375rem;
+  color: var(--bw-text-secondary, #6B7280);
+  line-height: 1.5;
+  margin: 0 0 24px 0;
+}
+
+.system-state-actions {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+}
+
+.system-state-404 {
+  text-align: center;
+  max-width: 480px;
+}
+
+.system-404-numeral {
+  font-size: 96px;
+  font-weight: 800;
+  line-height: 1;
+  color: #CBD5E1;
+  letter-spacing: -0.05em;
+  margin-bottom: 16px;
+}
+
+.system-error-trace {
+  background: #FEE2E2;
+  color: #991B1B;
+  padding: 12px;
+  border-radius: 6px;
+  text-align: left;
+  font-size: 0.8125rem;
+  margin-bottom: 20px;
+  max-height: 140px;
+  overflow: auto;
+}

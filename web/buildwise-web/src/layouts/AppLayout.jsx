@@ -22,11 +22,23 @@ export default function AppLayout({ children, user, onLogout }) {
   return <div className="app-shell">
     <a className="skip-link" href="#main-content">Skip to content</a>
     <aside className="sidebar">
-      <div className="brand"><div className="brand__mark">BW</div><div><div className="brand__name">BuildWise</div><div className="brand__tagline">Project operations</div></div></div>
+      <div className="brand">
+        <div className="brand__mark">BW</div>
+        <div>
+          <div className="brand__name">BuildWise</div>
+          <div className="brand__tagline">B2B PROCUREMENT</div>
+        </div>
+      </div>
       <nav className="nav" aria-label="Main navigation">
         <div className="nav-label" aria-hidden="true">Workspace</div>
         {navigation.map((item) => <NavLink key={item.path} to={item.path} className={({ isActive }) => `nav-item ${isActive ? 'nav-item--active' : ''}`}>{item.label}</NavLink>)}
       </nav>
+      <div className="sidebar-footer">
+        <div className="sidebar-role-indicator">
+          <span className="sidebar-role-dot" />
+          <span>Signed in as {roles[0] || 'Member'}</span>
+        </div>
+      </div>
     </aside>
     <div className="app-main">
       <header className="topbar">

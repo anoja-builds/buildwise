@@ -1,4 +1,4 @@
-import { Link, Navigate, Outlet, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
+import { Navigate, Outlet, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
 import AppLayout from './layouts/AppLayout'
 import MaterialRequestsPage from './Features/MaterialRequests/pages/MaterialRequestsPage'
 import DeliveryDashboard from './Features/deliveries/pages/DeliveryDashboard'
@@ -7,16 +7,13 @@ import { RoutedQualityApp } from './Features/quality/QualityApp'
 import LoginPage from './auth/LoginPage'
 import { useAuth } from './auth/AuthContext'
 import { canAccess, landingPath, routeConfig } from './routes/routeConfig'
+import { AccessDeniedView, ErrorBoundary, NotFoundView, SessionExpiredView } from './components/system/SystemStates'
 import './pages/common/common.css'
 
 function AccessDenied() {
   const { roles } = useAuth()
   const landing = landingPath(roles)
-  return <section className="state" role="alert"><div>
-    <h1>Access Denied</h1>
-    <p>Your account does not have access to this page.</p>
-    {landing !== '/access-denied' && <Link to={landing}>Go to your workspace</Link>}
-  </div></section>
+  return <AccessDeniedView landingPath={landing} />
 }
 
 function AuthenticatedLayout() {
@@ -62,13 +59,18 @@ function ProtectedPage({ route }) {
 
 export default function App() {
   const { roles } = useAuth()
-  return <Routes>
-    <Route path="/login" element={<LoginRoute />} />
-    <Route element={<AuthenticatedLayout />}>
-      <Route index element={<Navigate to={landingPath(roles)} replace />} />
-      {routeConfig.map((route) => <Route key={route.path} path={route.path} element={<ProtectedPage route={route} />} />)}
-      <Route path="/access-denied" element={<AccessDenied />} />
-      <Route path="*" element={<section className="state"><div><h1>Page not found</h1><Link to={landingPath(roles)}>Go to your workspace</Link></div></section>} />
-    </Route>
-  </Routes>
+  return (
+    <ErrorBoundary>
+      <Routes>
+        <Route path="/login" element={<LoginRoute />} />
+        <Route path="/session-expired" element={<SessionExpiredView />} />
+        <Route element={<AuthenticatedLayout />}>
+          <Route index element={<Navigate to={landingPath(roles)} replace />} />
+          {routeConfig.map((route) => <Route key={route.path} path={route.path} element={<ProtectedPage route={route} />} />)}
+          <Route path="/access-denied" element={<AccessDenied />} />
+          <Route path="*" element={<NotFoundView landingPath={landingPath(roles)} />} />
+        </Route>
+      </Routes>
+    </ErrorBoundary>
+  )
 }

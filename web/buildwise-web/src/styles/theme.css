@@ -1,36 +1,73 @@
 :root {
-  --color-primary-900: #0a1830;
-  --color-primary-800: #102a4c;
-  --color-primary-700: #1a4270;
-  --color-primary-600: #235792;
-  --color-primary-100: #e7eef8;
-  --color-primary-50: #f2f6fb;
+  /* BuildWise Figma Design Tokens */
+  --bw-sidebar: #1E293B;
+  --bw-sidebar-active: #334155;
+  --bw-sidebar-hover: rgba(255, 255, 255, 0.08);
+  --bw-sidebar-text: #F8FAFC;
+  --bw-sidebar-muted: #94A3B8;
 
-  --color-accent-700: #b45f04;
-  --color-accent-600: #e08a1e;
-  --color-accent-500: #f0a53a;
-  --color-accent-100: #fdf1de;
+  --bw-amber: #D97706;
+  --bw-amber-hover: #B45309;
+  --bw-amber-light: #FEF3C7;
+  --bw-amber-dark: #92400E;
 
-  --color-success-700: #15803d;
-  --color-success-100: #dcfce7;
-  --color-warning-700: #a16207;
-  --color-warning-100: #fef3c7;
-  --color-danger-700: #b91c1c;
-  --color-danger-100: #fee2e2;
-  --color-info-700: #1d4ed8;
-  --color-info-100: #dbeafe;
+  --bw-bg: #F8F7F5;
+  --bw-surface: #FFFFFF;
+  --bw-surface-subtle: #F3F4F6;
+  --bw-border: #E5E5E0;
+  --bw-border-subtle: #EDEDEC;
 
-  --color-bg: #f6f8fb;
-  --color-surface: #ffffff;
-  --color-surface-muted: #f7f9fc;
-  --color-text: #131a2b;
-  --color-text-muted: #667085;
-  --color-border: #e1e6ee;
-  --color-border-strong: #c9d2e0;
+  --bw-text-primary: #1E1E1E;
+  --bw-text-secondary: #6B7280;
+  --bw-text-muted: #9CA3AF;
+
+  --bw-success: #16A34A;
+  --bw-success-bg: #DCFCE7;
+  --bw-danger: #DC2626;
+  --bw-danger-bg: #FEE2E2;
+  --bw-info: #2563EB;
+  --bw-info-bg: #DBEAFE;
+  --bw-warning: #D97706;
+  --bw-warning-bg: #FEF3C7;
+
+  --bw-card-radius: 8px;
+  --bw-control-radius: 6px;
+  --bw-topbar-height: 64px;
+  --bw-sidebar-width: 260px;
+
+  /* Backward Compatibility Mappings */
+  --color-primary-900: #1E293B;
+  --color-primary-800: #253346;
+  --color-primary-700: #334155;
+  --color-primary-600: #475569;
+  --color-primary-100: #F1F5F9;
+  --color-primary-50: #F8FAFC;
+
+  --color-accent-700: #B45309;
+  --color-accent-600: #D97706;
+  --color-accent-500: #F59E0B;
+  --color-accent-100: #FEF3C7;
+
+  --color-success-700: var(--bw-success);
+  --color-success-100: var(--bw-success-bg);
+  --color-warning-700: var(--bw-amber-dark);
+  --color-warning-100: var(--bw-warning-bg);
+  --color-danger-700: var(--bw-danger);
+  --color-danger-100: var(--bw-danger-bg);
+  --color-info-700: var(--bw-info);
+  --color-info-100: var(--bw-info-bg);
+
+  --color-bg: var(--bw-bg);
+  --color-surface: var(--bw-surface);
+  --color-surface-muted: var(--bw-surface-subtle);
+  --color-text: var(--bw-text-primary);
+  --color-text-muted: var(--bw-text-secondary);
+  --color-border: var(--bw-border);
+  --color-border-strong: #D1D5DB;
   --color-white: #ffffff;
 
-  --gradient-primary: linear-gradient(135deg, var(--color-primary-700) 0%, var(--color-primary-900) 100%);
-  --gradient-accent: linear-gradient(135deg, var(--color-accent-500) 0%, var(--color-accent-700) 100%);
+  --gradient-primary: linear-gradient(180deg, #1E293B 0%, #0F172A 100%);
+  --gradient-accent: linear-gradient(135deg, #D97706 0%, #B45309 100%);
 
   --space-1: 0.25rem;
   --space-2: 0.5rem;
@@ -41,16 +78,16 @@
   --space-8: 2rem;
   --space-10: 2.5rem;
 
-  --radius-sm: 0.5rem;
-  --radius-md: 0.75rem;
-  --radius-lg: 1.1rem;
-  --radius-xl: 1.5rem;
+  --radius-sm: var(--bw-control-radius);
+  --radius-md: var(--bw-card-radius);
+  --radius-lg: 12px;
+  --radius-xl: 16px;
 
-  --shadow-xs: 0 1px 2px rgb(19 26 43 / 0.05);
-  --shadow-sm: 0 2px 6px rgb(19 26 43 / 0.06), 0 1px 2px rgb(19 26 43 / 0.05);
-  --shadow-md: 0 10px 24px rgb(16 42 76 / 0.09), 0 2px 6px rgb(16 42 76 / 0.06);
-  --shadow-lg: 0 24px 48px rgb(10 24 48 / 0.16), 0 8px 16px rgb(10 24 48 / 0.08);
-  --shadow-primary: 0 10px 22px rgb(16 42 76 / 0.28);
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.08), 0 2px 4px -1px rgba(0, 0, 0, 0.04);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -2px rgba(0, 0, 0, 0.04);
+  --shadow-primary: 0 4px 14px rgba(217, 119, 6, 0.25);
 
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
 
@@ -58,9 +95,11 @@
   --font-sm: 0.875rem;
   --font-md: 1rem;
   --font-lg: 1.125rem;
-  --font-xl: 1.5rem;
-  --font-2xl: 2rem;
-  --font-3xl: 2.5rem;
-  --font-family: "Plus Jakarta Sans", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --font-xl: 1.25rem;
+  --font-2xl: 1.5rem;
+  --font-3xl: 2rem;
+
+  --font-sans: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-family: var(--font-sans);
+  --font-mono: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
