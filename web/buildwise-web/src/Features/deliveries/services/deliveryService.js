@@ -54,14 +54,14 @@ export const deliveryService = {
     return res.json();
   },
 
-  async uploadEvidence(id, imageUrl) {
+  async saveEvidenceLink(id, imageUrl) {
     const res = await fetch(`${API_BASE_URL}/deliveries/${id}/evidence`, {
       method: 'POST',
       headers: getHeaders(true),
       body: JSON.stringify({ imageUrl })
     });
     handleUnauthorized(res);
-    if (!res.ok) throw new Error('Failed to upload photographic evidence');
+    if (!res.ok) throw new Error('Failed to save evidence link');
     return res.json();
   },
 

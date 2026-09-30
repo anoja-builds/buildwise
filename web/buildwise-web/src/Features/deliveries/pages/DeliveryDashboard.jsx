@@ -3,20 +3,20 @@ import { deliveryService } from '../services/deliveryService';
 import DeliveryRiskPanel from '../components/DeliveryRiskPanel';
 import DeliveryDiscrepancyPanel from '../components/DeliveryDiscrepancyPanel';
 import ScheduleDeliveryModal from '../components/ScheduleDeliveryModal';
+import RecordDeliveryForm from './RecordDeliveryForm';
 import { useAuth } from '../../../auth/AuthContext';
 import { purchaseOrderRoles } from '../../../routes/routeConfig';
-import RecordDeliveryForm from './RecordDeliveryForm';
 
 export default function DeliveryDashboard() {
-  const { roles } = useAuth();
-  const canSchedule = purchaseOrderRoles.some(role => roles.includes(role));
+  const { roles = [] } = useAuth();
+  const canSchedule = purchaseOrderRoles.some((role) => roles.includes(role));
   const canReceive = roles.includes('SiteEngineer') || roles.includes('Administrator');
   const [expected, setExpected] = useState([]);
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [showScheduleModal, setShowScheduleModal] = useState(false);
-  
+
   // Selection for recording delivery
   const [activeDelivery, setActiveDelivery] = useState(null);
   // Selection for showing AI risk assessment on a specific Purchase Order
@@ -65,38 +65,32 @@ export default function DeliveryDashboard() {
     );
   }
 
+  if (canReceive && activeDelivery) return <RecordDeliveryForm delivery={activeDelivery} onCancel={() => setActiveDelivery(null)} onSuccess={() => { setActiveDelivery(null); loadData(); }} />;
+
   return (
-    <div style={{ padding: '20px' }} className="fade-in">
-      <div className="page-header" style={{ marginBottom: '20px' }}>
+    <div className="fade-in">
+      <div className="page-header" style={{ marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div className="page-header__title-section">
           <h1 className="page-header__title">Delivery & Material Receiving</h1>
           <p className="page-header__subtitle">
-            Verify deliveries, reconcile quantities, and evaluate supplier risks (Component Ownership: Ramya)
+            Verify deliveries, reconcile quantities, and evaluate supplier risks.
           </p>
         </div>
-        {canSchedule && <button
-          type="button"
-          className="btn btn--primary"
-          onClick={() => setShowScheduleModal(true)}
-        >
-          + Schedule Delivery
-        </button>}
+        {canSchedule && (
+          <button
+            type="button"
+            className="btn btn--primary"
+            onClick={() => setShowScheduleModal(true)}
+          >
+            + Schedule Delivery
+          </button>
+        )}
       </div>
-
-      {canSchedule && showScheduleModal && (
-        <ScheduleDeliveryModal
-          onCancel={() => setShowScheduleModal(false)}
-          onSuccess={() => {
-            setShowScheduleModal(false);
-            loadData();
-          }}
-        />
-      )}
 
       {error && <div className="error-state" style={{ marginBottom: '20px' }}>⚠️ {error}</div>}
 
       {/* Grid of stats */}
-      <div className="dashboard-stats delivery-stats">
+      <div className="delivery-stats">
         <div className="card stats-card" style={{ padding: '16px', textAlign: 'center', background: '#eaf2f8' }}>
           <h4 style={{ margin: '0 0 8px 0', color: '#2980b9' }}>Expected Shipments</h4>
           <span style={{ fontSize: '28px', fontWeight: 'bold', color: '#1f618d' }}>{expected.length}</span>
@@ -121,26 +115,23 @@ export default function DeliveryDashboard() {
         </div>
       </div>
 
-      {/* active record form */}
-      {canReceive && activeDelivery && (
-        <div style={{ marginBottom: '30px' }}>
-          <RecordDeliveryForm
-            delivery={activeDelivery}
-            onCancel={() => setActiveDelivery(null)}
-            onSuccess={() => {
-              setActiveDelivery(null);
-              loadData();
-            }}
-          />
-        </div>
+      {/* schedule delivery modal */}
+      {canSchedule && showScheduleModal && (
+        <ScheduleDeliveryModal
+          onCancel={() => setShowScheduleModal(false)}
+          onSuccess={() => {
+            setShowScheduleModal(false);
+            loadData();
+          }}
+        />
       )}
 
       {/* active AI assessment panel */}
       {activePoForRisk && (
         <div style={{ marginBottom: '30px' }}>
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '-10px' }}>
-            <button 
-              className="btn btn--secondary" 
+            <button
+              className="btn btn--secondary"
               onClick={() => setActivePoForRisk(null)}
               style={{ padding: '2px 8px', fontSize: '11px', zIndex: 10 }}
             >
@@ -155,8 +146,8 @@ export default function DeliveryDashboard() {
       {activeDeliveryForDiscrepancy && (
         <div style={{ marginBottom: '30px' }}>
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '-10px' }}>
-            <button 
-              className="btn btn--secondary" 
+            <button
+              className="btn btn--secondary"
               onClick={() => setActiveDeliveryForDiscrepancy(null)}
               style={{ padding: '2px 8px', fontSize: '11px', zIndex: 10 }}
             >
@@ -196,20 +187,24 @@ export default function DeliveryDashboard() {
                         <span className={`badge ${getStatusBadgeClass(del.status)}`}>{del.status}</span>
                       </td>
                       <td style={{ padding: '10px', display: 'flex', gap: '8px' }}>
-                        {canReceive && <button
-                          className="btn btn--primary" 
-                          style={{ padding: '6px 12px', fontSize: '12px' }}
-                          onClick={() => setActiveDelivery(del)}
-                        >
-                          Receive
-                        </button>}
-                        {canSchedule && <button
-                          className="btn btn--secondary" 
-                          style={{ padding: '6px 12px', fontSize: '12px' }}
-                          onClick={() => setActivePoForRisk(del.purchaseOrderId)}
-                        >
-                          AI Risk Check
-                        </button>}
+                        {canReceive && (
+                          <button
+                            className="btn btn--primary"
+                            style={{ padding: '6px 12px', fontSize: '12px' }}
+                            onClick={() => setActiveDelivery(del)}
+                          >
+                            Receive
+                          </button>
+                        )}
+                        {canSchedule && (
+                          <button
+                            className="btn btn--secondary"
+                            style={{ padding: '6px 12px', fontSize: '12px' }}
+                            onClick={() => setActivePoForRisk(del.purchaseOrderId)}
+                          >
+                            AI Risk Check
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -265,7 +260,7 @@ export default function DeliveryDashboard() {
                         <div style={{ marginTop: '6px', fontSize: '10.5px', background: '#f9f9f9', padding: '4px 8px', borderRadius: '4px' }}>
                           {del.items.map((i, idx) => (
                             <div key={idx}>
-                              • {i.materialName}: Received {i.receivedQuantity} / Ordered {i.orderedQuantity} 
+                              • {i.materialName}: Received {i.receivedQuantity} / Ordered {i.orderedQuantity}
                               {i.damagedQuantity > 0 && <span style={{ color: '#c0392b' }}> (Damaged: {i.damagedQuantity})</span>}
                             </div>
                           ))}
@@ -299,7 +294,7 @@ export default function DeliveryDashboard() {
                 <strong>Reconciliation Rule</strong>: Always reconcile quantities upon delivery. Shortages and damaged materials are automatically logged to alert the procurement department.
               </li>
               <li style={{ marginBottom: '10px' }}>
-                <strong>Photographic Evidence</strong>: If materials arrive damaged, use the 📸 camera simulation to attach pictures. This is required for audit trails and returns.
+                <strong>Evidence links</strong>: Record an existing photo or document link when reporting damage. BuildWise stores the link, not the file.
               </li>
               <li style={{ marginBottom: '10px' }}>
                 <strong>Inspection Boundary</strong>: Receiving materials logs their physical quantities. They must subsequently pass Quality Inspection (Component 4) before being released for site construction.

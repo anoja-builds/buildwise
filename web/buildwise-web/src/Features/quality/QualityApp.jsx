@@ -48,7 +48,7 @@ function QualityWorkspace({ section, routeView, onNavigate }) {
     {view.kind !== 'inspectionList' && view.kind !== 'ncrList' && <Button variant="secondary" onClick={back}>Back to {section}</Button>}
     {view.kind === 'inspectionList' && <InspectionSection onOpen={openInspection} onBeginInspection={(delivery) => setView({ kind: 'startInspection', delivery })} />}
     {view.kind === 'inspection' && <InspectionDetail key={view.id} id={view.id} onComplete={onNavigate ? (inspection) => setView({ kind: 'completeInspection', inspection }) : undefined} onCreate={(inspection, item) => setView({ kind: 'create', inspection, item })} />}
-    {view.kind === 'create' && <CreateNcr inspection={view.inspection} item={view.item} onSaved={openNcr} onCancel={() => openInspection(view.inspection.id)} />}
+    {view.kind === 'create' && <div className="workflow-columns ncr-create"><div className="stack"><NcrList onOpen={openNcr} onInspections={() => setView({ kind: 'inspectionList' })} /></div><CreateNcr inspection={view.inspection} item={view.item} onSaved={openNcr} onCancel={() => openInspection(view.inspection.id)} /></div>}
     {view.kind === 'ncrList' && <NcrList onOpen={openNcr} onInspections={() => setView({ kind: 'inspectionList' })} />}
     {view.kind === 'ncr' && <NcrDetail key={view.id} id={view.id} onInspection={openInspection} />}
     {view.kind === 'startInspection' && (
@@ -58,13 +58,14 @@ function QualityWorkspace({ section, routeView, onNavigate }) {
         onCancel={() => setView({ kind: 'inspectionList' })}
       />
     )}
-    {view.kind === 'completeInspection' && (
+    {view.kind === 'completeInspection' && view.inspection.status === 'UnderInspection' && (
       <CompleteInspectionForm
         inspection={view.inspection}
         onSuccess={(id) => openInspection(id)}
         onCancel={() => setView({ kind: 'inspectionList' })}
       />
     )}
+    {view.kind === 'completeInspection' && view.inspection.status !== 'UnderInspection' && <InspectionDetail id={view.inspection.id} onCreate={(inspection, item) => setView({ kind: 'create', inspection, item })} />}
   </div>
 }
 
@@ -101,7 +102,9 @@ function QualityFormRoute({ kind, params, section, onNavigate }) {
       return { kind, delivery }
     }
     const inspection = await qualityApi.getInspection(params.id)
-    if (kind === 'completeInspection') return { kind, inspection }
+    if (kind === 'completeInspection') return inspection.status === 'UnderInspection'
+      ? { kind, inspection }
+      : { kind: 'inspection', id: inspection.id }
     const item = inspection.items.find((item) => String(item.id) === params.itemId)
     if (!item) throw new Error('Inspection item not found.')
     return { kind, inspection, item }
@@ -256,6 +259,7 @@ function CompleteInspectionForm({ inspection, onSuccess, onCancel }) {
     deliveryItems.map((di) => ({
       deliveryItemId: di.deliveryItemId,
       receivedQuantity: di.receivedQuantity,
+      damagedQuantity: di.damagedQuantity,
       condition: '',
       acceptedQuantity: '',
       rejectedQuantity: '',
@@ -325,27 +329,20 @@ function CompleteInspectionForm({ inspection, onSuccess, onCancel }) {
   }
 
   return (
-    <Card title={`Complete Inspection #${inspection.id} — ${inspection.deliveryReference || `Delivery #${inspection.deliveryId}`}`}>
-      <p>Fill in every delivery item below. The backend requires all positive-received items to be included.</p>
-      <form className="stack" onSubmit={submit}>
+    <div className="workflow-columns"><div className="stack">
+      <Card title={`Complete Inspection #${inspection.id}`}><div className="context-ribbon"><div><span>Delivery</span><strong>{inspection.deliveryReference || `Delivery #${inspection.deliveryId}`}</strong></div><div><span>Inspector</span><strong>{inspection.inspectorName || 'Current inspector'}</strong></div><div><span>Status</span><Badge value={inspection.status} /></div></div></Card>
+      <div className="request-items-header"><h3>Material Items for Assessment</h3><span className="muted">Accepted + Rejected ≤ Received</span></div>
+      <form id="complete-inspection-form" className="stack" onSubmit={submit}>
         {/* Per-item form rows */}
         {items.map((it, idx) => (
-          <div key={it.deliveryItemId} style={{ border: '1px solid #e2e8f0', borderRadius: 6, padding: 12, marginBottom: 8 }}>
-            <strong>Delivery Item #{it.deliveryItemId}</strong>
-            <span style={{ marginLeft: 8, color: '#888', fontSize: 13 }}>Received qty: {it.receivedQuantity}</span>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 8 }}>
+          <Card key={it.deliveryItemId}>
+            <div className="inspection-item-heading"><strong>Delivery Item #{it.deliveryItemId}</strong><span className="muted">Received: {it.receivedQuantity} · Damaged: {it.damagedQuantity ?? 'Not recorded'}</span></div>
+            <div className="inspection-item-fields">
               <TextInput
                 name={`condition-${idx}`}
                 label="Condition"
                 value={it.condition}
                 onChange={(e) => setItemField(idx, 'condition', e.target.value)}
-                disabled={busy}
-              />
-              <TextInput
-                name={`remarks-${idx}`}
-                label="Remarks"
-                value={it.remarks}
-                onChange={(e) => setItemField(idx, 'remarks', e.target.value)}
                 disabled={busy}
               />
               <TextInput
@@ -368,12 +365,13 @@ function CompleteInspectionForm({ inspection, onSuccess, onCancel }) {
                 onChange={(e) => setItemField(idx, 'rejectedQuantity', e.target.value)}
                 disabled={busy}
               />
+              <TextInput name={`remarks-${idx}`} label="Remarks" multiline value={it.remarks} onChange={(e) => setItemField(idx, 'remarks', e.target.value)} disabled={busy} />
             </div>
-          </div>
+          </Card>
         ))}
 
         {/* Overall decision and notes */}
-        <SelectInput
+        <Card title="Overall Inspection Decision"><div className="form-grid"><SelectInput
           name="decision"
           label="Overall decision"
           value={decision}
@@ -392,15 +390,12 @@ function CompleteInspectionForm({ inspection, onSuccess, onCancel }) {
           onChange={(e) => setNotes(e.target.value)}
           disabled={busy}
         />
+        </div></Card>
 
         {error && <ErrorState message={error} />}
 
-        <div className="quality-actions">
-          <Button type="submit" disabled={busy}>{busy ? 'Completing…' : 'Complete Inspection'}</Button>
-          <Button variant="secondary" disabled={busy} onClick={onCancel}>Cancel</Button>
-        </div>
       </form>
-    </Card>
+    </div><aside className="workflow-summary"><Card title="Inspection Summary"><dl className="summary-facts"><dt>Total received</dt><dd>{items.reduce((s, i) => s + i.receivedQuantity, 0)}</dd><dt>Total accepted</dt><dd>{items.reduce((s, i) => s + Number(i.acceptedQuantity || 0), 0)}</dd><dt>Total rejected</dt><dd>{items.reduce((s, i) => s + Number(i.rejectedQuantity || 0), 0)}</dd><dt>Overall decision</dt><dd>{decision || 'Not selected'}</dd></dl><p className="muted">Physical inspection is a human decision. AI risk advice does not change these quantities.</p><div className="stack"><Button type="submit" form="complete-inspection-form" disabled={busy}>{busy ? 'Completing…' : 'Complete Inspection'}</Button><Button variant="secondary" disabled={busy} onClick={onCancel}>Cancel</Button></div></Card></aside></div>
   )
 }
 
@@ -430,7 +425,7 @@ function InspectionDetail({ id, onCreate, onComplete }) {
   const state = useRecord(qualityApi.getInspection, id)
   return <><PageHeader title={`Inspection #${id}`} actions={<Button variant="secondary" onClick={state.refresh}>Refresh</Button>} />
     <ReadState state={state}>{(inspection) => <>
-      {onComplete && inspection.status !== 'Completed' && <Button onClick={() => onComplete(inspection)}>Complete inspection</Button>}
+      {onComplete && inspection.status === 'UnderInspection' && <Button onClick={() => onComplete(inspection)}>Complete inspection</Button>}
       <Card title="Inspection details"><dl className="quality-facts">
         <dt>Delivery</dt><dd>{inspection.deliveryReference || `Delivery #${inspection.deliveryId}`} (#{inspection.deliveryId})</dd>
         <dt>Inspector</dt><dd>{inspection.inspectorName || `User #${inspection.inspectorUserId}`}</dd>
@@ -525,14 +520,16 @@ function NcrEditor({ record, onChanged, onInspection }) {
     catch (err) { setError(err.message) }
     finally { locked.current = false; setBusy(false) }
   }
-  return <Card title="Non-conformance details">
+  const lifecycle = ['Open', 'CorrectiveActionRequired', 'Resolved', 'Closed']
+  return <><Card title="NCR Workflow Lifecycle"><ol className="ncr-steps">{lifecycle.map((status, index) => <li key={status} aria-current={status === record.status ? 'step' : undefined} data-complete={index < lifecycle.indexOf(record.status)}>{index + 1}. {status.replace(/([a-z])([A-Z])/g, '$1 $2')}</li>)}</ol></Card><div className="workflow-columns"><div className="stack"><Card title="Non-conformance details">
     <dl className="quality-facts">
       <dt>Inspection</dt><dd><button className="table-action" onClick={() => onInspection(record.inspectionId)}>Inspection #{record.inspectionId}</button>, item #{record.inspectionItemId}, delivery item #{record.deliveryItemId}</dd>
-      <dt>Issue</dt><dd>{record.issueDescription}</dd><dt>Severity</dt><dd>{record.severity}</dd><dt>Status</dt><dd><Badge value={record.status} /></dd>
+      <dt>Severity</dt><dd>{record.severity}</dd><dt>Status</dt><dd><Badge value={record.status} /></dd>
       <dt>Condition</dt><dd>{show(record.condition)}</dd><dt>Accepted / rejected</dt><dd>{record.acceptedQuantity} / {record.rejectedQuantity}</dd>
-      <dt>Remarks</dt><dd>{show(record.remarks)}</dd><dt>Corrective action</dt><dd>{show(record.correctiveAction)}</dd>
-      <dt>Created</dt><dd>{date(record.createdAt)}</dd><dt>Updated</dt><dd>{date(record.updatedAt)}</dd><dt>Resolved</dt><dd>{date(record.resolvedAt)}</dd>
+      <dt>Remarks</dt><dd>{show(record.remarks)}</dd>
     </dl>
+    </Card><Card title="Issue Description"><p>{record.issueDescription}</p></Card></div><div className="stack"><Card title="Corrective Action Plan">
+    <p className="advisory-note">{show(record.correctiveAction)}</p>
     {error && <ErrorState message={error} />}
     {editable && <form className="stack" onSubmit={(event) => { event.preventDefault(); if (!action.trim()) { setError('Enter a corrective action.'); return }; mutate(() => qualityApi.updateCorrectiveAction(record.id, action.trim())) }}>
       <TextInput name="corrective-action" label="Corrective action" multiline required value={action} disabled={busy} onChange={(e) => setAction(e.target.value)} />
@@ -542,5 +539,5 @@ function NcrEditor({ record, onChanged, onInspection }) {
       {editable && record.correctiveAction?.trim() && <Button disabled={busy || action.trim() !== record.correctiveAction.trim()} onClick={() => mutate(() => qualityApi.resolveNcr(record.id))}>Mark resolved</Button>}
       {record.status === 'Resolved' && <Button disabled={busy} onClick={() => mutate(() => qualityApi.closeNcr(record.id))}>Close NCR</Button>}
     </div>
-  </Card>
+  </Card><Card title="Audit History"><dl className="quality-facts"><dt>Created</dt><dd>{date(record.createdAt)}</dd><dt>Updated</dt><dd>{date(record.updatedAt)}</dd><dt>Resolved</dt><dd>{date(record.resolvedAt)}</dd></dl></Card></div></div></>
 }
