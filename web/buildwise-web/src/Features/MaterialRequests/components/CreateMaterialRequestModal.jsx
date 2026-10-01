@@ -1,4 +1,4 @@
-﻿import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { materialRequestService } from '../services/materialRequestService'
 import { Button, Card, ErrorState, LoadingState, PageHeader, TextInput } from '../../../components/shared'
 const blankItem = () => ({ materialId: '', quantity: '', notes: '' })
@@ -21,11 +21,24 @@ export default function CreateMaterialRequestModal({ onClose, onSuccess }) {
   }, [revision])
   const updateItem = (index, field, value) => setItems(current => current.map((item, i) => i === index ? { ...item, [field]: value } : item))
   const available = options?.projects?.length > 0 && options?.materials?.length > 0
+  const now = new Date()
+  const todayLocal = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+
   async function submit(event) {
     event.preventDefault()
     if (locked.current || !available) return
-    if (!options.projects.some(p => String(p.id) === projectId) || items.some(i => !options.materials.some(m => String(m.id) === i.materialId) || !(Number(i.quantity) > 0))) {
-      setError('Select a project, active materials, and positive quantities.'); return
+    if (!requiredDate || requiredDate < todayLocal) {
+      setError('Required date cannot be before today.')
+      return
+    }
+    if (!options.projects.some(p => String(p.id) === projectId) || items.length === 0 || items.some(i => !options.materials.some(m => String(m.id) === i.materialId) || !(Number(i.quantity) > 0))) {
+      setError('Select a project, active materials, and positive quantities.')
+      return
+    }
+    const materialIds = items.map(i => i.materialId)
+    if (new Set(materialIds).size !== materialIds.length) {
+      setError('Duplicate materials are not allowed in the same request.')
+      return
     }
     locked.current = true; setBusy(true); setError('')
     try {
@@ -44,7 +57,7 @@ export default function CreateMaterialRequestModal({ onClose, onSuccess }) {
     {available && <Card><form className="stack" onSubmit={submit}>
       <div className="form-grid">
         <label className="field"><span className="field__label">Project *</span><select className="field__control" aria-label="Project" required value={projectId} disabled={busy} onChange={e => setProjectId(e.target.value)}><option value="">Select project...</option>{options.projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
-        <TextInput label="Required Date" name="requiredDate" type="date" required value={requiredDate} disabled={busy} onChange={e => setRequiredDate(e.target.value)} />
+        <TextInput label="Required Date" name="requiredDate" type="date" required min={todayLocal} value={requiredDate} disabled={busy} onChange={e => setRequiredDate(e.target.value)} />
       </div>
       <TextInput label="Reason / Justification" name="reason" multiline required value={reason} disabled={busy} onChange={e => setReason(e.target.value)} />
       <div className="request-items-header"><h3>Requested Materials</h3><Button variant="secondary" disabled={busy} onClick={() => setItems(current => [...current, blankItem()])}>+ Add Material</Button></div>

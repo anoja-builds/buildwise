@@ -64,8 +64,8 @@ public class DeliveriesController : ControllerBase
                 MaterialUnit = di.PurchaseOrderItem?.Material?.Unit,
                 OrderedQuantity = di.PurchaseOrderItem?.OrderedQuantity ?? 0,
                 PreviouslyReceivedUsableQuantity = priorUsable.GetValueOrDefault(di.PurchaseOrderItemId),
-                OutstandingQuantity = Math.Max(0, (di.PurchaseOrderItem?.OrderedQuantity ?? 0)
-                    - priorUsable.GetValueOrDefault(di.PurchaseOrderItemId)),
+                OutstandingQuantity = DeliveryQuantityRules.Outstanding(di.PurchaseOrderItem?.OrderedQuantity ?? 0,
+                    priorUsable.GetValueOrDefault(di.PurchaseOrderItemId)),
                 di.ReceivedQuantity,
                 di.DamagedQuantity,
                 di.Notes
@@ -167,8 +167,8 @@ public class DeliveriesController : ControllerBase
                 MaterialUnit = di.PurchaseOrderItem?.Material?.Unit,
                 OrderedQuantity = di.PurchaseOrderItem?.OrderedQuantity ?? 0,
                 PreviouslyReceivedUsableQuantity = priorUsable.GetValueOrDefault(di.PurchaseOrderItemId),
-                OutstandingQuantity = Math.Max(0, (di.PurchaseOrderItem?.OrderedQuantity ?? 0)
-                    - priorUsable.GetValueOrDefault(di.PurchaseOrderItemId)),
+                OutstandingQuantity = DeliveryQuantityRules.Outstanding(di.PurchaseOrderItem?.OrderedQuantity ?? 0,
+                    priorUsable.GetValueOrDefault(di.PurchaseOrderItemId)),
                 di.ReceivedQuantity,
                 di.DamagedQuantity,
                 ShortageQuantity = (di.PurchaseOrderItem?.OrderedQuantity ?? 0) - di.ReceivedQuantity,
@@ -195,6 +195,9 @@ public class DeliveriesController : ControllerBase
 
         if (purchaseOrder.Status is not (PurchaseOrderStatus.Confirmed or PurchaseOrderStatus.InProgress))
             return BadRequest("Only confirmed or in-progress purchase orders can be scheduled.");
+
+        if (purchaseOrder.Items == null || purchaseOrder.Items.Count == 0)
+            return BadRequest("Purchase order has no items to deliver.");
 
         var delivery = new Delivery
         {
@@ -276,11 +279,11 @@ public class DeliveriesController : ControllerBase
                     || i.Delivery.Status == DeliveryStatus.DiscrepancyReported))
             .ToListAsync();
         var priorUsable = priorItems.GroupBy(i => i.PurchaseOrderItemId)
-            .ToDictionary(g => g.Key, g => g.Sum(i => i.ReceivedQuantity - i.DamagedQuantity));
+            .ToDictionary(g => g.Key, g => g.Sum(i => DeliveryQuantityRules.Fulfilled(i.ReceivedQuantity, i.DamagedQuantity)));
         foreach (var item in dto.Items)
         {
-            var remaining = Math.Max(0, deliveryItems[item.PurchaseOrderItemId].PurchaseOrderItem!.OrderedQuantity
-                - priorUsable.GetValueOrDefault(item.PurchaseOrderItemId));
+            var remaining = DeliveryQuantityRules.Outstanding(deliveryItems[item.PurchaseOrderItemId].PurchaseOrderItem!.OrderedQuantity,
+                priorUsable.GetValueOrDefault(item.PurchaseOrderItemId));
             if (item.ReceivedQuantity > remaining)
                 return BadRequest($"Received quantity for item #{item.PurchaseOrderItemId} exceeds the outstanding quantity ({remaining}).");
         }
@@ -296,7 +299,7 @@ public class DeliveriesController : ControllerBase
         }
         var complete = delivery.PurchaseOrder.Items.All(i =>
             priorUsable.GetValueOrDefault(i.Id) + delivery.Items.Where(d => d.PurchaseOrderItemId == i.Id)
-                .Sum(d => d.ReceivedQuantity - d.DamagedQuantity) >= i.OrderedQuantity);
+                .Sum(d => DeliveryQuantityRules.Fulfilled(d.ReceivedQuantity, d.DamagedQuantity)) >= i.OrderedQuantity);
         // Preserve the existing shortage/damage discrepancy workflow used by quality.
         delivery.Status = dto.Items.Any(i => i.DamagedQuantity > 0) || !complete
             ? DeliveryStatus.DiscrepancyReported : DeliveryStatus.Received;
@@ -359,6 +362,16 @@ public class DeliveriesController : ControllerBase
     [Authorize(Roles = "ProcurementOfficer,ProcurementManager,Administrator")]
     public async Task<IActionResult> CreateSchedule([FromBody] ScheduleDeliveryDto dto)
     {
+        var purchaseOrder = await _dbContext.PurchaseOrders.FindAsync(dto.PurchaseOrderId);
+        if (purchaseOrder == null)
+            return BadRequest("Purchase Order not found.");
+
+        if (purchaseOrder.Status is not (PurchaseOrderStatus.Confirmed or PurchaseOrderStatus.InProgress))
+            return BadRequest("Only confirmed or in-progress purchase orders can be scheduled.");
+
+        if (dto.ScheduledDate == default || dto.ScheduledDate.Date < DateTime.UtcNow.Date)
+            return BadRequest("Scheduled delivery date cannot be before today.");
+
         var schedule = new DeliverySchedule
         {
             PurchaseOrderId = dto.PurchaseOrderId,
@@ -401,12 +414,25 @@ public class DeliveriesController : ControllerBase
     {
         if (!User.TryGetUserId(out var actorId)) return Unauthorized();
 
+        if (string.IsNullOrWhiteSpace(dto.Description))
+            return BadRequest("Issue description is required.");
+
+        var delivery = await _dbContext.Deliveries
+            .Include(d => d.Items)
+            .FirstOrDefaultAsync(d => d.Id == dto.DeliveryId);
+
+        if (delivery == null)
+            return NotFound($"Delivery #{dto.DeliveryId} not found.");
+
+        if (dto.DeliveryItemId.HasValue && !delivery.Items.Any(i => i.Id == dto.DeliveryItemId.Value))
+            return BadRequest($"Delivery item #{dto.DeliveryItemId.Value} does not belong to delivery #{dto.DeliveryId}.");
+
         var issue = new DeliveryIssue
         {
             DeliveryId = dto.DeliveryId,
             DeliveryItemId = dto.DeliveryItemId,
             IssueType = dto.IssueType,
-            Description = dto.Description,
+            Description = dto.Description.Trim(),
             Severity = dto.Severity,
             ReportedByUserId = actorId,
             Status = "Open",
@@ -513,13 +539,14 @@ public class DeliveriesController : ControllerBase
     // Match ReceiveDelivery's usable-quantity rule; never expose procurement entities.
     private async Task<Dictionary<int, decimal>> GetPriorUsableQuantities(int excludeDeliveryId = 0)
     {
-        return await _dbContext.DeliveryItems.AsNoTracking()
+        var totals = await _dbContext.DeliveryItems.AsNoTracking()
             .Where(i => i.DeliveryId != excludeDeliveryId
                 && (i.Delivery!.Status == DeliveryStatus.Received
                     || i.Delivery.Status == DeliveryStatus.PartiallyReceived
                     || i.Delivery.Status == DeliveryStatus.DiscrepancyReported))
             .GroupBy(i => i.PurchaseOrderItemId)
-            .Select(g => new { Id = g.Key, Quantity = g.Sum(i => i.ReceivedQuantity - i.DamagedQuantity) })
-            .ToDictionaryAsync(i => i.Id, i => i.Quantity);
+            .Select(g => new { Id = g.Key, Received = g.Sum(i => i.ReceivedQuantity), Damaged = g.Sum(i => i.DamagedQuantity) })
+            .ToListAsync();
+        return totals.ToDictionary(i => i.Id, i => DeliveryQuantityRules.Fulfilled(i.Received, i.Damaged));
     }
 }

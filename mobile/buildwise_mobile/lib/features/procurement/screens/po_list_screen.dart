@@ -1,76 +1,91 @@
 import 'package:flutter/material.dart';
+
+import '../../../core/widgets/widgets.dart' as ui;
+import '../models/procurement_models.dart';
 import '../services/procurement_service.dart';
+import 'purchase_order_detail_screen.dart';
 
 class PoListScreen extends StatefulWidget {
-  const PoListScreen({super.key});
-
+  const PoListScreen({super.key, this.service});
+  final ProcurementService? service;
   @override
   State<PoListScreen> createState() => _PoListScreenState();
 }
 
 class _PoListScreenState extends State<PoListScreen> {
-  final _service = ProcurementService();
-  late Future<List<dynamic>> _futurePos;
-
+  late final api = widget.service ?? ProcurementService();
+  String _status = 'All';
   @override
-  void initState() {
-    super.initState();
-    _futurePos = _service.getPurchaseOrders();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Issued Purchase Orders'),
-      ),
-      body: FutureBuilder<List<dynamic>>(
-        future: _futurePos,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          } else if (snapshot.hasError) {
-            return Center(child: Text('Error: ${snapshot.error}'));
-          } else if (!snapshot.hasData || snapshot.data!.isEmpty) {
-            return const Center(child: Text('No purchase orders found.'));
-          }
-
-          final pos = snapshot.data!;
-          return ListView.builder(
-            itemCount: pos.length,
-            padding: const EdgeInsets.all(12),
-            itemBuilder: (context, index) {
-              final po = pos[index];
-              return Card(
-                elevation: 2,
-                margin: const EdgeInsets.only(bottom: 12),
-                child: ListTile(
-                  leading: const CircleAvatar(
-                    backgroundColor: Colors.tealAccent,
-                    child: Icon(Icons.shopping_cart, color: Colors.teal),
-                  ),
-                  title: Text(
-                    'PO #${po['id'].toString().padLeft(4, '0')} - ${po['supplierName'] ?? 'Supplier'}',
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  subtitle: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const SizedBox(height: 4),
-                      Text('Material request #${po['materialRequestId']}'),
-                      Text('Status: ${po['status']}', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.teal)),
-                    ],
-                  ),
-                  trailing: Text(
-                    'LKR ${(po['totalAmount'] as num).toStringAsFixed(0)}',
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                  ),
-                ),
-              );
-            },
-          );
-        },
-      ),
-    );
-  }
+  Widget build(BuildContext context) => Scaffold(
+    appBar: ui.WorkspaceAppBar(
+      title: const Text('Purchase Orders'),
+      subtitle: 'Procurement • Order progress',
+    ),
+    body: ui.ApiView<List<PurchaseOrder>>(
+      load: api.getOrders,
+      builder: (context, orders, refresh) {
+        final filtered = orders
+            .where((o) => _status == 'All' || o.status == _status)
+            .toList();
+        return ListView(
+          padding: const EdgeInsets.all(16),
+          physics: const AlwaysScrollableScrollPhysics(),
+          children: [
+            ui.FilterChips(
+              values: const [
+                'All',
+                'Created',
+                'Confirmed',
+                'InProgress',
+                'Completed',
+                'Cancelled',
+              ],
+              selected: _status,
+              onChanged: (value) => setState(() => _status = value),
+            ),
+            const SizedBox(height: 12),
+            if (filtered.isEmpty)
+              const ui.EmptyStateWidget(
+                title: 'No purchase orders found',
+                message: 'Try another status filter or pull to refresh.',
+              ),
+            for (final o in filtered) ...[
+              ui.RecordCard(
+                title: ui.reference('PO', o.id),
+                status: o.status,
+                action: 'View Order Details',
+                onTap: () async {
+                  await Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => PurchaseOrderDetailScreen(
+                        orderId: o.id,
+                        service: api,
+                      ),
+                    ),
+                  );
+                  refresh();
+                },
+                children: [
+                  ui.FieldRow('Supplier', o.supplier),
+                  if (o.requestId != null)
+                    ui.FieldRow(
+                      'Material Request',
+                      ui.reference('MR', o.requestId!),
+                    ),
+                  ui.FieldRow('Total amount', ui.money(o.total)),
+                  if (o.expectedDate != null)
+                    ui.FieldRow(
+                      'Expected delivery',
+                      ui.displayDate(o.expectedDate),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 12),
+            ],
+          ],
+        );
+      },
+    ),
+  );
 }

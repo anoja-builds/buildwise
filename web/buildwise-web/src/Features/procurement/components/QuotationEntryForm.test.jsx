@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import QuotationEntryForm from './QuotationEntryForm'
@@ -60,5 +60,60 @@ describe('QuotationEntryForm validation', () => {
     await user.type(screen.getByLabelText('Unit price'), '2100')
 
     expect(await screen.findAllByText('525,000')).toHaveLength(2)
+  })
+
+  it('rejects a quotation date in the future', async () => {
+    const user = userEvent.setup()
+    render(<QuotationEntryForm requestDetail={requestDetail} onCreated={() => {}} />)
+
+    await waitFor(() => expect(screen.getByRole('combobox', { name: 'Supplier' }).options.length).toBeGreaterThan(1))
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Supplier' }), '1')
+    await user.type(screen.getByLabelText('Quantity (bag)'), '10')
+    await user.type(screen.getByLabelText('Unit price'), '100')
+
+    const dateInput = screen.getByLabelText(/Quotation date/i)
+    await user.clear(dateInput)
+    await user.type(dateInput, '2099-12-31')
+    fireEvent.submit(screen.getByRole('button', { name: 'Save quotation' }).closest('form'))
+
+    expect(await screen.findByText('Quotation date cannot be in the future.')).toBeInTheDocument()
+  })
+
+  it('rejects an expired quotation date where validUntil is before quotationDate', async () => {
+    const user = userEvent.setup()
+    render(<QuotationEntryForm requestDetail={requestDetail} onCreated={() => {}} />)
+
+    await waitFor(() => expect(screen.getByRole('combobox', { name: 'Supplier' }).options.length).toBeGreaterThan(1))
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Supplier' }), '1')
+    await user.type(screen.getByLabelText('Quantity (bag)'), '10')
+    await user.type(screen.getByLabelText('Unit price'), '100')
+
+    const validUntilInput = screen.getByLabelText(/Valid until/i)
+    await user.clear(validUntilInput)
+    await user.type(validUntilInput, '2020-01-01')
+    fireEvent.submit(screen.getByRole('button', { name: 'Save quotation' }).closest('form'))
+
+    expect(await screen.findByText('Valid-until must be on or after the quotation date.')).toBeInTheDocument()
+  })
+
+  it('rejects an already expired quotation where validUntil is before today', async () => {
+    const user = userEvent.setup()
+    render(<QuotationEntryForm requestDetail={requestDetail} onCreated={() => {}} />)
+
+    await waitFor(() => expect(screen.getByRole('combobox', { name: 'Supplier' }).options.length).toBeGreaterThan(1))
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Supplier' }), '1')
+    await user.type(screen.getByLabelText('Quantity (bag)'), '10')
+    await user.type(screen.getByLabelText('Unit price'), '100')
+
+    const dateInput = screen.getByLabelText(/Quotation date/i)
+    await user.clear(dateInput)
+    await user.type(dateInput, '2020-01-01')
+
+    const validUntilInput = screen.getByLabelText(/Valid until/i)
+    await user.clear(validUntilInput)
+    await user.type(validUntilInput, '2020-01-02')
+    fireEvent.submit(screen.getByRole('button', { name: 'Save quotation' }).closest('form'))
+
+    expect(await screen.findByText('Quotation has already expired.')).toBeInTheDocument()
   })
 })

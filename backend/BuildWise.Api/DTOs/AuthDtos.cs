@@ -1,15 +1,17 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace BuildWise.Api.DTOs;
 
 public record RegisterRequestDto(
-    string FullName,
-    string Email,
-    string Password,
-    string RoleName
+    [Required, StringLength(150)] string FullName,
+    [Required, StringLength(255)] string Email,
+    [Required, MinLength(8)] string Password,
+    [Required] string RoleName
 );
 
 public record LoginRequestDto(
-    string Email,
-    string Password
+    [Required, StringLength(255)] string Email,
+    [Required] string Password
 );
 
 public record UserSummaryDto(

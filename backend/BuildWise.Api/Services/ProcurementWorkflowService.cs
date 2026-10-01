@@ -9,11 +9,12 @@ namespace BuildWise.Api.Services;
 
 public class ProcurementWorkflowService
 {
-    /// <summary>agent_workflow_steps.agent_role for the tool-using analysis step (spec §6).</summary>
+    /// <summary>Persisted role for authoritative quotation comparison.</summary>
     private const string AnalysisAgentRole = "QuotationSupplierAnalysisAgent";
 
     private readonly ApplicationDbContext _db;
     private readonly QuotationAgentClient _agentClient;
+    private readonly ProcurementAdvisoryService? _advisoryService;
     private readonly ProcurementValidationService _validationService;
     private readonly IEmailService _emailService;
     private readonly ILogger<ProcurementWorkflowService> _logger;
@@ -23,13 +24,15 @@ public class ProcurementWorkflowService
         QuotationAgentClient agentClient,
         ProcurementValidationService validationService,
         IEmailService emailService,
-        ILogger<ProcurementWorkflowService> logger)
+        ILogger<ProcurementWorkflowService> logger,
+        ProcurementAdvisoryService? advisoryService = null)
     {
         _db = db;
         _agentClient = agentClient;
         _validationService = validationService;
         _emailService = emailService;
         _logger = logger;
+        _advisoryService = advisoryService;
     }
 
     public async Task<StartProcurementWorkflowResponse> StartWorkflowAsync(
@@ -74,14 +77,12 @@ public class ProcurementWorkflowService
         _db.AgentWorkflows.Add(workflow);
         await _db.SaveChangesAsync();
 
-        // 2. Planning step (ProcurementPlanningAgent): a distinct, lightweight
-        // coordinator that turns the objective into a structured, ordered plan
-        // before any tool call happens — this is what a downstream agent
-        // "delegates" against, satisfying spec §9.1's planning/delegation step.
+        // 2. Record the fixed workflow plan before comparison and advisory execution.
         var plan = new[]
         {
             "Filter eligible quotations (Active supplier, not expired) and rank by total amount.",
             "Independently re-validate the recommendation against all deterministic business rules.",
+            "Collect read-only evidence for bounded advisory procurement analysis.",
             "Pause for Procurement Manager approval before any purchase order can be created."
         };
         var planningStep = new AgentWorkflowStep
@@ -116,15 +117,12 @@ public class ProcurementWorkflowService
             valid: q.ValidUntil >= today
         )).ToList();
 
-        // 4. Analysis step (QuotationSupplierAnalysisAgent): the tool-using agent —
-        // calls the allow-listed filter_eligible/rank_by_total tools via the
-        // agent microservice (or the rule-based fallback) and produces the
-        // structured recommendation.
+        // 4. Authoritative deterministic comparison; the advisory runs after validation.
         var analysisStep = new AgentWorkflowStep
         {
             AgentWorkflowId = workflow.Id,
             AgentRole = AnalysisAgentRole,
-            StepName = "Filter & rank eligible quotations (tool use)",
+            StepName = "Filter & rank eligible quotations (deterministic)",
             StepOrder = 2,
             Status = WorkflowStepStatus.Running,
             StartedAt = DateTime.UtcNow
@@ -134,7 +132,7 @@ public class ProcurementWorkflowService
 
         try
         {
-            // Call Agent Microservice
+            // Authoritative deterministic ranking; the provider cannot return a selection.
             var recommendation = await _agentClient.AnalyzeAsync(materialRequestId, agentQuotations, requestedQuantities);
 
             // Validate schema conformance (§5.7)
@@ -199,6 +197,30 @@ public class ProcurementWorkflowService
             // Validation passed & ready for human approval
             validationStep.Status = WorkflowStepStatus.Completed;
             validationStep.CompletedAt = DateTime.UtcNow;
+
+            // Advisory analysis occurs only after the authoritative selection passes existing validation.
+            var advisoryStep = new AgentWorkflowStep
+            {
+                AgentWorkflowId = workflow.Id, AgentRole = "ProcurementAdvisoryAgent",
+                StepName = "Advisory assessment (read-only evidence tools)", StepOrder = 4,
+                Status = WorkflowStepStatus.Running, StartedAt = DateTime.UtcNow
+            };
+            _db.AgentWorkflowSteps.Add(advisoryStep);
+            await _db.SaveChangesAsync();
+            recommendation = _advisoryService == null ? recommendation :
+                await _advisoryService.EnrichAsync(request, quotations, recommendation);
+            // The validated advisory is additive; winner, ranks, rationale and approval semantics are unchanged.
+            analysisStep.StructuredResult = JsonSerializer.Serialize(recommendation);
+            advisoryStep.StructuredResult = JsonSerializer.Serialize(new
+            {
+                recommendation.ExecutionMode, recommendation.ModelIdentifier, recommendation.IterationCount,
+                recommendation.ToolTrace, recommendation.FallbackReason, recommendation.Advisory,
+                recommendation.AdvisoryEvidence
+            });
+            advisoryStep.ValidationResult = JsonSerializer.Serialize(new { advisoryValidated = recommendation.ExecutionMode == "AgenticAI",
+                deterministicSelectionUnchanged = true });
+            advisoryStep.Status = WorkflowStepStatus.Completed;
+            advisoryStep.CompletedAt = DateTime.UtcNow;
 
             workflow.Status = WorkflowStatus.AwaitingApproval;
             workflow.ApprovalStatus = AgentApprovalStatus.Pending;
@@ -355,8 +377,8 @@ public class ProcurementWorkflowService
         if (workflow is null)
             throw new ArgumentException($"Workflow #{workflowId} not found.");
 
-        if (workflow.Status != WorkflowStatus.AwaitingApproval)
-            throw new InvalidOperationException($"Workflow #{workflowId} is in state '{workflow.Status}', not 'AwaitingApproval'.");
+        if (workflow.Status != WorkflowStatus.AwaitingApproval || workflow.ApprovalStatus != AgentApprovalStatus.Pending || await _db.AgentApprovals.AnyAsync(a => a.AgentWorkflowId == workflowId))
+            throw new InvalidOperationException($"Workflow #{workflowId} is not awaiting approval or a decision has already been recorded.");
 
         var normalizedDecision = dto.Decision?.Trim().ToLowerInvariant() switch
         {
@@ -425,6 +447,9 @@ public class ProcurementWorkflowService
 
         if (workflow is null)
             throw new ArgumentException($"Workflow #{workflowId} not found.");
+
+        if (workflow.ApprovalStatus != AgentApprovalStatus.Approved)
+            throw new InvalidOperationException($"Workflow #{workflowId} has not been approved by a manager (status: {workflow.ApprovalStatus}).");
 
         var order = await CreatePurchaseOrderInternalAsync(workflow);
         if (requestLock != null) await requestLock.CommitAsync();
@@ -498,6 +523,9 @@ public class ProcurementWorkflowService
                     UnitPrice = qi.UnitPrice
                 }).ToList()
             };
+
+            if (po.ExpectedDeliveryDate.HasValue && po.ExpectedDeliveryDate.Value < po.OrderDate)
+                throw new InvalidOperationException("Expected delivery date must not be before order date.");
 
             _db.PurchaseOrders.Add(po);
 

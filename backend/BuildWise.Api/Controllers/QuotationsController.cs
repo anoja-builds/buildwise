@@ -81,11 +81,22 @@ public class QuotationsController : ControllerBase
         if (supplier is null)
             return NotFound($"Supplier #{dto.SupplierId} not found.");
 
+        if (supplier.Status != SupplierStatus.Active)
+            return BadRequest($"Supplier '{supplier.Name}' is not active.");
+
         if (dto.Items == null || dto.Items.Count == 0)
             return BadRequest("At least one quotation item is required.");
 
-        if (dto.QuotationDate == default || dto.ValidUntil < dto.QuotationDate)
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        if (dto.QuotationDate == default)
+            return BadRequest("Quotation date is required.");
+        if (dto.QuotationDate > today)
+            return BadRequest("Quotation date cannot be in the future.");
+        if (dto.ValidUntil < dto.QuotationDate)
             return BadRequest("Valid-until must be on or after the quotation date.");
+        if (dto.ValidUntil < today)
+            return BadRequest("Quotation has already expired.");
+
         if (dto.Items.Select(i => i.MaterialRequestItemId).Distinct().Count() != dto.Items.Count)
             return BadRequest("Each request item may appear only once.");
         if (dto.Items.Any(i => decimal.Round(i.Quantity, 2) != i.Quantity || decimal.Round(i.UnitPrice, 2) != i.UnitPrice

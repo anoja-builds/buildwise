@@ -24,7 +24,7 @@ it('restores the persisted workflow and uses the PO returned by approval without
   const user = userEvent.setup(); const onView = vi.fn()
   render(<RequestWorkspace requestId={5} role="Manager" onViewPurchaseOrder={onView} />)
   await user.click(await screen.findByRole('button', { name: 'Comparison & AI Recommendation' }))
-  expect(screen.getByText(/no successful external AI call/)).toBeInTheDocument()
+  expect(screen.getByText(/deterministic rationale; AI advice unavailable/)).toBeInTheDocument()
   await user.click(screen.getByRole('button', { name: 'Approve', exact: true }))
   await waitFor(() => expect(onView).toHaveBeenCalledWith(17))
   expect(procurementApi.createPurchaseOrderFromWorkflow).not.toHaveBeenCalled()

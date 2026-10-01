@@ -14,7 +14,7 @@ abstract final class AppTheme {
     );
 
     final border = OutlineInputBorder(
-      borderRadius: BorderRadius.circular(10),
+      borderRadius: BorderRadius.circular(6),
       borderSide: const BorderSide(color: AppColors.border),
     );
 
@@ -22,36 +22,46 @@ abstract final class AppTheme {
       useMaterial3: true,
       colorScheme: colorScheme,
       scaffoldBackgroundColor: AppColors.background,
-      fontFamily: 'Roboto',
+      fontFamily: 'Geist',
       textTheme: const TextTheme(
         headlineSmall: TextStyle(
           fontWeight: FontWeight.w700,
           color: AppColors.text,
         ),
         titleLarge: TextStyle(
+          fontSize: 18,
           fontWeight: FontWeight.w700,
           color: AppColors.text,
         ),
         titleMedium: TextStyle(
+          fontSize: 15,
           fontWeight: FontWeight.w700,
           color: AppColors.text,
         ),
-        bodyLarge: TextStyle(color: AppColors.text),
-        bodyMedium: TextStyle(color: AppColors.text),
+        bodyLarge: TextStyle(fontSize: 14, color: AppColors.text),
+        bodyMedium: TextStyle(fontSize: 13, color: AppColors.text),
+        bodySmall: TextStyle(fontSize: 12, color: AppColors.textMuted),
       ),
       appBarTheme: const AppBarTheme(
-        backgroundColor: AppColors.primaryDark,
-        foregroundColor: Colors.white,
+        backgroundColor: Colors.white,
+        foregroundColor: AppColors.text,
+        surfaceTintColor: Colors.transparent,
+        toolbarHeight: 65,
         centerTitle: false,
         elevation: 0,
-        titleTextStyle: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+        titleTextStyle: TextStyle(
+          fontFamily: 'Geist',
+          fontSize: 18,
+          fontWeight: FontWeight.w700,
+          color: AppColors.text,
+        ),
       ),
       cardTheme: CardThemeData(
         color: Colors.white,
         elevation: 0,
         margin: EdgeInsets.zero,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(10),
           side: const BorderSide(color: AppColors.border),
         ),
       ),
@@ -60,10 +70,26 @@ abstract final class AppTheme {
           backgroundColor: AppColors.primary,
           foregroundColor: Colors.white,
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+          textStyle: const TextStyle(
+            fontFamily: 'Geist',
+            fontSize: 14,
+            fontWeight: FontWeight.w700,
           ),
-          textStyle: const TextStyle(fontWeight: FontWeight.w700),
+        ),
+      ),
+      elevatedButtonTheme: ElevatedButtonThemeData(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: AppColors.primary,
+          foregroundColor: Colors.white,
+          elevation: 0,
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+          textStyle: const TextStyle(
+            fontFamily: 'Geist',
+            fontSize: 14,
+            fontWeight: FontWeight.w700,
+          ),
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
@@ -71,10 +97,12 @@ abstract final class AppTheme {
           foregroundColor: AppColors.primary,
           side: const BorderSide(color: AppColors.border),
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+          textStyle: const TextStyle(
+            fontFamily: 'Geist',
+            fontSize: 14,
+            fontWeight: FontWeight.w700,
           ),
-          textStyle: const TextStyle(fontWeight: FontWeight.w700),
         ),
       ),
       inputDecorationTheme: InputDecorationTheme(
@@ -91,6 +119,17 @@ abstract final class AppTheme {
         ),
         errorBorder: border.copyWith(
           borderSide: const BorderSide(color: AppColors.danger),
+        ),
+      ),
+      floatingActionButtonTheme: FloatingActionButtonThemeData(
+        backgroundColor: AppColors.accent,
+        foregroundColor: Colors.white,
+        elevation: 0,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+        extendedTextStyle: const TextStyle(
+          fontFamily: 'Geist',
+          fontSize: 14,
+          fontWeight: FontWeight.w600,
         ),
       ),
       dividerTheme: const DividerThemeData(

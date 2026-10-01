@@ -12,6 +12,7 @@ public class User : BaseEntity
 
     public string Email { get; set; } = string.Empty;
 
+    [System.Text.Json.Serialization.JsonIgnore]
     public string PasswordHash { get; set; } = string.Empty;
 
     public bool IsActive { get; set; } = true;

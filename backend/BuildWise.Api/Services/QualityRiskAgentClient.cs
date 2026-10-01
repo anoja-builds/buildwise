@@ -12,7 +12,7 @@ public class QualityRiskAgentClient(HttpClient http, IConfiguration configuratio
         if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var uri)
             || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
             throw new QualityRiskException(503, "Internal agent service URL is not configured.");
-        var key = configuration["AgentService:ApiKey"] ?? Environment.GetEnvironmentVariable("QUALITY_AGENT_SERVICE_KEY");
+        var key = (configuration["AgentService:ApiKey"] ?? Environment.GetEnvironmentVariable("QUALITY_AGENT_SERVICE_KEY"))?.Trim();
         if (string.IsNullOrWhiteSpace(key)) throw new QualityRiskException(503, "Internal agent service credentials are not configured.");
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(TimeSpan.FromSeconds(100));

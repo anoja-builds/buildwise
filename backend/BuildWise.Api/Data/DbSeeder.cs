@@ -14,16 +14,21 @@ namespace BuildWise.Api.Data;
 /// </summary>
 public static class DbSeeder
 {
-    public const string DemoPassword = "Passw0rd!";
+    public static string DemoPassword { get; } = Environment.GetEnvironmentVariable("BUILDWISE_DEMO_PASSWORD")
+        ?? Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
 
     public static async Task SeedAsync(ApplicationDbContext db)
     {
         await SeedUsersAsync(db);
+        await SeedMaterialsAsync(db);
         await SeedProcurementScenarioAsync(db);
     }
 
     private static async Task SeedUsersAsync(ApplicationDbContext db)
     {
+        if (string.IsNullOrWhiteSpace(DemoPassword) || DemoPassword.Length < 8)
+            throw new InvalidOperationException("BUILDWISE_DEMO_PASSWORD must contain at least 8 characters.");
+
         var roles = await db.Roles.ToDictionaryAsync(r => r.Name, r => r);
         var hasher = new PasswordHasher<User>();
 
@@ -42,7 +47,7 @@ public static class DbSeeder
 
             var existingUser = await db.Users
                 .Include(u => u.UserRoles)
-                .FirstOrDefaultAsync(u => u.Email == email);
+                .FirstOrDefaultAsync(u => u.Email.Trim().ToLower() == email);
 
             if (existingUser == null)
             {
@@ -59,15 +64,36 @@ public static class DbSeeder
 
                 db.Users.Add(user);
             }
-            else
-            {
-                if (!existingUser.UserRoles.Any(ur => ur.RoleId == role.Id))
-                {
-                    existingUser.UserRoles.Add(new UserRole { UserId = existingUser.Id, RoleId = role.Id });
-                }
-            }
         }
 
+        await db.SaveChangesAsync();
+    }
+
+    private static async Task SeedMaterialsAsync(ApplicationDbContext db)
+    {
+        (string Name, string Unit, string Category)[] catalogue =
+        [
+            ("Cement (50kg bag)", "bag", "Structural Materials"),
+            ("Sand", "m3", "Aggregate"),
+            ("Crushed Aggregate", "m3", "Aggregate"),
+            ("Reinforcement Steel Bar", "kg", "Structural Materials"),
+            ("Concrete Block", "unit", "Masonry"),
+            ("Clay Brick", "unit", "Masonry"),
+            ("Timber", "m", "Carpentry"),
+            ("Plywood Sheet", "sheet", "Carpentry"),
+            ("PVC Pipe", "m", "Plumbing"),
+            ("Electrical Cable", "m", "Electrical"),
+            ("Interior Paint", "litre", "Finishes"),
+            ("Ceramic Tile", "m2", "Finishes")
+        ];
+        var names = (await db.Materials.Select(m => m.Name).ToListAsync())
+            .Select(n => n.Trim()).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var (name, unit, category) in catalogue)
+        {
+            // Preserve existing IDs, custom values, and intentional deactivation.
+            if (!names.Add(name)) continue;
+            db.Materials.Add(new Material { Name = name, Unit = unit, Category = category, IsActive = true });
+        }
         await db.SaveChangesAsync();
     }
 
@@ -83,8 +109,8 @@ public static class DbSeeder
         var project = new Project { Name = "Riverside Apartments — Block C", Location = "Colombo 05", Status = ProjectStatus.Active, StartDate = DateOnly.FromDateTime(DateTime.UtcNow.AddMonths(-2)), CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow };
         db.Projects.Add(project);
 
-        var cement = new Material { Name = "Cement (50kg bag)", Unit = "bag", Category = "Structural Materials", IsActive = true, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow };
-        db.Materials.Add(cement);
+        var cement = (await db.Materials.ToListAsync()).First(m =>
+            string.Equals(m.Name.Trim(), "Cement (50kg bag)", StringComparison.OrdinalIgnoreCase));
 
         await db.SaveChangesAsync();
 

@@ -38,7 +38,7 @@ void main() {
     Map<String, dynamic>? submitted;
     final client = MockClient((request) async {
       expect(request.headers['Authorization'], 'Bearer site-jwt');
-      if (request.url.path.endsWith('/options')){
+      if (request.url.path.endsWith('/options')) {
         return http.Response(jsonEncode(options), 200);
       }
       submitted = jsonDecode(request.body) as Map<String, dynamic>;
@@ -109,6 +109,68 @@ void main() {
     expect(find.text('Select project'), findsOneWidget);
   });
 
+  testWidgets('saves multiple selected materials as a server draft', (
+    tester,
+  ) async {
+    Map<String, dynamic>? submitted;
+    final client = MockClient((request) async {
+      if (request.method == 'GET') {
+        return http.Response(
+          jsonEncode({
+            ...options,
+            'materials': [
+              {'id': 81, 'name': 'Live material', 'unit': 'kg'},
+              {'id': 82, 'name': 'Second material', 'unit': 'bags'},
+            ],
+          }),
+          200,
+        );
+      }
+      submitted = jsonDecode(request.body) as Map<String, dynamic>;
+      return http.Response('{}', 201);
+    });
+    addTearDown(client.close);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: CreateMaterialRequestScreen(
+          service: MaterialRequestService(apiClient: ApiClient(client: client)),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('project-select')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Live project').last);
+    await tester.pumpAndSettle();
+    Future<void> select(String material, String unit, String quantity) async {
+      await tester.ensureVisible(find.byKey(const Key('material-select')));
+      await tester.tap(find.byKey(const Key('material-select')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('$material ($unit)').last);
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Required Quantity ($unit)'),
+        quantity,
+      );
+    }
+
+    await select('Live material', 'kg', '12.5');
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Purpose / Work Reason'),
+      'Site demand',
+    );
+    await tester.ensureVisible(find.text('Add Another Material Item'));
+    await tester.tap(find.text('Add Another Material Item'));
+    await tester.pumpAndSettle();
+    await select('Second material', 'bags', '10');
+    await tester.ensureVisible(find.text('Save Draft'));
+    await tester.tap(find.text('Save Draft'));
+    await tester.pumpAndSettle();
+    expect(submitted!['submitImmediately'], false);
+    expect((submitted!['items'] as List).map((i) => i['materialId']), [81, 82]);
+    expect(submitted!.containsKey('requestedByUserId'), false);
+  });
+
   testWidgets(
     'site user sees manager-updated status after refresh and resume',
     (tester) async {
@@ -137,16 +199,20 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(find.text('Status: PendingApproval'), findsOneWidget);
+      expect(find.text('Pending Approval'), findsNWidgets(2));
       status = 'Approved';
       await tester.tap(find.byTooltip('Refresh request status'));
       await tester.pumpAndSettle();
-      expect(find.text('Status: Approved'), findsOneWidget);
+      expect(find.text('Approved'), findsNWidgets(2));
       status = 'Rejected';
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
       await tester.pumpAndSettle();
-      expect(find.text('Status: Rejected'), findsOneWidget);
+      expect(find.text('Rejected'), findsNWidgets(2));
     },
   );
 }

@@ -5,6 +5,8 @@ import path from 'node:path'
 // No route interception or API fixtures: the Flutter-created request, users,
 // suppliers, quotations, agent workflow and PO all live in the isolated database.
 test('Flutter request → React approval, quotations and PO confirmation', async ({ page }) => {
+  const demoPassword = process.env.BUILDWISE_DEMO_PASSWORD
+  if (!demoPassword?.trim()) throw new Error('Set BUILDWISE_DEMO_PASSWORD for live verification.')
   const directory = process.env.BUILDWISE_LIVE_DIR
   const { requestId } = JSON.parse(fs.readFileSync(path.join(directory, 'request.json'), 'utf8'))
   const failures = []
@@ -12,7 +14,7 @@ test('Flutter request → React approval, quotations and PO confirmation', async
   await page.goto('/')
   async function login(email) {
     await page.getByLabel(/^Email/).fill(email)
-    await page.getByLabel(/^Password/).fill('Passw0rd!')
+    await page.getByLabel(/^Password/).fill(demoPassword)
     await page.getByRole('button', { name: 'Sign in', exact: true }).click()
     await expect(page.getByRole('button', { name: 'Sign out' })).toBeVisible()
   }

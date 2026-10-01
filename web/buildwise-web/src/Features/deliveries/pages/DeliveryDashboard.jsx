@@ -68,7 +68,7 @@ export default function DeliveryDashboard() {
   if (canReceive && activeDelivery) return <RecordDeliveryForm delivery={activeDelivery} onCancel={() => setActiveDelivery(null)} onSuccess={() => { setActiveDelivery(null); loadData(); }} />;
 
   return (
-    <div className="fade-in">
+    <div className="fade-in delivery-dashboard">
       <div className="page-header" style={{ marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div className="page-header__title-section">
           <h1 className="page-header__title">Delivery & Material Receiving</h1>
@@ -167,49 +167,51 @@ export default function DeliveryDashboard() {
             {expected.length === 0 ? (
               <p className="text-muted">No scheduled deliveries pending receiving actions.</p>
             ) : (
-              <table className="table" style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr style={{ background: '#f8f9fa', textAlign: 'left' }}>
-                    <th style={{ padding: '10px' }}>Reference</th>
-                    <th style={{ padding: '10px' }}>Supplier</th>
-                    <th style={{ padding: '10px' }}>Project</th>
-                    <th style={{ padding: '10px' }}>Status</th>
-                    <th style={{ padding: '10px' }}>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {expected.map((del) => (
-                    <tr key={del.id} style={{ borderBottom: '1px solid #eee' }}>
-                      <td style={{ padding: '10px', fontWeight: 'bold' }}>{del.deliveryReference}</td>
-                      <td style={{ padding: '10px' }}>{del.supplierName}</td>
-                      <td style={{ padding: '10px' }}>{del.projectName}</td>
-                      <td style={{ padding: '10px' }}>
-                        <span className={`badge ${getStatusBadgeClass(del.status)}`}>{del.status}</span>
-                      </td>
-                      <td style={{ padding: '10px', display: 'flex', gap: '8px' }}>
-                        {canReceive && (
-                          <button
-                            className="btn btn--primary"
-                            style={{ padding: '6px 12px', fontSize: '12px' }}
-                            onClick={() => setActiveDelivery(del)}
-                          >
-                            Receive
-                          </button>
-                        )}
-                        {canSchedule && (
-                          <button
-                            className="btn btn--secondary"
-                            style={{ padding: '6px 12px', fontSize: '12px' }}
-                            onClick={() => setActivePoForRisk(del.purchaseOrderId)}
-                          >
-                            AI Risk Check
-                          </button>
-                        )}
-                      </td>
+              <div className="table-wrap" tabIndex={0} role="region" aria-label="Scheduled deliveries">
+                <table className="table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ background: '#f8f9fa', textAlign: 'left' }}>
+                      <th style={{ padding: '10px' }}>Reference</th>
+                      <th style={{ padding: '10px' }}>Supplier</th>
+                      <th style={{ padding: '10px' }}>Project</th>
+                      <th style={{ padding: '10px' }}>Status</th>
+                      <th style={{ padding: '10px' }}>Actions</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {expected.map((del) => (
+                      <tr key={del.id} style={{ borderBottom: '1px solid #eee' }}>
+                        <td style={{ padding: '10px', fontWeight: 'bold' }}>{del.deliveryReference}</td>
+                        <td style={{ padding: '10px' }}>{del.supplierName}</td>
+                        <td style={{ padding: '10px' }}>{del.projectName}</td>
+                        <td style={{ padding: '10px' }}>
+                          <span className={`badge ${getStatusBadgeClass(del.status)}`}>{del.status}</span>
+                        </td>
+                        <td style={{ padding: '10px', display: 'flex', gap: '8px' }}>
+                          {canReceive && (
+                            <button
+                              className="btn btn--primary"
+                              style={{ padding: '6px 12px', fontSize: '12px' }}
+                              onClick={() => setActiveDelivery(del)}
+                            >
+                              Receive
+                            </button>
+                          )}
+                          {canSchedule && (
+                            <button
+                              className="btn btn--secondary"
+                              style={{ padding: '6px 12px', fontSize: '12px' }}
+                              onClick={() => setActivePoForRisk(del.purchaseOrderId)}
+                            >
+                              AI Risk Check
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </div>
 
@@ -219,68 +221,70 @@ export default function DeliveryDashboard() {
             {history.length === 0 ? (
               <p className="text-muted">No historical shipments found.</p>
             ) : (
-              <table className="table" style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr style={{ background: '#f8f9fa', textAlign: 'left' }}>
-                    <th style={{ padding: '10px' }}>Ref / Date</th>
-                    <th style={{ padding: '10px' }}>Supplier & PO</th>
-                    <th style={{ padding: '10px' }}>Reconciled By</th>
-                    <th style={{ padding: '10px' }}>Status</th>
-                    <th style={{ padding: '10px' }}>Details / Remarks</th>
-                    <th style={{ padding: '10px' }}>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {history.map((del) => (
-                    <tr key={del.id} style={{ borderBottom: '1px solid #eee' }}>
-                      <td style={{ padding: '10px' }}>
-                        <div style={{ fontWeight: 'bold' }}>{del.deliveryReference}</div>
-                        <div style={{ fontSize: '11px', color: '#888' }}>
-                          {del.deliveryDate ? new Date(del.deliveryDate).toLocaleDateString() : 'N/A'}
-                        </div>
-                      </td>
-                      <td style={{ padding: '10px' }}>
-                        <div>{del.supplierName}</div>
-                        <div style={{ fontSize: '11px', color: '#888' }}>PO #{del.purchaseOrderId}</div>
-                      </td>
-                      <td style={{ padding: '10px' }}>{del.receivedBy || 'System Seeded'}</td>
-                      <td style={{ padding: '10px' }}>
-                        <span className={`badge ${getStatusBadgeClass(del.status)}`}>{del.status}</span>
-                      </td>
-                      <td style={{ padding: '10px', fontSize: '12px', color: '#555' }}>
-                        <div>{del.notes || 'No remarks recorded.'}</div>
-                        {del.photographicEvidenceUrl && (
-                          <div style={{ marginTop: '4px', fontSize: '11px' }}>
-                            📸 <a href={del.photographicEvidenceUrl} target="_blank" rel="noreferrer" style={{ color: '#2980b9' }}>
-                              Photo Evidence Attached
-                            </a>
-                          </div>
-                        )}
-                        {/* Render items breakdown */}
-                        <div style={{ marginTop: '6px', fontSize: '10.5px', background: '#f9f9f9', padding: '4px 8px', borderRadius: '4px' }}>
-                          {del.items.map((i, idx) => (
-                            <div key={idx}>
-                              • {i.materialName}: Received {i.receivedQuantity} / Ordered {i.orderedQuantity}
-                              {i.damagedQuantity > 0 && <span style={{ color: '#c0392b' }}> (Damaged: {i.damagedQuantity})</span>}
-                            </div>
-                          ))}
-                        </div>
-                      </td>
-                      <td style={{ padding: '10px' }}>
-                        {(del.status === 'Received' || del.status === 'DiscrepancyReported' || del.status === 'PartiallyReceived') && (
-                          <button
-                            className="btn btn--secondary"
-                            style={{ padding: '4px 10px', fontSize: '11px' }}
-                            onClick={() => setActiveDeliveryForDiscrepancy(del.id)}
-                          >
-                            🔍 Discrepancy Agent
-                          </button>
-                        )}
-                      </td>
+              <div className="table-wrap" tabIndex={0} role="region" aria-label="Delivery history">
+                <table className="table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ background: '#f8f9fa', textAlign: 'left' }}>
+                      <th style={{ padding: '10px' }}>Ref / Date</th>
+                      <th style={{ padding: '10px' }}>Supplier & PO</th>
+                      <th style={{ padding: '10px' }}>Reconciled By</th>
+                      <th style={{ padding: '10px' }}>Status</th>
+                      <th style={{ padding: '10px' }}>Details / Remarks</th>
+                      <th style={{ padding: '10px' }}>Actions</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {history.map((del) => (
+                      <tr key={del.id} style={{ borderBottom: '1px solid #eee' }}>
+                        <td style={{ padding: '10px' }}>
+                          <div style={{ fontWeight: 'bold' }}>{del.deliveryReference}</div>
+                          <div style={{ fontSize: '11px', color: '#888' }}>
+                            {del.deliveryDate ? new Date(del.deliveryDate).toLocaleDateString() : 'N/A'}
+                          </div>
+                        </td>
+                        <td style={{ padding: '10px' }}>
+                          <div>{del.supplierName}</div>
+                          <div style={{ fontSize: '11px', color: '#888' }}>PO #{del.purchaseOrderId}</div>
+                        </td>
+                        <td style={{ padding: '10px' }}>{del.receivedBy || 'System Seeded'}</td>
+                        <td style={{ padding: '10px' }}>
+                          <span className={`badge ${getStatusBadgeClass(del.status)}`}>{del.status}</span>
+                        </td>
+                        <td style={{ padding: '10px', fontSize: '12px', color: '#555' }}>
+                          <div>{del.notes || 'No remarks recorded.'}</div>
+                          {del.photographicEvidenceUrl && (
+                            <div style={{ marginTop: '4px', fontSize: '11px' }}>
+                              📸 <a href={del.photographicEvidenceUrl} target="_blank" rel="noreferrer" style={{ color: '#2980b9' }}>
+                                Photo Evidence Attached
+                              </a>
+                            </div>
+                          )}
+                          {/* Render items breakdown */}
+                          <div style={{ marginTop: '6px', fontSize: '10.5px', background: '#f9f9f9', padding: '4px 8px', borderRadius: '4px' }}>
+                            {del.items.map((i, idx) => (
+                              <div key={idx}>
+                                • {i.materialName}: Received {i.receivedQuantity} / Ordered {i.orderedQuantity}
+                                {i.damagedQuantity > 0 && <span style={{ color: '#c0392b' }}> (Damaged: {i.damagedQuantity})</span>}
+                              </div>
+                            ))}
+                          </div>
+                        </td>
+                        <td style={{ padding: '10px' }}>
+                          {(del.status === 'Received' || del.status === 'DiscrepancyReported' || del.status === 'PartiallyReceived') && (
+                            <button
+                              className="btn btn--secondary"
+                              style={{ padding: '4px 10px', fontSize: '11px' }}
+                              onClick={() => setActiveDeliveryForDiscrepancy(del.id)}
+                            >
+                              🔍 Discrepancy Agent
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </div>
         </div>

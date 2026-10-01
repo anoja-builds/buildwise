@@ -9,13 +9,17 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from pydantic import ValidationError
 from .config import Settings
 from .models import AgentResult, EvidencePackage, QualityRiskRecommendation, TraceEntry
-from .tools import build_tools
+from .tools import build_tools, gemini_tool_declaration
 
 SYSTEM = '''You are the BuildWise Quality Risk & Non-Conformance Agent, one specialized advisory agent.
 Use only request-scoped evidence obtained through the three read-only tools. Begin by reading current
 inspection evidence; choose the order and bounded history limit needed for the remaining tools.
 Consult all three evidence categories before submitting a final recommendation. Missing history means
 insufficient historical evidence, never good supplier history. Cite exact supplied evidence references.
+Every riskFlags entry and itemRecommendations entry must have a nonempty evidenceReferences list
+containing supplied references. Each item recommendation must cite its inspection-item:<id> reference.
+When history is absent, describe that limitation in evidenceSummary; do not create an uncited history
+risk flag or invent a reference. Omit risk flags that cannot be supported by the supplied evidence.
 Never invent supplier facts, certifications or ratings. Never alter authoritative quantities or
 OverallDecision. ASP.NET performs business arithmetic; do not combine different material units.
 Never perform or request database writes, SQL, arbitrary URLs, shell/code execution, authorization,
@@ -58,8 +62,10 @@ async def analyse(evidence: EvidencePackage, settings: Settings, model=None) -> 
         if model is None:
             model = ChatGoogleGenerativeAI(model=settings.model, google_api_key=settings.api_key,
                 temperature=0, max_retries=0, timeout=30, max_output_tokens=4096)
-        # Final Pydantic schema is a submission channel, not an executable business tool.
-        bound = model.bind_tools([*tools.values(), QualityRiskRecommendation])
+        # Provider declarations are separate from strict execution/output validation.
+        # The final declaration is an advisory submission channel only.
+        bound = model.bind_tools([gemini_tool_declaration(source)
+                                  for source in [*tools.values(), QualityRiskRecommendation]])
 
         async def agent_node(state):
             nonlocal iterations

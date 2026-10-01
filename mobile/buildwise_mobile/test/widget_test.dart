@@ -47,8 +47,13 @@ void main() {
     expect(find.byType(CircularProgressIndicator), findsNothing);
     expect(find.byType(LoginScreen), findsOneWidget);
     expect(find.text('BuildWise'), findsOneWidget);
-    // Found twice: the sign-in card heading and the submit button label.
-    expect(find.text('Sign in'), findsNWidgets(2));
-    expect(find.text('Quick demo login'), findsOneWidget);
+    expect(find.text('Sign in'), findsOneWidget);
+    expect(find.text('Quick demo login'), findsNothing);
+    expect(
+      tester
+          .widgetList<TextFormField>(find.byType(TextFormField))
+          .every((field) => field.controller!.text.isEmpty),
+      isTrue,
+    );
   });
 }

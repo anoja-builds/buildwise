@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/widgets/widgets.dart';
 import '../services/material_request_service.dart';
 import 'create_material_request_screen.dart';
-import '../../procurement/screens/material_request_procurement_view.dart';
+import 'material_request_detail_screen.dart';
+import '../../../common/screens/operational_home_screen.dart';
 
 class MaterialRequestListScreen extends StatefulWidget {
   const MaterialRequestListScreen({
@@ -11,174 +13,144 @@ class MaterialRequestListScreen extends StatefulWidget {
     this.canCreate = true,
     this.canViewProcurementStatus = true,
   });
-
-  final bool canCreate;
-  final bool canViewProcurementStatus;
-
   final MaterialRequestService? service;
-
+  final bool canCreate, canViewProcurementStatus;
   @override
   State<MaterialRequestListScreen> createState() =>
       _MaterialRequestListScreenState();
 }
 
-class _MaterialRequestListScreenState extends State<MaterialRequestListScreen>
-    with WidgetsBindingObserver {
+class _MaterialRequestListScreenState extends State<MaterialRequestListScreen> {
   late final _service = widget.service ?? MaterialRequestService();
-  late Future<List<dynamic>> _futureRequests;
-
+  String _filter = 'All', _search = '';
+  int _revision = 0;
   @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addObserver(this);
-    _refresh();
-  }
-
-  @override
-  void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    super.dispose();
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed && mounted) _refresh();
-  }
-
-  void _refresh() {
-    setState(() {
-      _futureRequests = _service.getRequests();
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Material Requests'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            tooltip: 'Refresh request status',
-            onPressed: _refresh,
+  Widget build(BuildContext context) => Scaffold(
+    appBar: WorkspaceAppBar(
+      title: const Text('Material Requests'),
+      subtitle: 'Track site material requirements',
+      actions: [
+        IconButton(
+          tooltip: 'Site overview',
+          onPressed: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => SiteEngineerHomeScreen(requests: _service),
+            ),
           ),
-        ],
-      ),
-      body: FutureBuilder<List<dynamic>>(
-        future: _futureRequests,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          } else if (snapshot.hasError) {
-            return Center(child: Text('Error: ${snapshot.error}'));
-          } else if (!snapshot.hasData || snapshot.data!.isEmpty) {
-            return const Center(child: Text('No material requests found.'));
-          }
-
-          final requests = snapshot.data!;
-          return ListView.builder(
-            itemCount: requests.length,
-            padding: const EdgeInsets.all(12),
-            itemBuilder: (context, index) {
-              final item = requests[index];
-              return Card(
-                elevation: 2,
-                margin: const EdgeInsets.only(bottom: 12),
-                child: ListTile(
-                  onTap: !widget.canViewProcurementStatus
-                      ? null
-                      : () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => Scaffold(
-                              appBar: AppBar(
-                                title: Text('Request #${item['id']}'),
-                              ),
-                              body: SingleChildScrollView(
-                                padding: const EdgeInsets.all(16),
-                                child: MaterialRequestProcurementView(
-                                  materialRequestId: item['id'] as int,
-                                ),
-                              ),
-                            ),
-                          ),
+          icon: const Icon(Icons.home_outlined),
+        ),
+        IconButton(
+          tooltip: 'Refresh request status',
+          onPressed: () => setState(() => _revision++),
+          icon: const Icon(Icons.refresh),
+        ),
+      ],
+    ),
+    body: ApiView<List<dynamic>>(
+      key: ValueKey(_revision),
+      load: _service.getRequests,
+      builder: (context, data, refresh) {
+        final requests = data
+            .where(
+              (r) =>
+                  (_filter == 'All' || r['status'] == _filter) &&
+                  '${reference('MR', r['id'] as int)} ${r['projectName']} ${r['reason']}'
+                      .toLowerCase()
+                      .contains(_search.toLowerCase()),
+            )
+            .toList();
+        return ListView(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
+          physics: const AlwaysScrollableScrollPhysics(),
+          children: [
+            TextFormField(
+              initialValue: _search,
+              decoration: const InputDecoration(
+                hintText: 'Search requests...',
+                prefixIcon: Icon(Icons.search),
+              ),
+              onChanged: (value) => setState(() => _search = value),
+            ),
+            const SizedBox(height: 12),
+            FilterChips(
+              values: const [
+                'All',
+                'Draft',
+                'PendingApproval',
+                'Approved',
+                'Rejected',
+                'Ordered',
+              ],
+              selected: _filter,
+              onChanged: (value) => setState(() => _filter = value),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              '${requests.length} requests',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 12),
+            if (requests.isEmpty)
+              const EmptyStateWidget(
+                title: 'No material requests',
+                message: 'Requests matching your search will appear here.',
+              ),
+            for (final r in requests)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: RecordCard(
+                  title: reference('MR', r['id'] as int),
+                  status: r['status']?.toString(),
+                  action: 'View Request',
+                  onTap: () async {
+                    await Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => MaterialRequestDetailScreen(
+                          requestId: r['id'] as int,
+                          service: _service,
+                          canViewProcurementStatus:
+                              widget.canViewProcurementStatus,
                         ),
-                  leading: CircleAvatar(
-                    backgroundColor:
-                        item['priority'] == 'High' ||
-                            item['priority'] == 'Urgent'
-                        ? Colors.orange.shade100
-                        : Colors.blue.shade100,
-                    child: Icon(
-                      Icons.assignment,
-                      color:
-                          item['priority'] == 'High' ||
-                              item['priority'] == 'Urgent'
-                          ? Colors.orange.shade800
-                          : Colors.blue.shade800,
+                      ),
+                    );
+                    refresh();
+                  },
+                  children: [
+                    Text('${r['projectName'] ?? 'Project not recorded'}'),
+                    FieldRow('Required date', displayDate(r['requiredDate'])),
+                    FieldRow(
+                      'Materials',
+                      '${r['itemsCount'] ?? (r['items'] as List? ?? []).length}',
                     ),
-                  ),
-                  title: Text(
-                    'MR-${item['id'].toString().padLeft(4, '0')} - ${item['projectName'] ?? 'Site'}',
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  subtitle: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const SizedBox(height: 4),
-                      Text('Reason: ${item['reason'] ?? 'N/A'}'),
+                    if (r['reason'] != null)
                       Text(
-                        'Status: ${item['status']}',
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          color:
-                              item['status'] == 'Approved' ||
-                                  item['status'] == 'Ordered'
-                              ? Colors.green
-                              : Colors.blue.shade800,
-                        ),
+                        '${r['reason']}',
+                        style: Theme.of(context).textTheme.bodySmall,
                       ),
-                    ],
-                  ),
-                  trailing: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 4,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.grey.shade200,
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Text(
-                      item['priority'] ?? 'Medium',
-                      style: const TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
+                  ],
+                ),
+              ),
+          ],
+        );
+      },
+    ),
+    floatingActionButton: widget.canCreate
+        ? FloatingActionButton.extended(
+            icon: const Icon(Icons.add),
+            label: const Text('New Request'),
+            onPressed: () async {
+              final result = await Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) =>
+                      CreateMaterialRequestScreen(service: _service),
                 ),
               );
+              if (result == true && mounted) setState(() => _revision++);
             },
-          );
-        },
-      ),
-      floatingActionButton: !widget.canCreate
-          ? null
-          : FloatingActionButton.extended(
-              onPressed: () async {
-                final res = await Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) =>
-                        CreateMaterialRequestScreen(service: _service),
-                  ),
-                );
-                if (res == true && mounted) _refresh();
-              },
-              icon: const Icon(Icons.add),
-              label: const Text('New Request'),
-            ),
-    );
-  }
+          )
+        : null,
+  );
 }

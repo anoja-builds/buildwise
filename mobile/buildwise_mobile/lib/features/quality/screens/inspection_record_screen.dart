@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../core/widgets/widgets.dart' as shared;
 import '../models/inspection_record.dart';
 import '../services/quality_api_service.dart';
+import 'quality_risk_screen.dart';
 
 class InspectionRecordScreen extends StatefulWidget {
   const InspectionRecordScreen({
@@ -86,12 +87,37 @@ class _InspectionRecordScreenState extends State<InspectionRecordScreen> {
       if (items.isEmpty) {
         throw const FormatException('There are no delivery items to inspect.');
       }
+      final hasAccepted = items.any((it) => it.acceptedQuantity > 0);
+      final hasRejected = items.any((it) => it.rejectedQuantity > 0);
+      if (_decision == 'Accepted' && (!hasAccepted || hasRejected)) {
+        throw const FormatException(
+          'Accepted requires positive total accepted quantity and zero total rejected quantity.',
+        );
+      }
+      if (_decision == 'Rejected' && (hasAccepted || !hasRejected)) {
+        throw const FormatException(
+          'Rejected requires zero total accepted quantity and positive total rejected quantity.',
+        );
+      }
+      if (_decision == 'PartiallyAccepted' && (!hasAccepted || !hasRejected)) {
+        throw const FormatException(
+          'PartiallyAccepted requires some accepted quantity and some rejected quantity.',
+        );
+      }
     } on FormatException catch (error) {
       setState(() => _error = error.message);
       _revealError();
       return;
     }
     FocusScope.of(context).unfocus();
+    final confirmed = await shared.showAppConfirmDialog(
+      context,
+      title: 'Complete Inspection?',
+      message:
+          'Save the recorded quantities and ${_label(_decision)} decision? The completed inspection will be read only.',
+      confirmLabel: 'Confirm Completion',
+    );
+    if (!confirmed || !mounted) return;
     setState(() {
       _busy = true;
       _error = null;
@@ -131,7 +157,7 @@ class _InspectionRecordScreenState extends State<InspectionRecordScreen> {
     return PopScope(
       canPop: !_busy,
       child: Scaffold(
-        appBar: AppBar(
+        appBar: shared.WorkspaceAppBar(
           title: Text('Inspection #${widget.inspectionId}'),
           automaticallyImplyLeading: !_busy,
         ),
@@ -259,6 +285,21 @@ class _InspectionRecordScreenState extends State<InspectionRecordScreen> {
                   ),
                 if (record.completed)
                   shared.AppButton(
+                    label: 'AI Quality Risk Analysis',
+                    variant: shared.AppButtonVariant.secondary,
+                    onPressed: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => QualityRiskScreen(
+                          inspectionId: widget.inspectionId,
+                          service: widget.service,
+                        ),
+                      ),
+                    ),
+                    expand: true,
+                  ),
+                if (record.completed)
+                  shared.AppButton(
                     label: 'Done',
                     onPressed: () => Navigator.pop(context, true),
                     expand: true,
@@ -304,10 +345,22 @@ class _ItemDraft {
         'Item #${item.id}: condition must not exceed 100 characters.',
       );
     }
+    final acc = quantity(accepted);
+    final rej = quantity(rejected);
+    if (acc + rej <= 0) {
+      throw FormatException(
+        'Item #${item.id}: accepted plus rejected quantity must be greater than zero.',
+      );
+    }
+    if (acc + rej > item.received) {
+      throw FormatException(
+        'Item #${item.id}: accepted plus rejected quantity (${acc + rej}) must not exceed received quantity (${item.received}).',
+      );
+    }
     return InspectionItemSubmission(
       deliveryItemId: item.id,
-      acceptedQuantity: quantity(accepted),
-      rejectedQuantity: quantity(rejected),
+      acceptedQuantity: acc,
+      rejectedQuantity: rej,
       condition: condition.text.trim(),
       remarks: remarks.text.trim(),
     );

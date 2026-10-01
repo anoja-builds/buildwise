@@ -69,7 +69,8 @@ Write-Host ''
 Write-Host 'Authentication' -ForegroundColor White
 $managerToken = $null
 try {
-    $loginBody = @{ email = 'procurement.manager@buildwise.demo'; password = 'Passw0rd!' } | ConvertTo-Json -Compress
+    if ([string]::IsNullOrWhiteSpace($env:BUILDWISE_DEMO_PASSWORD)) { throw 'Set BUILDWISE_DEMO_PASSWORD for demo-account authentication.' }
+    $loginBody = @{ email = 'procurement.manager@buildwise.demo'; password = $env:BUILDWISE_DEMO_PASSWORD } | ConvertTo-Json -Compress
     $login = Invoke-WebRequest -Uri "$ApiBase/api/auth/login" -Method Post -ContentType 'application/json' `
         -Body $loginBody -UseBasicParsing -TimeoutSec 15
     $managerToken = ($login.Content | ConvertFrom-Json).token

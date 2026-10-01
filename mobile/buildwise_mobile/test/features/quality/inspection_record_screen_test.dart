@@ -172,6 +172,9 @@ void main() {
       await tester.pumpAndSettle();
       await fill(tester);
       await tester.tap(find.text('Complete Inspection'));
+      await tester.pumpAndSettle();
+      expect(posts, 0);
+      await tester.tap(find.text('Confirm Completion'));
       await tester.pump();
       await tester.tap(find.text('Saving...'));
       await tester.pump();
@@ -184,9 +187,8 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Complete Inspection'), findsNothing);
       expect(find.text('Overall decision: Partially Accepted'), findsOneWidget);
-      await tester.ensureVisible(
-        find.text('Inspection completed successfully.'),
-      );
+      await tester.drag(find.byType(ListView), const Offset(0, 1500));
+      await tester.pumpAndSettle();
       expect(find.text('Inspection completed successfully.'), findsOneWidget);
     },
   );
@@ -232,6 +234,8 @@ void main() {
         await fill(tester);
         await tester.tap(find.text('Complete Inspection'));
         await tester.pumpAndSettle();
+        await tester.tap(find.text('Confirm Completion'));
+        await tester.pumpAndSettle();
         await tester.ensureVisible(find.textContaining(entry.value));
         expect(find.textContaining(entry.value), findsOneWidget);
         expect(
@@ -256,6 +260,8 @@ void main() {
       await tester.pumpAndSettle();
       await fill(tester);
       await tester.tap(find.text('Complete Inspection'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Confirm Completion'));
       await tester.pumpAndSettle();
       await tester.ensureVisible(find.text('Check saved status'));
       await tester.tap(find.text('Check saved status'));

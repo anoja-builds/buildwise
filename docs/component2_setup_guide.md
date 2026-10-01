@@ -25,9 +25,9 @@ dotnet tool install --global dotnet-ef
 
 ## 2. Database setup & migrations
 
-1. Create a database and update the connection string in
-   `backend/BuildWise.Api/appsettings.json` (`ConnectionStrings:DefaultConnection`)
-   to match your local PostgreSQL user/password.
+1. Create a database and set `ConnectionStrings:DefaultConnection` through .NET
+   user-secrets or `ConnectionStrings__DefaultConnection` in the environment.
+   Keep database credentials out of tracked configuration files.
 2. Apply the included migrations, which cover every entity registered on
    `ApplicationDbContext` — Component 1 stub tables and the shared
    `users`/`roles`/`user_roles` auth tables included:
@@ -42,14 +42,13 @@ with `dotnet ef migrations add <Name>` before running `database update` again.
 
 ## 3. Configuration (secrets — do not commit real values)
 
-`appsettings.json` ships with safe local-dev defaults so the app runs out of
-the box, but you should override these via
+`appsettings.json` contains no signing key or database credentials. Configure them via
 [`dotnet user-secrets`](https://learn.microsoft.com/aspnet/core/security/app-secrets)
-or environment variables for anything beyond your own machine:
+or environment variables before starting the API:
 
 | Setting | Purpose | Default |
 |---|---|---|
-| `Jwt:Key` | Signs every login token (shared by React + Flutter) | dev-only placeholder in `appsettings.json` |
+| `Jwt:Key` | Signs every login token (shared by React + Flutter) | required via user-secrets or `Jwt__Key`; startup fails if missing or shorter than 32 bytes |
 | `Smtp:Host` / `Port` / `Username` / `Password` | Sends the "recommendation awaiting approval" and "PO created" notification emails | empty — logs instead of sending when unset |
 | `AgentService:Url` | Where the Python agent microservice lives | `http://127.0.0.1:8001` |
 | `ANTHROPIC_API_KEY` (env var, read by `agent_service`) | Enables the agent's real LLM-generated rationale | unset — falls back to the deterministic template rationale |
@@ -58,6 +57,8 @@ Example for local dev (never commit real secrets):
 
 ```bash
 cd backend/BuildWise.Api
+dotnet user-secrets set "Jwt:Key" "<replace-with-a-random-signing-key-of-at-least-32-bytes>"
+dotnet user-secrets set "ConnectionStrings:DefaultConnection" "<your-local-postgresql-connection-string>"
 dotnet user-secrets set "Smtp:Host" "smtp.gmail.com"
 dotnet user-secrets set "Smtp:Username" "you@gmail.com"
 dotnet user-secrets set "Smtp:Password" "<app-password>"
@@ -75,12 +76,18 @@ dotnet run
   JWT from `/api/auth/login` to call protected endpoints from the UI.
 - CORS is open (`AllowAll`) for local development with the React/Flutter apps.
 - In `Development`, `DbSeeder` runs automatically on startup and creates:
-  - Demo accounts (password **`Passw0rd!`** for all of them):
+  - Demo accounts (set `BUILDWISE_DEMO_PASSWORD` before seeding and live verification):
     `admin@buildwise.demo` (Administrator), `site.engineer@buildwise.demo`
     (SiteEngineer), `procurement.officer@buildwise.demo` (ProcurementOfficer),
     `procurement.manager@buildwise.demo` (ProcurementManager).
   - The spec's cement scenario: Suppliers A (Active), B (Suspended), C
     (Active), one Approved material request for 250 bags of cement.
+
+Set `BUILDWISE_DEMO_PASSWORD` securely in the environment of the API and live-check
+processes; it must match the existing demo accounts. Without it, newly seeded
+accounts receive an unreported random password. Seeding does not reset existing
+passwords, roles, or activation status. Demo buttons fill only the email; enter
+the configured password manually. Never use the placeholders above as real secrets.
 
 ## 5. Start the Python Agent Service
 

@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show kIsWeb, ValueNotifier;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 
@@ -20,6 +20,7 @@ const String apiBaseUrl = String.fromEnvironment(
 /// storage) to every request and centralizes the auth-session shape so every
 /// feature service talks to the same backend the same way.
 class ApiClient {
+  static final sessionExpired = ValueNotifier<int>(0);
   ApiClient({FlutterSecureStorage? storage, http.Client? client})
     : _storage = storage ?? const FlutterSecureStorage(),
       _client = client ?? http.Client(),
@@ -67,9 +68,11 @@ class ApiClient {
 
   Future<http.Response> get(String path) async {
     final headers = await _authHeaders();
-    return _client
+    final response = await _client
         .get(_uri(path), headers: headers)
         .timeout(const Duration(seconds: 10));
+    if (response.statusCode == 401) sessionExpired.value++;
+    return response;
   }
 
   Future<http.Response> post(
@@ -78,13 +81,17 @@ class ApiClient {
     Duration timeout = const Duration(seconds: 10),
   }) async {
     final headers = await _authHeaders(json: true);
-    return _client
+    final response = await _client
         .post(
           _uri(path),
           headers: headers,
           body: body == null ? null : jsonEncode(body),
         )
         .timeout(timeout);
+    if (response.statusCode == 401 && path != '/auth/login') {
+      sessionExpired.value++;
+    }
+    return response;
   }
 
   /// An injected HTTP client remains owned by its caller.

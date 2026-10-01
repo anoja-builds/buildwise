@@ -1,4 +1,4 @@
-﻿import { useState } from 'react'
+import { useState } from 'react'
 import { Button, Card } from '../components/shared'
 import { useAuth } from './AuthContext'
 import hardHat from '../assets/figma/hard-hat.svg'
@@ -37,7 +37,7 @@ export default function LoginPage() {
         </form>
         <div className="auth-audit-notice"><img src={alertIcon} alt="" /><span>Authorized personnel only. Access, procurement decisions, and quality actions are recorded for audit.</span></div>
       </Card>
-      <details className="auth-demo"><summary>Quick demo accounts</summary><div className="auth-demo-grid">{DEMO_ACCOUNTS.map(account => <button key={account.email} type="button" className="auth-demo-button" disabled={loading} onClick={() => { setEmail(account.email); setPassword('Passw0rd!'); login(account.email, 'Passw0rd!') }}><strong>{account.label}</strong><span>{account.email}</span></button>)}</div></details>
+      <details className="auth-demo"><summary>Quick demo accounts</summary><div className="auth-demo-grid">{DEMO_ACCOUNTS.map(account => <button key={account.email} type="button" className="auth-demo-button" disabled={loading} onClick={() => { setEmail(account.email); setPassword('' ) }}><strong>{account.label}</strong><span>{account.email}</span></button>)}</div></details>
     </div></main>
   </div>
 }

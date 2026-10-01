@@ -2,6 +2,7 @@ using BuildWise.Api.Models.Dtos;
 using BuildWise.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
+using System.Security.Claims;
 
 namespace BuildWise.Api.Controllers;
 
@@ -31,21 +32,36 @@ public class NonConformancesController : ControllerBase
     [HttpPost("~/api/non-conformances")]
     public Task<IActionResult> Create([FromBody] CreateNonConformanceDto dto) => ExecuteAsync(async () =>
     {
+        if (!int.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId) || userId <= 0)
+            return Unauthorized();
         var record = await _service.CreateAsync(dto);
         return CreatedAtAction(nameof(GetById), new { id = record.Id }, record);
     });
 
     [HttpPatch("~/api/non-conformances/{id:int}/corrective-action")]
     public Task<IActionResult> UpdateCorrectiveAction(int id, [FromBody] UpdateCorrectiveActionDto dto)
-        => ExecuteAsync(async () => Ok(await _service.UpdateCorrectiveActionAsync(id, dto)));
+        => ExecuteAsync(async () =>
+        {
+            if (!int.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId) || userId <= 0)
+                return Unauthorized();
+            return Ok(await _service.UpdateCorrectiveActionAsync(id, dto));
+        });
 
     [HttpPost("~/api/non-conformances/{id:int}/resolve")]
     public Task<IActionResult> Resolve(int id) => ExecuteAsync(async () =>
-        Ok(await _service.ResolveAsync(id)));
+    {
+        if (!int.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId) || userId <= 0)
+            return Unauthorized();
+        return Ok(await _service.ResolveAsync(id));
+    });
 
     [HttpPost("~/api/non-conformances/{id:int}/close")]
     public Task<IActionResult> Close(int id) => ExecuteAsync(async () =>
-        Ok(await _service.CloseAsync(id)));
+    {
+        if (!int.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId) || userId <= 0)
+            return Unauthorized();
+        return Ok(await _service.CloseAsync(id));
+    });
 
     private async Task<IActionResult> ExecuteAsync(Func<Task<IActionResult>> operation)
     {

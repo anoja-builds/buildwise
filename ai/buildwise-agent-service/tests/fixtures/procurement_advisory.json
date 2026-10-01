@@ -1,0 +1,8 @@
+{
+  "summary":"The authoritative selection is Supplier A. Confirm delivery timing before manager review.",
+  "riskLevel":"Medium",
+  "risks":["No recorded order history is available for the selected supplier."],
+  "clarificationQuestions":["Can the selected supplier meet the required date?"],
+  "recommendedFollowUps":["Obtain a delivery commitment for manager review."],
+  "evidenceRefs":["request:1","quotation:11","supplier:1"]
+}

@@ -19,10 +19,12 @@ export default function QuotationEntryForm({ requestDetail, onCreated }) {
   const [submitting, setSubmitting] = useState(false)
 
   useEffect(() => {
-    procurementApi.listSuppliers({ status: 'Active', pageSize: 200 }).then((data) => setSuppliers(data.items)).catch(err => setError(err.message || 'Could not load suppliers.'))
+    procurementApi.listSuppliers({ status: 'Active', pageSize: 200 })
+      .then((data) => setSuppliers(data.items))
+      .catch(err => setError(err.message || 'Could not load suppliers.'))
   }, [])
 
-  const items = requestDetail?.items || []
+  const items = useMemo(() => requestDetail?.items || [], [requestDetail?.items])
 
   const total = useMemo(() => items.reduce((sum, item) => {
     const line = lines[item.id]
@@ -40,6 +42,9 @@ export default function QuotationEntryForm({ requestDetail, onCreated }) {
     setError('')
 
     if (!supplierId) { setError('Select a supplier.'); return }
+    if (quotationDate > today()) { setError('Quotation date cannot be in the future.'); return }
+    if (validUntil < quotationDate) { setError('Valid-until must be on or after the quotation date.'); return }
+    if (validUntil < today()) { setError('Quotation has already expired.'); return }
 
     const quoteItems = items
       .map((item) => ({ materialRequestItemId: item.id, quantity: Number(lines[item.id]?.quantity || 0), unitPrice: Number(lines[item.id]?.unitPrice || 0) }))
@@ -62,34 +67,86 @@ export default function QuotationEntryForm({ requestDetail, onCreated }) {
   }
 
   return (
-    <Card title="Record a quotation" subtitle="Enter what a supplier quoted for this request's line items. Total is calculated automatically.">
-      <form onSubmit={handleSubmit} className="stack">
+    <Card
+      title="Record Supplier Quotation"
+      subtitle="Enter quoted prices and quantities per line item. Total is automatically calculated."
+      style={{ border: '1px solid var(--color-border)', borderRadius: 'var(--radius-lg)' }}
+    >
+      <form onSubmit={handleSubmit} className="stack" style={{ gap: '20px' }}>
         <div className="form-grid">
-          <SelectInput label="Supplier" name="supplierId" value={supplierId} onChange={(e) => setSupplierId(e.target.value)} options={[{ value: '', label: 'Select an active supplier' }, ...suppliers.map((s) => ({ value: String(s.id), label: s.name }))]} />
-          <TextInput label="Quotation date" name="quotationDate" type="date" value={quotationDate} onChange={(e) => setQuotationDate(e.target.value)} required />
-          <TextInput label="Valid until" name="validUntil" type="date" value={validUntil} onChange={(e) => setValidUntil(e.target.value)} required />
+          <SelectInput
+            label="Supplier"
+            name="supplierId"
+            value={supplierId}
+            onChange={(e) => setSupplierId(e.target.value)}
+            options={[{ value: '', label: 'Select an active supplier' }, ...suppliers.map((s) => ({ value: String(s.id), label: s.name }))]}
+          />
+          <TextInput
+            label="Quotation date"
+            name="quotationDate"
+            type="date"
+            value={quotationDate}
+            onChange={(e) => setQuotationDate(e.target.value)}
+            required
+          />
+          <TextInput
+            label="Valid until"
+            name="validUntil"
+            type="date"
+            value={validUntil}
+            onChange={(e) => setValidUntil(e.target.value)}
+            required
+          />
         </div>
 
         <div>
+          <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--color-text)', display: 'block', marginBottom: '8px' }}>
+            Requested Line Items Pricing
+          </span>
           {items.map((item) => (
             <div className="item-line" key={item.id}>
-              <div className="item-line__label">{item.materialName} <span className="muted">(requested {item.requestedQuantity} {item.unit})</span></div>
-              <TextInput label={`Quantity (${item.unit})`} name={`quantity-${item.id}`} type="number" min="0" step="0.01" value={lines[item.id]?.quantity || ''} onChange={updateLine(item.id, 'quantity')} />
-              <TextInput label="Unit price" name={`unitPrice-${item.id}`} type="number" min="0" step="0.01" value={lines[item.id]?.unitPrice || ''} onChange={updateLine(item.id, 'unitPrice')} />
+              <div className="item-line__label">
+                {item.materialName} <span className="muted" style={{ fontSize: '12px' }}>(requested {item.requestedQuantity} {item.unit})</span>
+              </div>
+              <TextInput
+                label={`Quantity (${item.unit})`}
+                name={`quantity-${item.id}`}
+                type="number"
+                min="0"
+                step="0.01"
+                value={lines[item.id]?.quantity || ''}
+                onChange={updateLine(item.id, 'quantity')}
+              />
+              <TextInput
+                label="Unit price"
+                name={`unitPrice-${item.id}`}
+                type="number"
+                min="0"
+                step="0.01"
+                value={lines[item.id]?.unitPrice || ''}
+                onChange={updateLine(item.id, 'unitPrice')}
+              />
               <div>
                 <span className="field__label">Line total</span>
-                <div style={{ fontWeight: 700, paddingTop: '0.6rem' }}>{(Number(lines[item.id]?.quantity || 0) * Number(lines[item.id]?.unitPrice || 0)).toLocaleString()}</div>
+                <div style={{ fontWeight: 700, paddingTop: '0.55rem', fontSize: '14px', fontVariantNumeric: 'tabular-nums' }}>
+                  {(Number(lines[item.id]?.quantity || 0) * Number(lines[item.id]?.unitPrice || 0)).toLocaleString()}
+                </div>
               </div>
             </div>
           ))}
         </div>
 
-        <div className="total-strip"><span>Quotation total</span><span>{total.toLocaleString()}</span></div>
+        <div className="total-strip">
+          <span>Quotation total</span>
+          <span style={{ fontVariantNumeric: 'tabular-nums' }}>{total.toLocaleString()}</span>
+        </div>
 
         {error && <span className="field__error">{error}</span>}
 
         <div className="form-actions">
-          <Button type="submit" disabled={submitting}>{submitting ? 'Saving…' : 'Save quotation'}</Button>
+          <Button type="submit" disabled={submitting}>
+            {submitting ? 'Saving…' : 'Save quotation'}
+          </Button>
         </div>
       </form>
     </Card>

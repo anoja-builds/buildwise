@@ -65,7 +65,7 @@ class _StartInspectionScreenState extends State<StartInspectionScreen> {
     return PopScope(
       canPop: !_submitting,
       child: Scaffold(
-        appBar: AppBar(
+        appBar: shared.WorkspaceAppBar(
           title: Text(
             created == null ? 'Start Inspection' : 'Inspection Started',
           ),

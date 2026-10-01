@@ -81,8 +81,8 @@ $agentPy   = Join-Path $agentDir '.venv\Scripts\python.exe'
 $webDir    = Join-Path $repoRoot 'web\buildwise-web'
 $vitestBin = Join-Path $webDir 'node_modules\vitest\vitest.mjs'
 
-# Mirrors BuildWise.Api/Data/DbSeeder.cs (DemoPassword) - seeded demo accounts only.
-$demoPassword = 'Passw0rd!'
+# Supply the password configured for the existing demo accounts through the environment.
+$demoPassword = $env:BUILDWISE_DEMO_PASSWORD
 $officerEmail = 'procurement.officer@buildwise.demo'
 $managerEmail = 'procurement.manager@buildwise.demo'
 
@@ -200,6 +200,7 @@ function Invoke-ApiRequest {
 
 function Get-Token {
     param([string]$Email)
+    if ([string]::IsNullOrWhiteSpace($demoPassword)) { throw 'Set BUILDWISE_DEMO_PASSWORD for demo-account authentication.' }
     $login = Invoke-ApiRequest -Uri "$ApiBase/api/auth/login" -Method Post `
         -Body (@{ email = $Email; password = $demoPassword } | ConvertTo-Json -Compress)
     if ($login.Status -eq 200 -and $login.Data.token) { return $login.Data.token }

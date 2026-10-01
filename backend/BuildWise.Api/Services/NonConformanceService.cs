@@ -51,6 +51,11 @@ public class NonConformanceService
         if (item.RejectedQuantity <= 0)
             throw Invalid("Inspection item must have positive rejected quantity.");
 
+        var hasActiveNcr = await _dbContext.NonConformances.AnyAsync(nc =>
+            nc.InspectionItemId == item.Id && nc.Status != NonConformanceStatus.Closed);
+        if (hasActiveNcr)
+            throw Conflict("An open non-conformance already exists for this inspection item.");
+
         var correctiveAction = string.IsNullOrWhiteSpace(dto.CorrectiveAction)
             ? null : dto.CorrectiveAction.Trim();
         var now = DateTime.UtcNow;

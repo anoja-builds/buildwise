@@ -6,12 +6,13 @@ import unittest
 from unittest.mock import patch
 from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage, ToolMessage
+from langchain_google_genai import ChatGoogleGenerativeAI
 from pydantic import ValidationError
 from app.config import Settings, get_settings
 from app.main import app
 from app.models import EvidencePackage, QualityRiskRecommendation
 from app.quality_agent import analyse, SYSTEM
-from app.tools import build_tools
+from app.tools import build_tools, gemini_tool_declaration, NoArguments, HistoryArguments
 
 FIXTURES = Path(__file__).parent / 'fixtures'
 EVIDENCE = json.loads((FIXTURES / 'evidence.json').read_text(encoding='utf-8-sig'))
@@ -42,6 +43,35 @@ class FakeModel:
 
 
 class ContractTests(unittest.TestCase):
+    def test_gemini_declarations_bind_without_unsupported_keywords(self):
+        tools = build_tools(EvidencePackage.model_validate(EVIDENCE))
+        declarations = [gemini_tool_declaration(source)
+                        for source in [*tools.values(), QualityRiskRecommendation]]
+        def check(value):
+            if isinstance(value, dict):
+                for keyword in ['additionalProperties', 'exclusiveMinimum', '$ref', '$defs']:
+                    self.assertNotIn(keyword, value)
+                for child in value.values():
+                    check(child)
+            elif isinstance(value, list):
+                for child in value:
+                    check(child)
+        check(declarations)
+        self.assertEqual([d['function']['name'] for d in declarations],
+                         [*tools, 'QualityRiskRecommendation'])
+        final = declarations[-1]['function']['parameters']
+        self.assertEqual(final['required'], QualityRiskRecommendation.model_json_schema()['required'])
+        self.assertEqual(final['properties']['inspectionId']['minimum'], 1)
+        item = final['properties']['itemRecommendations']['items']
+        self.assertIn('suggestedSeverity', item['required'])
+        self.assertIn({'type': 'null'}, item['properties']['suggestedSeverity']['anyOf'])
+        for model in [NoArguments, HistoryArguments, QualityRiskRecommendation]:
+            self.assertIs(model.model_json_schema()['additionalProperties'], False)
+        with self.assertNoLogs('langchain_google_genai._function_utils', level='WARNING'):
+            bound = ChatGoogleGenerativeAI(model='gemini-3.8-flash',
+                                          google_api_key='schema-test-key').bind_tools(declarations)
+        self.assertTrue(bound.kwargs['tools'])
+
     def test_valid_request_and_recommendation(self):
         EvidencePackage.model_validate(EVIDENCE)
         QualityRiskRecommendation.model_validate(RECOMMENDATION)
@@ -135,6 +165,9 @@ class GraphTests(unittest.IsolatedAsyncioTestCase):
         model = FakeModel(evidence_turns() + [call('QualityRiskRecommendation', RECOMMENDATION)])
         result = await analyse(EvidencePackage.model_validate(EVIDENCE), Settings('', 'test'), model)
         self.assertTrue(result.success)
+        self.assertEqual(model.tools, [gemini_tool_declaration(source) for source in
+                         [*build_tools(EvidencePackage.model_validate(EVIDENCE)).values(),
+                          QualityRiskRecommendation]])
         self.assertEqual(result.iterationCount, 4)
         self.assertEqual(len(result.trace), 4)
         self.assertIsInstance(model.inputs[1][-1], ToolMessage)
@@ -146,6 +179,28 @@ class GraphTests(unittest.IsolatedAsyncioTestCase):
     async def test_missing_key(self):
         result = await analyse(EvidencePackage.model_validate(EVIDENCE), Settings('', 'test'))
         self.assertEqual(result.errorCode, 'missing_api_key')
+
+    async def test_projected_schemas_keep_strict_runtime_validation(self):
+        for name, args in [('get_current_inspection_evidence', {'supplierId': 999}),
+                           ('get_supplier_quality_history', {'limit': 10, 'supplierId': 999}),
+                           ('get_supplier_quality_history', {'limit': '10'})]:
+            with self.subTest(name=name, args=args):
+                result = await analyse(EvidencePackage.model_validate(EVIDENCE), Settings('', 'test'),
+                                       FakeModel([call(name, args)]))
+                self.assertEqual(result.errorCode, 'invalid_tool_call')
+                self.assertEqual(result.trace, [])
+        variants = [RECOMMENDATION | {'extra': True}, RECOMMENDATION | {'ncrRecommended': 'true'}]
+        for collection in ['riskFlags', 'itemRecommendations']:
+            bad = copy.deepcopy(RECOMMENDATION)
+            bad[collection][0]['extra'] = True
+            variants.append(bad)
+        for bad in variants:
+            with self.subTest(bad=bad):
+                result = await analyse(EvidencePackage.model_validate(EVIDENCE), Settings('', 'test'),
+                    FakeModel(evidence_turns() + [call('QualityRiskRecommendation', bad)]))
+                self.assertEqual(result.errorCode, 'invalid_output')
+                self.assertIsNone(result.recommendation)
+                self.assertFalse(result.trace[-1].success)
 
     async def test_no_tool_shortcut(self):
         result = await analyse(EvidencePackage.model_validate(EVIDENCE), Settings('', 'test'),
@@ -179,6 +234,27 @@ class GraphTests(unittest.IsolatedAsyncioTestCase):
             FakeModel(evidence_turns() + [AIMessage(content='not json')]))
         self.assertEqual(result.errorCode, 'invalid_output')
         self.assertIsNone(result.recommendation)
+
+    async def test_uncited_risk_flag_is_rejected_after_all_three_tools(self):
+        recommendation = copy.deepcopy(RECOMMENDATION)
+        recommendation['riskFlags'] = [{'flag': 'Insufficient historical evidence', 'evidenceReferences': []}]
+        result = await analyse(EvidencePackage.model_validate(EVIDENCE), Settings('', 'test'),
+            FakeModel(evidence_turns() + [call('QualityRiskRecommendation', recommendation)]))
+        self.assertFalse(result.success)
+        self.assertEqual(result.errorCode, 'invalid_output')
+        self.assertIsNone(result.recommendation)
+        self.assertEqual([entry.action for entry in result.trace[:-1]],
+            ['get_current_inspection_evidence', 'get_supplier_quality_history', 'get_prior_non_conformance_summary'])
+        self.assertTrue(all(entry.success for entry in result.trace[:-1]))
+        self.assertEqual(result.trace[-1].action, 'final_output')
+        self.assertFalse(result.trace[-1].success)
+
+        # An evidence limitation belongs in the summary; no fabricated citation is needed.
+        recommendation['riskFlags'] = []
+        recommendation['evidenceSummary'] = 'Current inspection evidence is available; historical evidence is insufficient.'
+        valid = await analyse(EvidencePackage.model_validate(EVIDENCE), Settings('', 'test'),
+            FakeModel(evidence_turns() + [call('QualityRiskRecommendation', recommendation)]))
+        self.assertTrue(valid.success)
 
     async def test_timeout(self):
         class Slow(FakeModel):

@@ -41,7 +41,7 @@ export default function AIRecommendationReview({ workflow }) {
         </div>
 
         <p role="status" style={{ fontSize: '13px', color: 'var(--color-text-muted)' }}>
-          Analysis mode: {recommendation?.executionMode === 'ProviderBacked' ? 'Live AI provider rationale with deterministic selection' : recommendation?.executionMode?.includes('Fallback') ? `${recommendation.executionMode}: no successful external AI call` : 'Not recorded'}
+          Analysis mode: {recommendation?.executionMode === 'AgenticAI' ? 'AgenticAI: read-only advisory analysis; deterministic selection' : recommendation?.executionMode === 'ProviderBacked' ? 'Live AI provider rationale with deterministic selection' : recommendation?.executionMode?.includes('Fallback') ? `${recommendation.executionMode}: deterministic rationale; AI advice unavailable` : 'Not recorded'}
         </p>
         {workflow.finalOutcome && <p style={{ fontSize: '13px' }}>{workflow.finalOutcome}</p>}
         {workflow.objective && <p style={{ fontSize: '13px', color: 'var(--color-text-muted)' }}>{workflow.objective}</p>}
@@ -67,6 +67,19 @@ export default function AIRecommendationReview({ workflow }) {
               <strong>Evaluation Rationale: </strong>{recommendation.rationale}
             </div>
           </>
+        )}
+
+        {recommendation?.advisory && (
+          <div className="ai-card__rationale">
+            <p><strong>Advisory assessment ({recommendation.advisory.riskLevel}): </strong>{recommendation.advisory.summary}</p>
+            {[
+              ['Risks', recommendation.advisory.risks],
+              ['Clarification questions', recommendation.advisory.clarificationQuestions],
+              ['Recommended follow-ups', recommendation.advisory.recommendedFollowUps],
+            ].map(([label, entries]) => entries?.length > 0 && (
+              <div key={label}><strong>{label}</strong><ul>{entries.map((entry, index) => <li key={index}>{entry}</li>)}</ul></div>
+            ))}
+          </div>
         )}
 
         {recommendation?.warnings?.length > 0 && (

@@ -36,7 +36,7 @@ describe('route authentication and navigation', () => {
   })
 
   it.each([
-    ['Administrator', '/dashboard', ['Dashboard', 'Material Requests', 'Suppliers', 'Quotations', 'Procurement', 'Purchase Orders', 'Deliveries', 'Quality Inspections', 'Non-Conformances']],
+    ['Administrator', '/dashboard', ['Dashboard', 'Material Requests', 'Suppliers', 'Quotations', 'Procurement', 'Purchase Orders', 'Deliveries', 'Quality Inspections', 'Non-Conformances', 'Users & Roles']],
     ['SiteEngineer', '/material-requests', ['Material Requests', 'Deliveries']],
     ['QualityInspector', '/quality-inspections', ['Deliveries', 'Quality Inspections', 'Non-Conformances']],
     ['ProcurementOfficer', '/procurement', ['Dashboard', 'Material Requests', 'Suppliers', 'Quotations', 'Procurement', 'Purchase Orders', 'Deliveries']],

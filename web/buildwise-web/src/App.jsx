@@ -1,5 +1,6 @@
 import { Navigate, Outlet, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
 import AppLayout from './layouts/AppLayout'
+import UsersPage from './Features/users/UsersPage'
 import MaterialRequestsPage from './Features/MaterialRequests/pages/MaterialRequestsPage'
 import DeliveryDashboard from './Features/deliveries/pages/DeliveryDashboard'
 import ProcurementApp from './Features/procurement/pages/ProcurementApp'
@@ -49,6 +50,7 @@ function ProtectedPage({ route }) {
   const { roles } = useAuth()
   if (!canAccess(route, roles)) return <AccessDenied />
   switch (route.screen) {
+    case 'users': return <UsersPage />
     case 'materials': return <MaterialRequestsPage />
     case 'deliveries': return <DeliveryDashboard />
     case 'procurement': return <ProcurementRoute route={route} />

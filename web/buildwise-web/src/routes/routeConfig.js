@@ -28,7 +28,7 @@ export const routeConfig = [
   // access until a contract exists, rather than inventing admin privileges.
   { label: 'AI Workflows', path: '/ai-workflows', allowedRoles: [], screen: 'placeholder' },
   { label: 'Reports', path: '/reports', allowedRoles: [], screen: 'placeholder' },
-  { label: 'Users & Roles', path: '/users', allowedRoles: [], screen: 'placeholder' },
+  { label: 'Users & Roles', path: '/users', allowedRoles: ['Administrator'], screen: 'users' },
 ]
 
 export const canAccess = (route, roles) => route.allowedRoles.some((role) => roles.includes(role))

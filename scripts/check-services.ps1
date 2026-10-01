@@ -11,7 +11,7 @@
       * React web       127.0.0.1:5173  - GET /  (the Vite dev server)
 
     Exit code is 0 when every service is up and 1 otherwise, so this can gate a script or a CI step.
-    Credentials for the deep API check mirror the seeded demo accounts (DbSeeder.DemoPassword).
+    Set BUILDWISE_DEMO_PASSWORD to the password configured for the demo accounts.
 
 .PARAMETER WaitSeconds
     Poll every 2 seconds for up to this many seconds instead of reporting once. Example: -WaitSeconds 60.
@@ -42,9 +42,9 @@ $apiBase   = 'http://127.0.0.1:5078'
 $agentBase = 'http://127.0.0.1:8001'
 $webBase   = 'http://127.0.0.1:5173'
 
-# Mirrors BuildWise.Api/Data/DbSeeder.cs (DemoPassword) - seeded demo accounts only.
+# Supply the password configured for the existing demo accounts through the environment.
 $demoManagerEmail = 'procurement.manager@buildwise.demo'
-$demoPassword     = 'Passw0rd!'
+$demoPassword     = $env:BUILDWISE_DEMO_PASSWORD
 
 function Test-PortOpen {
     param([int]$Port)
@@ -163,6 +163,7 @@ function Test-Api {
     $authDetail = 'login not attempted'
     $authOk = $false
     try {
+        if ([string]::IsNullOrWhiteSpace($demoPassword)) { throw 'Set BUILDWISE_DEMO_PASSWORD for demo-account authentication.' }
         $loginBody = @{ email = $demoManagerEmail; password = $demoPassword } | ConvertTo-Json -Compress
         $login = Invoke-WebRequest -Uri "$apiBase/api/auth/login" -Method Post -ContentType 'application/json' `
             -Body $loginBody -UseBasicParsing -TimeoutSec 10

@@ -1,3 +1,5 @@
+using BuildWise.Api.Services;
+
 namespace BuildWise.Api.DTOs;
 
 public record StartProcurementWorkflowRequest(
@@ -28,7 +30,13 @@ public record AgentRecommendationDto(
     List<RankedAlternativeDto> RankedAlternatives,
     List<string> Warnings,
     string ExecutionMode = "Unknown",
-    List<string>? ToolsUsed = null
+    List<string>? ToolsUsed = null,
+    string? ModelIdentifier = null,
+    int IterationCount = 0,
+    List<ProcurementAgentTrace>? ToolTrace = null,
+    string? FallbackReason = null,
+    ProcurementAdvisory? Advisory = null,
+    ProcurementAgentEvidence? AdvisoryEvidence = null
 );
 
 public record ProcurementValidationResultDto(

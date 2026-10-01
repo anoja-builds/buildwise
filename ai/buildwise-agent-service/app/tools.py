@@ -1,5 +1,6 @@
 from typing import Annotated
 from langchain_core.tools import tool
+from langchain_core.utils.function_calling import convert_to_openai_tool
 from pydantic import Field
 from .models import Contract, EvidencePackage, HistoryEvidence, ItemEvidence, NcrEvidence, DiscrepancyEvidence, IssueEvidence
 
@@ -10,6 +11,29 @@ class NoArguments(Contract):
 
 class HistoryArguments(Contract):
     limit: Annotated[int, Field(ge=1, le=20, strict=True)]
+
+
+def gemini_tool_declaration(source):
+    """Project a strict application schema into Gemini's function schema dialect.
+
+    Only declarations cross this boundary; execution still validates the original
+    Pydantic models. Conversion resolves nested model references before projection.
+    """
+    declaration = convert_to_openai_tool(source)
+
+    def project(value):
+        if isinstance(value, list):
+            return [project(item) for item in value]
+        if not isinstance(value, dict):
+            return value
+        result = {key: project(item) for key, item in value.items()
+                  if key != 'additionalProperties'}
+        # Positive integer IDs use an exclusive bound unsupported by this adapter.
+        if result.get('type') == 'integer' and 'exclusiveMinimum' in result:
+            result['minimum'] = result.pop('exclusiveMinimum') + 1
+        return result
+
+    return project(declaration)
 
 
 class CurrentObservation(Contract):

@@ -77,10 +77,11 @@ A PO can never exist without an `Approved` `agent_approvals` row, and a second n
 dotnet run --project backend/BuildWise.Api
 python -m uvicorn quotation_agent:app --app-dir backend/agent_service --port 8001
 
-# 2. Login (seeded demo accounts, password Passw0rd!)
+# 2. Login (set BUILDWISE_DEMO_PASSWORD securely to the existing demo-account password)
+if ([string]::IsNullOrWhiteSpace($env:BUILDWISE_DEMO_PASSWORD)) { throw "Set BUILDWISE_DEMO_PASSWORD." }
 $tok = (Invoke-RestMethod -Method Post -Uri http://localhost:5078/api/auth/login `
   -ContentType 'application/json' `
-  -Body '{"email":"procurement.officer@buildwise.demo","password":"Passw0rd!"}').token
+  -Body (@{ email = 'procurement.officer@buildwise.demo'; password = $env:BUILDWISE_DEMO_PASSWORD } | ConvertTo-Json -Compress)).token
 $h = @{ Authorization = "Bearer $tok" }
 
 # 3. Start the workflow for the seeded cement request (id 1, 250 bags)
@@ -88,7 +89,7 @@ Invoke-RestMethod -Method Post -Uri http://localhost:5078/api/material-requests/
 
 # 4. Approve as the Manager (button/role-gated in React), then read the PO
 $mgr = (Invoke-RestMethod -Method Post -Uri http://localhost:5078/api/auth/login -ContentType 'application/json' `
-  -Body '{"email":"procurement.manager@buildwise.demo","password":"Passw0rd!"}').token
+  -Body (@{ email = 'procurement.manager@buildwise.demo'; password = $env:BUILDWISE_DEMO_PASSWORD } | ConvertTo-Json -Compress)).token
 Invoke-RestMethod -Uri http://localhost:5078/api/purchase-orders -Headers @{ Authorization = "Bearer $mgr" }
 ```
 
@@ -96,7 +97,7 @@ The seeded scenario (spec §11) is: Suppliers A (Active), B (Suspended), C (Acti
 
 ## 6. Known gaps and open questions for you
 
-1. **Demo users:** fresh databases seed the five application roles. Development seeding backfills missing demo accounts/assignments while preserving existing passwords; it does not remap legacy roles. Public registration permits only SiteEngineer; other assignments require controlled administration.
+1. **Demo users:** fresh databases seed the five application roles. Development seeding backfills missing demo accounts while preserving existing passwords, roles, and activation status. Configure `Jwt:Key` and the database connection through user-secrets/environment variables before startup; see [auth configuration](../auth_configuration.md). Public registration permits only SiteEngineer; other assignments require controlled administration.
 2. **No "partially received" PO status exists** in the ERD enum (`Created/Confirmed/InProgress/Completed/Cancelled`). If deliveries need it, raise it as an ERD change so we add it consistently instead of you tracking it in `deliveries` alone.
 3. **`expected_delivery_date` is fixed at `order_date + 7 days`** and is not editable yet; tell us if the Manager should set it during approval.
 4. **Tracing a PO line back to the material request** goes `purchase_order_items.quotation_item_id → quotation_items.material_request_item_id → material_request_items.material_id`; `material_request_id` and `supplier_id` are also exposed directly on the PO DTO.

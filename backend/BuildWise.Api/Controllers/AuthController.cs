@@ -48,6 +48,10 @@ public class AuthController : ControllerBase
         {
             return Ok(await _authService.LoginAsync(dto));
         }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
         catch (UnauthorizedAccessException ex)
         {
             return Unauthorized(new { error = ex.Message });

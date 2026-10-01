@@ -1,5 +1,3 @@
-using System.Net.Http.Json;
-using System.Text.Json;
 using BuildWise.Api.DTOs;
 
 namespace BuildWise.Api.Services;
@@ -23,58 +21,17 @@ public record AgentAnalyzePayload(
 
 public class QuotationAgentClient
 {
-    private readonly HttpClient _http;
-    private readonly ILogger<QuotationAgentClient> _logger;
+    // Kept constructor-compatible with existing workflow composition. Ranking no longer
+    // crosses a provider boundary; the separate advisory client cannot choose a winner.
+    public QuotationAgentClient(HttpClient http, ILogger<QuotationAgentClient> logger) { }
 
-    public QuotationAgentClient(HttpClient http, ILogger<QuotationAgentClient> logger)
-    {
-        _http = http;
-        _logger = logger;
-    }
-
-    public async Task<AgentRecommendationDto?> AnalyzeAsync(
-        int materialRequestId,
-        List<AgentQuotationInput> quotations,
-        Dictionary<string, decimal> requestedQuantities,
+    public Task<AgentRecommendationDto?> AnalyzeAsync(int materialRequestId,
+        List<AgentQuotationInput> quotations, Dictionary<string, decimal> requestedQuantities,
         CancellationToken ct = default)
     {
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        cts.CancelAfter(TimeSpan.FromSeconds(10));
-
-        var payload = new AgentAnalyzePayload(materialRequestId, quotations, requestedQuantities);
-
-        try
-        {
-            var response = await _http.PostAsJsonAsync("/analyze", payload, cts.Token);
-            if (response.IsSuccessStatusCode)
-            {
-                // The Python agent emits snake_case (recommended_quotation_id, ranked_alternatives, ...)
-                // while this DTO is PascalCase, so the response must be read with a snake_case naming
-                // policy or every member binds to null. Scoped to this read only — the request payload
-                // and the REST contract exposed to React remain unchanged.
-                var agentJsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web)
-                {
-                    PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower
-                };
-                var result = await response.Content.ReadFromJsonAsync<AgentRecommendationDto>(agentJsonOptions, cts.Token);
-                if (result != null)
-                {
-                    _logger.LogInformation("Agent analysis received from external microservice for request #{RequestId}", materialRequestId);
-                    return result;
-                }
-            }
-            else
-            {
-                _logger.LogWarning("Agent microservice returned HTTP {StatusCode}. Using resilient fallback analysis.", response.StatusCode);
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Agent microservice unreachable at {BaseAddress}. Executing resilient in-process agent fallback.", _http.BaseAddress);
-        }
-
-        // Resilient in-process rule-based evaluation fallback (mirrors exact logic)
-        return ExecuteFallbackAnalysis(payload);
+        ct.ThrowIfCancellationRequested();
+        var result = ExecuteFallbackAnalysis(new(materialRequestId, quotations, requestedQuantities));
+        return Task.FromResult<AgentRecommendationDto?>(result);
     }
 
     public AgentRecommendationDto ExecuteFallbackAnalysis(AgentAnalyzePayload payload)
@@ -124,8 +81,10 @@ public class QuotationAgentClient
                 Rationale: "No eligible quotations met the procurement criteria.",
                 RankedAlternatives: new List<RankedAlternativeDto>(),
                 Warnings: warnings,
-                ExecutionMode: "CSharpDeterministicFallback",
-                ToolsUsed: []
+                ExecutionMode: "DeterministicFallback",
+                ToolsUsed: [],
+                ToolTrace: [],
+                FallbackReason: "not_configured"
             );
         }
 
@@ -152,8 +111,10 @@ public class QuotationAgentClient
             Rationale: rationale,
             RankedAlternatives: alternatives,
             Warnings: warnings,
-                ExecutionMode: "CSharpDeterministicFallback",
-                ToolsUsed: []
+                ExecutionMode: "DeterministicFallback",
+                ToolsUsed: [],
+                ToolTrace: [],
+                FallbackReason: "not_configured"
         );
     }
 }

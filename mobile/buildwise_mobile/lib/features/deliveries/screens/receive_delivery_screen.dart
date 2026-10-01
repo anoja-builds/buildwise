@@ -1,16 +1,23 @@
 import 'package:flutter/material.dart';
+
+import '../../../core/widgets/widgets.dart';
 import '../services/delivery_service.dart';
 
 class ReceiveDeliveryScreen extends StatefulWidget {
   final dynamic delivery;
-  const ReceiveDeliveryScreen({super.key, required this.delivery});
+  const ReceiveDeliveryScreen({
+    super.key,
+    required this.delivery,
+    this.service,
+  });
+  final DeliveryService? service;
 
   @override
   State<ReceiveDeliveryScreen> createState() => _ReceiveDeliveryScreenState();
 }
 
 class _ReceiveDeliveryScreenState extends State<ReceiveDeliveryScreen> {
-  final DeliveryService _service = DeliveryService();
+  late final DeliveryService _service = widget.service ?? DeliveryService();
   final TextEditingController _notesController = TextEditingController();
   late List<Map<String, dynamic>> _items;
   bool _isSubmitting = false;
@@ -27,23 +34,42 @@ class _ReceiveDeliveryScreenState extends State<ReceiveDeliveryScreen> {
         'materialName': i['materialName'] ?? 'Unknown',
         'materialUnit': i['materialUnit'] ?? 'units',
         'orderedQuantity': i['orderedQuantity'],
-        'receivedQuantity': i['outstandingQuantity'] ?? i['orderedQuantity'], // Remaining quantity
+        'outstandingQuantity':
+            i['outstandingQuantity'] ?? i['orderedQuantity'] ?? 0,
+        'receivedQuantity':
+            i['outstandingQuantity'] ??
+            i['orderedQuantity'], // Remaining quantity
         'damagedQuantity': 0.0,
       };
     }).toList();
   }
 
   Future<void> _submit() async {
+    if (_isSubmitting) return;
     // Validate before submitting
     for (var item in _items) {
       final received = (item['receivedQuantity'] as num).toDouble();
       final damaged = (item['damagedQuantity'] as num).toDouble();
+      final outstanding =
+          (item['outstandingQuantity'] as num?)?.toDouble() ?? double.infinity;
+      if (!received.isFinite || !damaged.isFinite) {
+        _showError('Enter valid received and damaged quantities.');
+        return;
+      }
       if (received < 0 || damaged < 0) {
         _showError('Quantities cannot be negative.');
         return;
       }
       if (damaged > received) {
-        _showError('Damaged quantity cannot exceed received quantity for ${item['materialName']}.');
+        _showError(
+          'Damaged quantity cannot exceed received quantity for ${item['materialName']}.',
+        );
+        return;
+      }
+      if (received > outstanding) {
+        _showError(
+          'Received quantity cannot exceed outstanding quantity for ${item['materialName']}.',
+        );
         return;
       }
     }
@@ -52,14 +78,21 @@ class _ReceiveDeliveryScreenState extends State<ReceiveDeliveryScreen> {
     try {
       final payload = {
         'notes': _notesController.text,
-        'items': _items.map((i) => {
-          'purchaseOrderItemId': i['purchaseOrderItemId'],
-          'receivedQuantity': i['receivedQuantity'],
-          'damagedQuantity': i['damagedQuantity'],
-        }).toList(),
+        'items': _items
+            .map(
+              (i) => {
+                'purchaseOrderItemId': i['purchaseOrderItemId'],
+                'receivedQuantity': i['receivedQuantity'],
+                'damagedQuantity': i['damagedQuantity'],
+              },
+            )
+            .toList(),
       };
 
-      final result = await _service.receiveDelivery(widget.delivery['id'], payload);
+      final result = await _service.receiveDelivery(
+        widget.delivery['id'],
+        payload,
+      );
 
       if (mounted) {
         setState(() {
@@ -67,7 +100,9 @@ class _ReceiveDeliveryScreenState extends State<ReceiveDeliveryScreen> {
         });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(result['message'] ?? 'Delivery reconciled successfully.'),
+            content: Text(
+              result['message'] ?? 'Delivery reconciled successfully.',
+            ),
             backgroundColor: Colors.green,
           ),
         );
@@ -75,7 +110,7 @@ class _ReceiveDeliveryScreenState extends State<ReceiveDeliveryScreen> {
     } catch (e) {
       _showError('$e');
     } finally {
-      setState(() => _isSubmitting = false);
+      if (mounted) setState(() => _isSubmitting = false);
     }
   }
 
@@ -89,7 +124,7 @@ class _ReceiveDeliveryScreenState extends State<ReceiveDeliveryScreen> {
     } catch (e) {
       _showError('Discrepancy analysis: $e');
     } finally {
-      setState(() => _isAnalyzing = false);
+      if (mounted) setState(() => _isAnalyzing = false);
     }
   }
 
@@ -102,91 +137,128 @@ class _ReceiveDeliveryScreenState extends State<ReceiveDeliveryScreen> {
   }
 
   @override
+  void dispose() {
+    _notesController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('Receive: ${widget.delivery['deliveryReference']}')),
+      appBar: WorkspaceAppBar(
+        title: Text(
+          _receiveResult == null
+              ? 'Receive: ${widget.delivery['deliveryReference']}'
+              : 'Receipt Result',
+        ),
+      ),
       body: _isSubmitting
-        ? const Center(child: CircularProgressIndicator())
-        : SingleChildScrollView(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('PO #${widget.delivery['purchaseOrderId']}',
-                    style: const TextStyle(fontWeight: FontWeight.bold)),
-                const SizedBox(height: 20),
+          ? const Center(child: CircularProgressIndicator())
+          : SingleChildScrollView(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'PO #${widget.delivery['purchaseOrderId']}',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 20),
 
-                // Receiving status indicator (after submit)
-                if (_receiveResult != null) ...[
-                  _buildStatusCard(),
-                  const SizedBox(height: 16),
-                ],
+                  // Receiving status indicator (after submit)
+                  if (_receiveResult != null) ...[
+                    _buildStatusCard(),
+                    const SizedBox(height: 16),
+                  ],
 
-                // Item entry cards
-                if (_receiveResult == null) ...[
-                  ..._items.asMap().entries.map((entry) {
-                    int idx = entry.key;
-                    var item = entry.value;
-                    return Card(
-                      margin: const EdgeInsets.only(bottom: 16),
-                      child: Padding(
-                        padding: const EdgeInsets.all(12),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(item['materialName'],
-                                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                            Text('Ordered: ${item['orderedQuantity']} ${item['materialUnit'] ?? ''}'),
-                            const SizedBox(height: 10),
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: TextFormField(
-                                    initialValue: item['receivedQuantity'].toString(),
-                                    decoration: const InputDecoration(labelText: 'Received Qty'),
-                                    keyboardType: TextInputType.number,
-                                    onChanged: (v) => _items[idx]['receivedQuantity'] = double.tryParse(v) ?? 0.0,
-                                  ),
+                  // Item entry cards
+                  if (_receiveResult == null) ...[
+                    ..._items.asMap().entries.map((entry) {
+                      int idx = entry.key;
+                      var item = entry.value;
+                      return Card(
+                        margin: const EdgeInsets.only(bottom: 16),
+                        child: Padding(
+                          padding: const EdgeInsets.all(12),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                item['materialName'],
+                                style: const TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
                                 ),
-                                const SizedBox(width: 16),
-                                Expanded(
-                                  child: TextFormField(
-                                    initialValue: item['damagedQuantity'].toString(),
-                                    decoration: const InputDecoration(labelText: 'Damaged Qty'),
-                                    keyboardType: TextInputType.number,
-                                    onChanged: (v) => _items[idx]['damagedQuantity'] = double.tryParse(v) ?? 0.0,
+                              ),
+                              Text(
+                                'Ordered: ${item['orderedQuantity']} ${item['materialUnit'] ?? ''}',
+                              ),
+                              const SizedBox(height: 10),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: TextFormField(
+                                      initialValue: item['receivedQuantity']
+                                          .toString(),
+                                      decoration: const InputDecoration(
+                                        labelText: 'Received Qty',
+                                      ),
+                                      keyboardType: TextInputType.number,
+                                      onChanged: (v) =>
+                                          _items[idx]['receivedQuantity'] =
+                                              double.tryParse(v) ?? double.nan,
+                                    ),
                                   ),
-                                ),
-                              ],
-                            ),
-                          ],
+                                  const SizedBox(width: 16),
+                                  Expanded(
+                                    child: TextFormField(
+                                      initialValue: item['damagedQuantity']
+                                          .toString(),
+                                      decoration: const InputDecoration(
+                                        labelText: 'Damaged Qty',
+                                      ),
+                                      keyboardType: TextInputType.number,
+                                      onChanged: (v) =>
+                                          _items[idx]['damagedQuantity'] =
+                                              double.tryParse(v) ?? double.nan,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
                         ),
+                      );
+                    }),
+                    TextField(
+                      controller: _notesController,
+                      decoration: const InputDecoration(
+                        labelText: 'Overall Remarks',
                       ),
-                    );
-                  }),
-                  TextField(
-                    controller: _notesController,
-                    decoration: const InputDecoration(labelText: 'Overall Remarks'),
-                    maxLines: 2,
-                  ),
-                  const SizedBox(height: 30),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: _submit,
-                      child: const Text('Verify & Save'),
+                      maxLines: 2,
                     ),
-                  ),
-                ],
+                    const SizedBox(height: 30),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: _submit,
+                        child: const Text('Verify & Save'),
+                      ),
+                    ),
+                  ],
 
-                // Post-receive: discrepancy analysis section
-                if (_receiveResult != null) ...[
-                  const Divider(height: 32),
-                  _buildDiscrepancySection(),
+                  // Post-receive: discrepancy analysis section
+                  if (_receiveResult != null &&
+                      [
+                        'DiscrepancyReported',
+                        'PartiallyReceived',
+                      ].contains(_receiveResult!['status'])) ...[
+                    const Divider(height: 32),
+                    _buildDiscrepancySection(),
+                  ],
                 ],
-              ],
+              ),
             ),
-          ),
     );
   }
 
@@ -212,13 +284,18 @@ class _ReceiveDeliveryScreenState extends State<ReceiveDeliveryScreen> {
                 children: [
                   Text(
                     _receiveResult?['message'] ?? 'Delivery recorded',
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 15,
+                    ),
                   ),
                   const SizedBox(height: 4),
                   Text(
                     'Status: $status',
                     style: TextStyle(
-                      color: isDiscrepancy ? Colors.orange.shade800 : Colors.green.shade800,
+                      color: isDiscrepancy
+                          ? Colors.orange.shade800
+                          : Colors.green.shade800,
                       fontWeight: FontWeight.w500,
                     ),
                   ),
@@ -235,6 +312,10 @@ class _ReceiveDeliveryScreenState extends State<ReceiveDeliveryScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        const AdvisoryBanner(
+          'Agent 3 suggestions support review. Receiving quantities and delivery status remain controlled by the API.',
+        ),
+        const SizedBox(height: 12),
         const Text(
           '🔍 Discrepancy Analysis',
           style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
@@ -288,18 +369,33 @@ class _ReceiveDeliveryScreenState extends State<ReceiveDeliveryScreen> {
       children: [
         // Summary card
         Card(
-          color: hasDiscrepancies ? Colors.orange.shade50 : Colors.green.shade50,
+          color: hasDiscrepancies
+              ? Colors.orange.shade50
+              : Colors.green.shade50,
           child: Padding(
             padding: const EdgeInsets.all(12),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
-                _summaryChip('Shortage', '${analysis['totalShortage'] ?? 0}',
-                    (analysis['totalShortage'] ?? 0) > 0 ? Colors.orange : Colors.green),
-                _summaryChip('Damaged', '${analysis['totalDamaged'] ?? 0}',
-                    (analysis['totalDamaged'] ?? 0) > 0 ? Colors.red : Colors.green),
-                _summaryChip('Undamaged', '${analysis['totalUndamagedReceived'] ?? 0}',
-                    Colors.blue),
+                _summaryChip(
+                  'Shortage',
+                  '${analysis['totalShortage'] ?? 0}',
+                  (analysis['totalShortage'] ?? 0) > 0
+                      ? Colors.orange
+                      : Colors.green,
+                ),
+                _summaryChip(
+                  'Damaged',
+                  '${analysis['totalDamaged'] ?? 0}',
+                  (analysis['totalDamaged'] ?? 0) > 0
+                      ? Colors.red
+                      : Colors.green,
+                ),
+                _summaryChip(
+                  'Undamaged',
+                  '${analysis['totalUndamagedReceived'] ?? 0}',
+                  Colors.blue,
+                ),
               ],
             ),
           ),
@@ -307,59 +403,89 @@ class _ReceiveDeliveryScreenState extends State<ReceiveDeliveryScreen> {
         const SizedBox(height: 12),
 
         // Item-level analysis
-        ...items.map((item) => Card(
-          margin: const EdgeInsets.only(bottom: 8),
-          child: Padding(
-            padding: const EdgeInsets.all(10),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(item['materialName'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold)),
-                    if (item['hasDiscrepancy'] == true)
-                      ...((item['discrepancyFlags'] as List?)?.map((flag) =>
-                        Chip(
-                          label: Text(flag, style: const TextStyle(fontSize: 10)),
-                          backgroundColor: Colors.orange.shade100,
-                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          padding: EdgeInsets.zero,
-                        )
-                      ) ?? [])
-                    else
-                      const Icon(Icons.check, color: Colors.green, size: 18),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                Text('Ordered: ${item['orderedQuantity']}  •  '
+        ...items.map(
+          (item) => Card(
+            margin: const EdgeInsets.only(bottom: 8),
+            child: Padding(
+              padding: const EdgeInsets.all(10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 4,
+                    children: [
+                      Text(
+                        item['materialName'] ?? '',
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      if (item['hasDiscrepancy'] == true)
+                        ...((item['discrepancyFlags'] as List?)?.map(
+                              (flag) => Chip(
+                                label: Text(
+                                  flag,
+                                  style: const TextStyle(fontSize: 10),
+                                ),
+                                backgroundColor: Colors.orange.shade100,
+                                materialTapTargetSize:
+                                    MaterialTapTargetSize.shrinkWrap,
+                                padding: EdgeInsets.zero,
+                              ),
+                            ) ??
+                            [])
+                      else
+                        const Icon(Icons.check, color: Colors.green, size: 18),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Ordered: ${item['orderedQuantity']}  •  '
                     'Received: ${item['newlyReceivedQuantity']}  •  '
                     'Damaged: ${item['damagedQuantity']}  •  '
                     'Shortage: ${item['shortageQuantity']}',
-                    style: const TextStyle(fontSize: 12, color: Colors.grey)),
-              ],
+                    style: const TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                ],
+              ),
             ),
           ),
-        )),
+        ),
 
         // Recommendations
         if (recommendations.isNotEmpty) ...[
           const SizedBox(height: 12),
-          const Text('Recommendations', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+          const Text(
+            'Recommendations',
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+          ),
           const SizedBox(height: 4),
-          ...recommendations.map((rec) => Card(
-            margin: const EdgeInsets.only(bottom: 6),
-            child: ListTile(
-              dense: true,
-              leading: Icon(
-                rec['isActionRequired'] == true ? Icons.priority_high : Icons.lightbulb_outline,
-                color: rec['isActionRequired'] == true ? Colors.red : Colors.blue,
+          ...recommendations.map(
+            (rec) => Card(
+              margin: const EdgeInsets.only(bottom: 6),
+              child: ListTile(
+                dense: true,
+                leading: Icon(
+                  rec['isActionRequired'] == true
+                      ? Icons.priority_high
+                      : Icons.lightbulb_outline,
+                  color: rec['isActionRequired'] == true
+                      ? Colors.red
+                      : Colors.blue,
+                ),
+                title: Text(
+                  '${rec['category']} — ${rec['materialName']}',
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                subtitle: Text(
+                  rec['advisory'] ?? '',
+                  style: const TextStyle(fontSize: 11),
+                ),
               ),
-              title: Text('${rec['category']} — ${rec['materialName']}',
-                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
-              subtitle: Text(rec['advisory'] ?? '', style: const TextStyle(fontSize: 11)),
             ),
-          )),
+          ),
         ],
 
         // Workflow info
@@ -377,7 +503,14 @@ class _ReceiveDeliveryScreenState extends State<ReceiveDeliveryScreen> {
   Widget _summaryChip(String label, String value, Color color) {
     return Column(
       children: [
-        Text(value, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: color)),
+        Text(
+          value,
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 18,
+            color: color,
+          ),
+        ),
         Text(label, style: const TextStyle(fontSize: 11, color: Colors.grey)),
       ],
     );

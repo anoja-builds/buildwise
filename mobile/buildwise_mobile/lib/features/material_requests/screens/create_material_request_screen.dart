@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/widgets/widgets.dart';
+
 import '../services/material_request_service.dart';
 
 class CreateMaterialRequestScreen extends StatefulWidget {
@@ -19,12 +21,13 @@ class _CreateMaterialRequestScreenState
   final _notesController = TextEditingController();
   final _quantityController = TextEditingController();
 
-  String _priority = 'High';
+  DateTime _requiredDate = DateTime.now().add(const Duration(days: 5));
   int? _projectId;
   int? _materialId;
   String _unit = '';
   List<dynamic> _projects = [];
   List<dynamic> _materials = [];
+  final List<Map<String, dynamic>> _addedItems = [];
   bool _loadingOptions = true;
   String? _optionsError;
 
@@ -66,14 +69,62 @@ class _CreateMaterialRequestScreenState
 
   bool _loading = false;
 
-  Future<void> _submit() async {
+  Map<String, dynamic>? _currentItem() {
     final quantity = double.tryParse(_quantityController.text);
-    if (_projectId == null ||
-        _materialId == null ||
+    if (_materialId == null ||
         quantity == null ||
         !quantity.isFinite ||
         quantity <= 0 ||
-        quantity > 1000000 ||
+        quantity > 1000000) {
+      return null;
+    }
+    return {
+      'materialId': _materialId,
+      'quantity': quantity,
+      'unit': _unit,
+      'notes': _notesController.text.trim(),
+    };
+  }
+
+  void _addItem() {
+    final item = _currentItem();
+    if (item == null ||
+        _addedItems.any((i) => i['materialId'] == item['materialId'])) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Choose a new material and enter a valid quantity.'),
+        ),
+      );
+      return;
+    }
+    setState(() {
+      _addedItems.add(item);
+      _materialId = null;
+      _unit = '';
+      _quantityController.clear();
+      _notesController.clear();
+    });
+  }
+
+  Future<void> _submit({bool draft = false}) async {
+    if (_loading) return;
+    final current = _currentItem();
+    final hasUnfinishedItem =
+        _materialId != null || _quantityController.text.isNotEmpty;
+    final items = [..._addedItems, ?current];
+    final today = DateUtils.dateOnly(DateTime.now());
+    if (DateUtils.dateOnly(_requiredDate).isBefore(today)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Required date cannot be before today.'),
+        ),
+      );
+      return;
+    }
+    if (_projectId == null ||
+        items.isEmpty ||
+        (hasUnfinishedItem && current == null) ||
+        items.map((i) => i['materialId']).toSet().length != items.length ||
         _reasonController.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -89,31 +140,21 @@ class _CreateMaterialRequestScreenState
     try {
       final payload = {
         'projectId': _projectId,
-        'priority': _priority,
-        'requiredDate': DateTime.now()
-            .add(const Duration(days: 5))
-            .toIso8601String(),
+        'requiredDate': _requiredDate.toIso8601String(),
         'reason': _reasonController.text,
-        'siteNotes': _notesController.text,
-        'submitImmediately': true,
-        'items': [
-          {
-            'materialId': _materialId,
-            'quantity': quantity,
-            'unit': _unit,
-            'requiredDate': DateTime.now()
-                .add(const Duration(days: 5))
-                .toIso8601String(),
-            'notes': _notesController.text,
-          },
-        ],
+        'submitImmediately': !draft,
+        'items': items,
       };
 
       await _service.createRequest(payload);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Material Request Submitted to Office!'),
+          SnackBar(
+            content: Text(
+              draft
+                  ? 'Material request draft saved.'
+                  : 'Material Request Submitted to Office!',
+            ),
           ),
         );
         Navigator.pop(context, true);
@@ -131,14 +172,17 @@ class _CreateMaterialRequestScreenState
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('New Material Request')),
+      appBar: const WorkspaceAppBar(
+        title: Text('New Material Request'),
+        subtitle: 'Request materials for your project',
+      ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Site Officer Material Demand Entry',
+              'Request Details',
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 16),
@@ -178,6 +222,21 @@ class _CreateMaterialRequestScreenState
               'Material Select:',
               style: TextStyle(fontWeight: FontWeight.bold),
             ),
+            for (final item in _addedItems)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text(
+                  '${_materials.firstWhere((m) => m['id'] == item['materialId'])['name']}',
+                ),
+                subtitle: Text('${item['quantity']} ${item['unit']}'),
+                trailing: IconButton(
+                  tooltip: 'Remove material',
+                  onPressed: _loading
+                      ? null
+                      : () => setState(() => _addedItems.remove(item)),
+                  icon: const Icon(Icons.close),
+                ),
+              ),
             DropdownButton<int>(
               key: const Key('material-select'),
               value: _materialId,
@@ -210,33 +269,32 @@ class _CreateMaterialRequestScreenState
               controller: _quantityController,
               keyboardType: TextInputType.number,
               decoration: InputDecoration(
-                labelText: 'Required Quantity ($_unit)',
+                labelText: _unit.isEmpty
+                    ? 'Required Quantity'
+                    : 'Required Quantity ($_unit)',
                 border: const OutlineInputBorder(),
               ),
             ),
             const SizedBox(height: 16),
-            const Text(
-              'Priority Level:',
-              style: TextStyle(fontWeight: FontWeight.bold),
-            ),
-            DropdownButton<String>(
-              value: _priority,
-              isExpanded: true,
-              items: const [
-                DropdownMenuItem(value: 'Low', child: Text('Low Priority')),
-                DropdownMenuItem(
-                  value: 'Medium',
-                  child: Text('Medium Priority'),
-                ),
-                DropdownMenuItem(value: 'High', child: Text('High Priority')),
-                DropdownMenuItem(
-                  value: 'Urgent',
-                  child: Text('Urgent Priority'),
-                ),
-              ],
-              onChanged: (val) {
-                if (val != null) setState(() => _priority = val);
-              },
+            OutlinedButton.icon(
+              icon: const Icon(Icons.calendar_today_outlined, size: 18),
+              label: Text('Required date: ${displayDate(_requiredDate)}'),
+              onPressed: _loading
+                  ? null
+                  : () async {
+                      final today = DateUtils.dateOnly(DateTime.now());
+                      final date = await showDatePicker(
+                        context: context,
+                        initialDate: _requiredDate.isBefore(today)
+                            ? today
+                            : _requiredDate,
+                        firstDate: today,
+                        lastDate: DateTime(today.year + 5),
+                      );
+                      if (date != null && mounted) {
+                        setState(() => _requiredDate = date);
+                      }
+                    },
             ),
             const SizedBox(height: 16),
             TextField(
@@ -252,12 +310,25 @@ class _CreateMaterialRequestScreenState
               controller: _notesController,
               maxLines: 3,
               decoration: const InputDecoration(
-                labelText: 'Site Logistics & Access Notes',
+                labelText: 'Material / Delivery Notes',
                 hintText: 'e.g. Deliver to Gate B. Tower crane active.',
                 border: OutlineInputBorder(),
               ),
             ),
             const SizedBox(height: 24),
+            OutlinedButton.icon(
+              onPressed: _loading ? null : _addItem,
+              icon: const Icon(Icons.add),
+              label: const Text('Add Another Material Item'),
+            ),
+            const SizedBox(height: 12),
+            OutlinedButton(
+              onPressed: _loading || _loadingOptions || _optionsError != null
+                  ? null
+                  : () => _submit(draft: true),
+              child: const Text('Save Draft'),
+            ),
+            const SizedBox(height: 12),
             SizedBox(
               width: double.infinity,
               height: 50,

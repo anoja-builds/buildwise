@@ -49,6 +49,7 @@ public class MaterialRequestsController : ControllerBase
     }
 
     [HttpGet("options")]
+    [HttpGet("/api/material-requests/options")]
     [Authorize(Roles = "SiteEngineer,Administrator")]
     public async Task<IActionResult> GetOptions()
     {
@@ -153,6 +154,20 @@ public class MaterialRequestsController : ControllerBase
     {
         if (!User.TryGetUserId(out var actorId)) return Unauthorized();
 
+        if (dto.Items == null || dto.Items.Count == 0)
+            return BadRequest("Material request must contain at least one item.");
+
+        var requiredDate = DateOnly.FromDateTime(dto.RequiredDate);
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        if (requiredDate < today)
+            return BadRequest("Required date cannot be before today.");
+
+        if (dto.Items.Any(i => i.Quantity <= 0))
+            return BadRequest("Quantity must be greater than zero.");
+
+        if (dto.Items.Select(i => i.MaterialId).Distinct().Count() != dto.Items.Count)
+            return BadRequest("Duplicate material items are not allowed in the same request.");
+
         var project = await _dbContext.Projects.FindAsync(dto.ProjectId);
         if (project == null || project.Status != ProjectStatus.Active) return BadRequest("Select an active project.");
         var materialIds = dto.Items.Select(i => i.MaterialId).Distinct().ToList();
@@ -163,7 +178,7 @@ public class MaterialRequestsController : ControllerBase
         {
             ProjectId = dto.ProjectId,
             RequestedByUserId = actorId,
-            RequiredDate = DateOnly.FromDateTime(dto.RequiredDate),
+            RequiredDate = requiredDate,
             Reason = dto.Reason,
             Status = dto.SubmitImmediately ? MaterialRequestStatus.PendingApproval : MaterialRequestStatus.Draft,
             CreatedAt = DateTime.UtcNow,
@@ -195,7 +210,11 @@ public class MaterialRequestsController : ControllerBase
     {
         if (!User.TryGetUserId(out var actorId)) return Unauthorized();
 
-        var request = await _dbContext.MaterialRequests.FindAsync(id);
+        var request = await _dbContext.MaterialRequests
+            .Include(r => r.Project)
+            .Include(r => r.Items)
+                .ThenInclude(i => i.Material)
+            .FirstOrDefaultAsync(r => r.Id == id);
         if (request == null) return NotFound("Material Request not found.");
 
         if (request.RequestedByUserId != actorId && !User.IsInRole("Administrator")) return Forbid();
@@ -203,6 +222,37 @@ public class MaterialRequestsController : ControllerBase
         if (request.Status != MaterialRequestStatus.Draft)
         {
             return BadRequest("Only draft requests can be submitted.");
+        }
+
+        if (request.Items == null || request.Items.Count == 0)
+        {
+            return BadRequest("Material request must contain at least one item.");
+        }
+
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        if (request.RequiredDate < today)
+        {
+            return BadRequest("Required date cannot be before today.");
+        }
+
+        if (request.Project == null || request.Project.Status != ProjectStatus.Active)
+        {
+            return BadRequest("Associated project must exist and be active.");
+        }
+
+        if (request.Items.Any(i => i.Material == null || !i.Material.IsActive))
+        {
+            return BadRequest("All materials in the request must exist and be active.");
+        }
+
+        if (request.Items.Any(i => i.RequestedQuantity <= 0))
+        {
+            return BadRequest("Quantity must be greater than zero.");
+        }
+
+        if (request.Items.Select(i => i.MaterialId).Distinct().Count() != request.Items.Count)
+        {
+            return BadRequest("Duplicate material items are not allowed in the same request.");
         }
 
         request.Status = MaterialRequestStatus.PendingApproval;
@@ -218,7 +268,11 @@ public class MaterialRequestsController : ControllerBase
     {
         if (!User.TryGetUserId(out var actorId)) return Unauthorized();
 
-        var request = await _dbContext.MaterialRequests.FindAsync(id);
+        var request = await _dbContext.MaterialRequests
+            .Include(r => r.Project)
+            .Include(r => r.Items)
+                .ThenInclude(i => i.Material)
+            .FirstOrDefaultAsync(r => r.Id == id);
         if (request == null) return NotFound("Material Request not found.");
 
         if (request.Status != MaterialRequestStatus.PendingApproval)
@@ -227,6 +281,16 @@ public class MaterialRequestsController : ControllerBase
 
         if (dto.Decision == ApprovalDecision.Approved)
         {
+            if (request.Project != null && request.Project.Status != ProjectStatus.Active)
+            {
+                return BadRequest("Associated project must exist and be active.");
+            }
+
+            if (request.Items != null && request.Items.Any(i => i.Material != null && !i.Material.IsActive))
+            {
+                return BadRequest("All materials in the request must exist and be active.");
+            }
+
             request.Status = MaterialRequestStatus.Approved;
         }
         else if (dto.Decision == ApprovalDecision.Rejected)

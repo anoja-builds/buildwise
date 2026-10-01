@@ -1,8 +1,10 @@
+using System.ComponentModel.DataAnnotations;
 using BuildWise.Api.Data;
 using BuildWise.Api.DTOs;
 using BuildWise.Api.Models.Entities;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 
 namespace BuildWise.Api.Services;
 
@@ -36,8 +38,10 @@ public class AuthService
             throw new ArgumentException("Password must be at least 8 characters long.");
 
         var normalizedEmail = dto.Email.Trim().ToLowerInvariant();
+        if (!new EmailAddressAttribute().IsValid(normalizedEmail))
+            throw new ArgumentException("A valid email address is required.");
 
-        var exists = await _db.Users.AnyAsync(u => u.Email == normalizedEmail);
+        var exists = await _db.Users.AnyAsync(u => u.Email.Trim().ToLower() == normalizedEmail);
         if (exists)
             throw new InvalidOperationException($"An account with email '{normalizedEmail}' already exists.");
 
@@ -57,19 +61,27 @@ public class AuthService
         user.UserRoles.Add(new UserRole { Role = role });
 
         _db.Users.Add(user);
-        await _db.SaveChangesAsync();
+        try { await _db.SaveChangesAsync(); }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
+        {
+            throw new InvalidOperationException("An account with this email already exists.");
+        }
 
         return BuildAuthResponse(user, [role.Name]);
     }
 
     public async Task<AuthResponseDto> LoginAsync(LoginRequestDto dto)
     {
+        if (string.IsNullOrWhiteSpace(dto.Email) || !new EmailAddressAttribute().IsValid(dto.Email.Trim())
+            || string.IsNullOrWhiteSpace(dto.Password))
+            throw new ArgumentException("A valid email address and password are required.");
+
         var normalizedEmail = dto.Email.Trim().ToLowerInvariant();
 
         var user = await _db.Users
             .Include(u => u.UserRoles)
             .ThenInclude(ur => ur.Role)
-            .FirstOrDefaultAsync(u => u.Email == normalizedEmail);
+            .FirstOrDefaultAsync(u => u.Email.Trim().ToLower() == normalizedEmail);
 
         if (user is null || !user.IsActive)
             throw new UnauthorizedAccessException("Invalid email or password.");

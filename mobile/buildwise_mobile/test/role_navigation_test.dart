@@ -5,101 +5,100 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:buildwise_mobile/main.dart';
 import 'package:buildwise_mobile/features/deliveries/screens/delivery_list_screen.dart';
-import 'package:buildwise_mobile/features/material_requests/screens/material_request_list_screen.dart';
+import 'package:buildwise_mobile/features/procurement/screens/procurement_home_screen.dart';
 
 const storage = MethodChannel('plugins.it_nomads.com/flutter_secure_storage');
-
 void main() {
   final cases = <String, List<String>>{
     'SiteEngineer': ['Requests', 'Deliveries'],
     'QualityInspector': ['Deliveries', 'Quality'],
-    'ProcurementOfficer': [],
-    'ProcurementManager': [],
-    'Administrator': ['Requests', 'Orders', 'Deliveries', 'Quality'],
+    'ProcurementOfficer': ['Procurement', 'Suppliers', 'Orders'],
+    'ProcurementManager': ['Procurement', 'Suppliers', 'Orders'],
+    'Administrator': ['Requests', 'Procurement', 'Suppliers', 'Orders', 'More'],
     'ProjectManager': [],
     'ReceivingOfficer': [],
     'Unknown': [],
   };
-
-  setUp(() {
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(storage, (call) async => null);
-  });
-
-  tearDown(() {
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(storage, null);
-  });
-
+  tearDown(
+    () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(storage, null),
+  );
   for (final entry in cases.entries) {
-    testWidgets(
-      '${entry.key} restores only permitted tabs from the API session',
-      (tester) async {
-        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-            .setMockMethodCallHandler(storage, (call) async {
-              if (call.method == 'read') {
-                return call.arguments['key'] == 'buildwise.jwt'
-                    ? 'test-token'
-                    : jsonEncode({
-                        'roles': [entry.key],
-                      });
-              }
-              return null;
-            });
-        await tester.pumpWidget(const BuildWiseApp());
-        await tester.pumpAndSettle();
-        final labels = tester
+    testWidgets('${entry.key} restores only authorized destinations', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(360, 844);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(
+            storage,
+            (call) async => call.method == 'read'
+                ? call.arguments['key'] == 'buildwise.jwt'
+                      ? 'test-token'
+                      : jsonEncode({
+                          'roles': [entry.key],
+                        })
+                : null,
+          );
+      await tester.pumpWidget(const BuildWiseApp());
+      await tester.pumpAndSettle();
+      expect(
+        tester
             .widgetList<NavigationDestination>(
               find.byType(NavigationDestination),
             )
-            .map((destination) => destination.label)
-            .toList();
-        expect(labels, entry.value);
-        if (entry.value.isEmpty) {
-          if (['ProcurementOfficer', 'ProcurementManager'].contains(entry.key)) {
-            expect(
-              find.text(
-                'Procurement management workflows are available in the BuildWise Web Portal.',
-              ),
-              findsOneWidget,
-            );
-          } else {
-            expect(
-              find.text('Your account has no assigned workspace.'),
-              findsOneWidget,
-            );
-          }
-        } else {
-          if (entry.value.first == 'Requests') {
-            final requests = tester.widget<MaterialRequestListScreen>(
-              find.byType(MaterialRequestListScreen),
-            );
-            expect(
-              requests.canCreate,
-              ['SiteEngineer', 'Administrator'].contains(entry.key),
-            );
-            expect(requests.canViewProcurementStatus, requests.canCreate);
-          }
-          await tester.tap(find.text('Deliveries'));
-          await tester.pumpAndSettle();
-          final deliveries = tester.widget<DeliveryListScreen>(
-            find.byType(DeliveryListScreen),
-          );
-          expect(
-            deliveries.canReceive,
-            ['SiteEngineer', 'Administrator'].contains(entry.key),
-          );
-        }
-        // Unselected modules are not mounted and do not issue background API calls.
-        expect(find.byType(MaterialRequestListScreen), findsNothing);
-        await tester.tap(find.byTooltip('Sign out'));
+            .map((d) => d.label)
+            .toList(),
+        entry.value,
+      );
+      if (entry.key.startsWith('Procurement')) {
+        expect(
+          tester
+              .widget<ProcurementHomeScreen>(find.byType(ProcurementHomeScreen))
+              .manager,
+          entry.key == 'ProcurementManager',
+        );
+        expect(find.text('Review in Web Portal'), findsNothing);
+      }
+      if (entry.key == 'Administrator') {
+        await tester.tap(find.text('More'));
         await tester.pumpAndSettle();
-        expect(find.text('Sign in'), findsWidgets);
-      },
-    );
+        expect(find.text('Quality'), findsOneWidget);
+        await tester.tap(find.text('Deliveries'));
+        await tester.pumpAndSettle();
+      } else if (entry.value.contains('Deliveries')) {
+        await tester.tap(
+          find.descendant(
+            of: find.byType(NavigationBar),
+            matching: find.text('Deliveries'),
+          ),
+        );
+        await tester.pumpAndSettle();
+      }
+      if (entry.value.contains('Deliveries') || entry.key == 'Administrator') {
+        expect(
+          tester
+              .widget<DeliveryListScreen>(find.byType(DeliveryListScreen))
+              .canReceive,
+          ['SiteEngineer', 'Administrator'].contains(entry.key),
+        );
+      }
+      if (entry.value.isEmpty) {
+        expect(
+          find.text('Your account has no assigned workspace.'),
+          findsOneWidget,
+        );
+      }
+      await tester.tap(find.byTooltip('Sign out'));
+      await tester.pumpAndSettle();
+      expect(find.text('Sign in'), findsOneWidget);
+    });
   }
-
-  testWidgets('multiple roles union permitted modules', (tester) async {
+  testWidgets('multiple roles union authorized modules', (tester) async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(storage, (_) async => null);
     await tester.pumpWidget(
       MaterialApp(
         home: MainAppShell(

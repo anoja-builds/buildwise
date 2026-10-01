@@ -22,6 +22,10 @@ void main() {
   testWidgets('live Flutter material request and procurement status: $stage', (
     tester,
   ) async {
+    final demoPassword = Platform.environment['BUILDWISE_DEMO_PASSWORD'];
+    if (demoPassword == null || demoPassword.trim().isEmpty) {
+      throw StateError('Set BUILDWISE_DEMO_PASSWORD for live verification.');
+    }
     final values = <String, String>{};
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(
@@ -45,7 +49,7 @@ void main() {
         '/auth/login',
         body: {
           'email': 'site.engineer@buildwise.demo',
-          'password': 'Passw0rd!',
+          'password': demoPassword,
         },
       );
       expect(response.statusCode, 200);

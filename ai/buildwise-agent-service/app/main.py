@@ -5,6 +5,9 @@ from fastapi.responses import JSONResponse
 from .config import Settings, get_settings
 from .models import EvidencePackage, AgentResult
 from .quality_agent import analyse
+from .delivery_agent import DeliveryEvidence, DeliveryAgentResult, analyse_delivery
+from .planning_agent import PlanningEvidence, PlanningAgentResult, analyse_planning
+from .procurement_agent import ProcurementEvidence, ProcurementAgentResult, analyse_procurement
 
 app = FastAPI(title='BuildWise Internal Quality Agent', docs_url=None, redoc_url=None, openapi_url=None)
 
@@ -32,3 +35,19 @@ def health():
 @app.post('/quality-risk/analyse', response_model=AgentResult)
 async def analyse_quality(evidence: EvidencePackage, settings: Settings = Depends(authorize)):
     return await analyse(evidence, settings)
+
+
+@app.post('/delivery-discrepancy/analyse', response_model=DeliveryAgentResult)
+async def analyse_discrepancy(evidence: DeliveryEvidence, settings: Settings = Depends(authorize)):
+    return await analyse_delivery(evidence, settings)
+
+
+@app.post('/planning/analyse', response_model=PlanningAgentResult)
+async def analyse_plan(evidence: PlanningEvidence, settings: Settings = Depends(authorize)):
+    return await analyse_planning(evidence, settings)
+
+
+
+@app.post('/procurement/analyse', response_model=ProcurementAgentResult)
+async def analyse_procurement_advisory(evidence: ProcurementEvidence, settings: Settings = Depends(authorize)):
+    return await analyse_procurement(evidence, settings)

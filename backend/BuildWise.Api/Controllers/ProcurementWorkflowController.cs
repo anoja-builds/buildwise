@@ -40,8 +40,7 @@ public class ProcurementWorkflowController : ControllerBase
 
         try
         {
-            var userId = actorId;
-            var response = await _workflowService.StartWorkflowAsync(requestId, userId, request?.Objective);
+            var response = await _workflowService.StartWorkflowAsync(requestId, actorId, request?.Objective);
             return Ok(response);
         }
         catch (ArgumentException ex)

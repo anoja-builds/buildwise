@@ -182,7 +182,7 @@ public class ProcurementValidationService
         var hasApprovedDecision = workflow.Approvals
             .Any(a => a.Decision == AgentApprovalStatus.Approved);
 
-        if (!hasApprovedDecision)
+        if (!hasApprovedDecision || workflow.ApprovalStatus != AgentApprovalStatus.Approved)
         {
             result.Errors.Add($"Purchase order creation blocked: workflow #{workflowId} does not have an Approved manager decision.");
         }

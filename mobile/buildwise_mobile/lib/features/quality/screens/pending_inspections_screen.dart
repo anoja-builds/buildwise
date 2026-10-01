@@ -4,6 +4,8 @@ import '../../../core/widgets/widgets.dart' as shared;
 import '../models/pending_inspection_delivery.dart';
 import '../services/quality_api_service.dart';
 import 'start_inspection_screen.dart';
+import 'inspection_record_screen.dart';
+import '../../../common/screens/operational_home_screen.dart';
 
 class PendingInspectionsScreen extends StatefulWidget {
   const PendingInspectionsScreen({super.key, this.service});
@@ -21,6 +23,7 @@ class _PendingInspectionsScreenState extends State<PendingInspectionsScreen> {
   bool _loading = true;
   String? _error;
   List<PendingInspectionDelivery> _deliveries = [];
+  String _tab = 'Pending';
 
   @override
   void initState() {
@@ -77,9 +80,21 @@ class _PendingInspectionsScreenState extends State<PendingInspectionsScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(
+    appBar: shared.WorkspaceAppBar(
       title: const Text('Pending Inspections'),
       actions: [
+        IconButton(
+          tooltip: 'Quality overview',
+          onPressed: _service == null
+              ? null
+              : () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => QualityHomeScreen(service: _service!),
+                  ),
+                ),
+          icon: const Icon(Icons.home_outlined),
+        ),
         IconButton(
           tooltip: 'Refresh deliveries',
           onPressed: _loading ? null : _load,
@@ -87,7 +102,87 @@ class _PendingInspectionsScreenState extends State<PendingInspectionsScreen> {
         ),
       ],
     ),
-    body: SafeArea(child: _body()),
+    body: SafeArea(
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: shared.FilterChips(
+              values: const ['Pending', 'InProgress', 'Completed'],
+              selected: _tab,
+              onChanged: (value) => setState(() => _tab = value),
+            ),
+          ),
+          Expanded(
+            child: _tab == 'Pending'
+                ? _body()
+                : shared.ApiView<List<Map<String, dynamic>>>(
+                    key: ValueKey(_tab),
+                    load: () => _service!.getHistory(),
+                    builder: (context, records, refresh) {
+                      final visible = records
+                          .where(
+                            (r) => _tab == 'Completed'
+                                ? r['status'] == 'Completed' || r['status'] == 2
+                                : r['status'] == 'UnderInspection' ||
+                                      r['status'] == 1,
+                          )
+                          .toList();
+                      return ListView(
+                        padding: const EdgeInsets.all(16),
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        children: [
+                          if (visible.isEmpty)
+                            const shared.EmptyStateWidget(
+                              title: 'No inspections',
+                              message: 'Saved inspections will appear here.',
+                            ),
+                          for (final r in visible)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 12),
+                              child: shared.RecordCard(
+                                title: shared.reference('INS', r['id'] as int),
+                                status: _tab,
+                                action: 'View Inspection',
+                                onTap: () async {
+                                  await Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => InspectionRecordScreen(
+                                        inspectionId: r['id'] as int,
+                                        service: _service!,
+                                      ),
+                                    ),
+                                  );
+                                  refresh();
+                                },
+                                children: [
+                                  shared.FieldRow(
+                                    'Delivery',
+                                    '${r['deliveryReference'] ?? r['deliveryId']}',
+                                  ),
+                                  shared.FieldRow(
+                                    'Date',
+                                    shared.displayDate(r['inspectionDate']),
+                                  ),
+                                  if (r['overallDecision'] != null)
+                                    shared.FieldRow(
+                                      'Decision',
+                                      shared.statusLabel(
+                                        '${r['overallDecision']}',
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                        ],
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+    ),
   );
 
   Widget _body() {

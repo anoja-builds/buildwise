@@ -39,7 +39,7 @@ public class DeliveryDiscrepancyAgentTests
         Assert.Equal(235, result.TotalUndamagedReceived); // 240 - 5 = 235
         Assert.Equal(delivery.Id, result.DeliveryId);
         Assert.True(result.WorkflowId > 0);
-        Assert.Equal("Deterministic", result.ExecutionMode);
+        Assert.Equal("DeterministicFallback", result.ExecutionMode);
 
         // Verify items
         var item = Assert.Single(result.Items);
@@ -238,7 +238,8 @@ public class DeliveryDiscrepancyAgentTests
         Assert.Equal(150, item.PreviouslyReceivedQuantity); // From delivery1
         Assert.Equal(90, item.NewlyReceivedQuantity);       // From delivery2
         Assert.Equal(240, item.TotalReceivedToDate);        // 150 + 90
-        Assert.Equal(10, item.ShortageQuantity);            // 250 - 240
+        Assert.Equal(13, item.ShortageQuantity);            // 250 - (150 - 3) - 90
+        Assert.Equal(18, item.OutstandingAfterReceipt);    // Includes 5 current damaged units
         Assert.Equal(85, item.UndamagedReceivedQuantity);   // 90 - 5
     }
 
@@ -327,6 +328,182 @@ public class DeliveryDiscrepancyAgentTests
     }
 
     // ──────── Helpers ────────
+
+    [Theory]
+    [InlineData(13, 0)]
+    [InlineData(15, 2)]
+    [InlineData(20, 7)]
+    public async Task ReplacementReceipt_UsesSameOutstandingAsReceiving(decimal priorReceived, decimal priorDamaged)
+    {
+        await using var db = TestDbFactory.CreateInMemory();
+        var (delivery, item, user) = await SeedCementScenario(db, 20, 0, 0);
+        delivery.Status = DeliveryStatus.Scheduled;
+        delivery.ReceivedAt = null;
+        db.Deliveries.Add(new Delivery
+        {
+            PurchaseOrderId = item.PurchaseOrderId, Status = DeliveryStatus.DiscrepancyReported,
+            ReceivedAt = DateTime.UtcNow.AddHours(-1),
+            Items = [new DeliveryItem { PurchaseOrderItemId = item.Id, ReceivedQuantity = priorReceived, DamagedQuantity = priorDamaged }]
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, user.Id);
+        Assert.IsType<OkObjectResult>(await controller.ReceiveDelivery(delivery.Id, new ReceiveDeliveryDto
+        {
+            Items = [new ReceiveDeliveryItemDto { PurchaseOrderItemId = item.Id, ReceivedQuantity = 7, DamagedQuantity = 2 }]
+        }));
+        var result = await new DeliveryDiscrepancyAgentService(db).AnalyzeDiscrepanciesAsync(delivery.Id, user.Id);
+        var row = Assert.Single(result.Items);
+        Assert.DoesNotContain("OverDelivery", row.DiscrepancyFlags);
+        Assert.Contains("Damage", row.DiscrepancyFlags);
+        Assert.Equal(13, row.PreviouslyFulfilledQuantity);
+        Assert.Equal(7, row.OutstandingBeforeReceipt);
+        Assert.Equal(18, row.TotalFulfilledQuantity);
+        Assert.Equal(2, row.OutstandingAfterReceipt);
+        Assert.Equal(0, row.ShortageQuantity);
+        Assert.Equal(5, row.UndamagedReceivedQuantity);
+        Assert.Equal(PurchaseOrderStatus.InProgress, item.PurchaseOrder!.Status);
+        Assert.Equal(DeliveryStatus.DiscrepancyReported, delivery.Status);
+    }
+
+    [Fact]
+    public async Task LaterReceipts_AreNotCountedAsPrior_TrueOverdeliveryStillFlagged()
+    {
+        await using var db = TestDbFactory.CreateInMemory();
+        var (delivery, item, user) = await SeedCementScenario(db, 20, 21, 0);
+        db.Deliveries.Add(new Delivery { PurchaseOrderId = item.PurchaseOrderId,
+            Status = DeliveryStatus.Received, ReceivedAt = delivery.ReceivedAt!.Value.AddHours(1),
+            Items = [new DeliveryItem { PurchaseOrderItemId = item.Id, ReceivedQuantity = 10 }] });
+        await db.SaveChangesAsync();
+        var result = await new DeliveryDiscrepancyAgentService(db).AnalyzeDiscrepanciesAsync(delivery.Id, user.Id);
+        var row = Assert.Single(result.Items);
+        Assert.Equal(0, row.PreviouslyReceivedQuantity);
+        Assert.Contains("OverDelivery", row.DiscrepancyFlags);
+    }
+
+    [Fact]
+    public async Task ProviderSuccess_ValidatedPersistedAndMapped_WithoutBusinessWrites()
+    {
+        await using var db = TestDbFactory.CreateInMemory();
+        var (delivery, item, user) = await SeedCementScenario(db, 20, 7, 2);
+        var client = new StubDeliveryAgent(ValidResponse);
+        var result = await new DeliveryDiscrepancyAgentService(db, client).AnalyzeDiscrepanciesAsync(delivery.Id, user.Id);
+        Assert.Equal("AgenticAI", result.ExecutionMode);
+        Assert.NotNull(result.Advisory);
+        Assert.Equal("High", result.Advisory.RiskLevel);
+        Assert.Contains("Contact supplier", Assert.Single(result.Recommendations).Advisory);
+        Assert.Equal(7, result.Items.Single().NewlyReceivedQuantity);
+        Assert.Equal(7, delivery.Items.Single().ReceivedQuantity);
+        Assert.Equal(20, item.OrderedQuantity);
+        Assert.Equal(DeliveryStatus.DiscrepancyReported, delivery.Status);
+        Assert.Equal(PurchaseOrderStatus.InProgress, item.PurchaseOrder!.Status);
+        var workflow = await db.AgentWorkflows.Include(w => w.Steps).SingleAsync();
+        Assert.Equal(AgentApprovalStatus.Pending, workflow.ApprovalStatus);
+        var saved = workflow.Steps.Single(s => s.StepOrder == 3).StructuredResult!;
+        Assert.Contains("AgenticAI", saved);
+        Assert.Contains("get_current_delivery_evidence", saved);
+        Assert.Contains("test-model", saved);
+        Assert.Contains("advisoryValidated", workflow.Steps.Single(s => s.StepOrder == 4).ValidationResult!);
+        var history = await new DeliveryDiscrepancyAgentService(db).GetWorkflowHistoryAsync(delivery.Id);
+        Assert.Equal("AgenticAI", Assert.Single(history).ExecutionMode);
+        Assert.Equal(workflow.CreatedAt, history[0].CreatedAt);
+    }
+
+    [Theory]
+    [InlineData("unavailable")]
+    [InlineData("timeout")]
+    [InlineData("invalid-reference")]
+    [InlineData("invalid-risk")]
+    [InlineData("missing-tools")]
+    [InlineData("missing-field")]
+    [InlineData("extra-write-field")]
+    [InlineData("missing-key")]
+    public async Task ProviderFailureOrInvalidOutput_FallsBackWithoutPersistingUntrustedOutput(string failure)
+    {
+        await using var db = TestDbFactory.CreateInMemory();
+        var (delivery, _, user) = await SeedCementScenario(db, 20, 7, 2);
+        var client = new StubDeliveryAgent(e =>
+        {
+            var valid = ValidResponse(e);
+            return failure switch
+            {
+                "unavailable" => throw new HttpRequestException("SECRET provider payload"),
+                "timeout" => throw new TaskCanceledException("SECRET provider payload"),
+                "invalid-reference" => valid with { Recommendation = valid.Recommendation! with { EvidenceRefs = ["SECRET"] } },
+                "invalid-risk" => valid with { Recommendation = valid.Recommendation! with { RiskLevel = "SECRET" } },
+                "missing-tools" => valid with { Trace = [] },
+                "missing-field" => System.Text.Json.JsonSerializer.Deserialize<DeliveryAgentResponse>("{}", DeliveryDiscrepancyAgentClient.JsonOptions)!,
+                "extra-write-field" => System.Text.Json.JsonSerializer.Deserialize<DeliveryAgentResponse>(
+                    System.Text.Json.JsonSerializer.Serialize(valid, DeliveryDiscrepancyAgentClient.JsonOptions).Replace(
+                        "\"riskLevel\":", "\"deliveryStatus\":\"SECRET\",\"riskLevel\":"), DeliveryDiscrepancyAgentClient.JsonOptions)!,
+                _ => new(false, null, [], 0, "test-model", "missing_api_key")
+            };
+        });
+        var result = await new DeliveryDiscrepancyAgentService(db, client).AnalyzeDiscrepanciesAsync(delivery.Id, user.Id);
+        Assert.Equal("DeterministicFallback", result.ExecutionMode);
+        Assert.Null(result.Advisory);
+        Assert.NotNull(result.Execution!.FallbackReason);
+        Assert.Contains(result.Recommendations, r => r.Category == "Damage");
+        var workflow = await db.AgentWorkflows.Include(w => w.Steps).SingleAsync();
+        Assert.Equal(WorkflowStatus.Completed, workflow.Status);
+        Assert.DoesNotContain("SECRET", string.Join("", workflow.Steps.Select(s => s.StructuredResult)));
+    }
+
+    [Fact]
+    public async Task InvalidArithmetic_FailsBeforeProviderAndMarksStepFailed()
+    {
+        await using var db = TestDbFactory.CreateInMemory();
+        var (delivery, _, user) = await SeedCementScenario(db, 20, 1, 2);
+        var client = new StubDeliveryAgent(_ => throw new Exception("Must not execute"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            new DeliveryDiscrepancyAgentService(db, client).AnalyzeDiscrepanciesAsync(delivery.Id, user.Id));
+        Assert.Null(client.Evidence);
+        var workflow = await db.AgentWorkflows.Include(w => w.Steps).SingleAsync();
+        Assert.Equal(WorkflowStatus.Failed, workflow.Status);
+        Assert.Equal(WorkflowStepStatus.Failed, workflow.Steps.Single(s => s.StepOrder == 2).Status);
+    }
+
+    [Fact]
+    public async Task EvidenceHistory_IsSupplierScopedBoundedAndExcludesFutureAndCurrent()
+    {
+        await using var db = TestDbFactory.CreateInMemory();
+        var (delivery, item, user) = await SeedCementScenario(db, 20, 7, 2);
+        item.PurchaseOrder!.Supplier = new Supplier { Name = "Current supplier" };
+        for (var i = 0; i < 22; i++)
+            db.Deliveries.Add(new Delivery { PurchaseOrder = item.PurchaseOrder,
+                ReceivedAt = delivery.ReceivedAt!.Value.AddDays(-i-1), Status = DeliveryStatus.DiscrepancyReported });
+        db.Deliveries.Add(new Delivery { PurchaseOrder = item.PurchaseOrder,
+            ReceivedAt = delivery.ReceivedAt!.Value.AddDays(1), Status = DeliveryStatus.Received });
+        db.Deliveries.Add(new Delivery { PurchaseOrder = new PurchaseOrder { Supplier = new Supplier { Name = "Other" } },
+            ReceivedAt = delivery.ReceivedAt!.Value.AddDays(-1), Status = DeliveryStatus.Received });
+        await db.SaveChangesAsync();
+        var client = new StubDeliveryAgent(ValidResponse);
+        await new DeliveryDiscrepancyAgentService(db, client).AnalyzeDiscrepanciesAsync(delivery.Id, user.Id);
+        var evidence = client.Evidence!;
+        Assert.Equal(20, evidence.History.Count);
+        Assert.Equal(20, evidence.PreviousDiscrepancies.Count);
+        Assert.True(evidence.HistoryTruncated);
+        Assert.True(evidence.DiscrepanciesTruncated);
+        Assert.All(evidence.History, h => Assert.True(h.ReceivedAt < delivery.ReceivedAt && h.DeliveryId != delivery.Id));
+        Assert.Equal(item.PurchaseOrder.SupplierId, evidence.SupplierId);
+    }
+
+    private static DeliveryAgentResponse ValidResponse(DeliveryAgentEvidence e) => new(true,
+        new("High", "Damage warrants supplier review.", ["Handling damage is possible, not confirmed."],
+            ["Contact supplier and document damage."], true, [$"delivery:{e.DeliveryId}"]),
+        [new(1, "get_current_delivery_evidence", [], true),
+         new(2, "get_supplier_delivery_history", new() { ["limit"] = 10 }, true),
+         new(3, "get_previous_discrepancy_summary", [], true), new(4, "final_output", [], true)],
+        4, "test-model", null);
+
+    private sealed class StubDeliveryAgent(Func<DeliveryAgentEvidence, DeliveryAgentResponse> response) : IDeliveryDiscrepancyAgentClient
+    {
+        public DeliveryAgentEvidence? Evidence { get; private set; }
+        public Task<DeliveryAgentResponse> AnalyseAsync(DeliveryAgentEvidence evidence, CancellationToken ct = default)
+        {
+            Evidence = evidence;
+            return Task.FromResult(response(evidence));
+        }
+    }
 
     private static async Task<(Delivery delivery, PurchaseOrderItem poItem, User user)> SeedCementScenario(
         ApplicationDbContext db, decimal ordered, decimal received, decimal damaged)

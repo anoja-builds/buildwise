@@ -43,7 +43,11 @@ public class InspectionsController : ControllerBase
 
     [HttpPost("{id:int}/complete")]
     public Task<IActionResult> CompleteInspection(int id, [FromBody] CompleteInspectionDto dto) => ExecuteAsync(async () =>
-        Ok(await _service.CompleteInspectionAsync(id, dto)));
+    {
+        if (!int.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId) || userId <= 0)
+            return Unauthorized();
+        return Ok(await _service.CompleteInspectionAsync(id, dto));
+    });
 
     private async Task<IActionResult> ExecuteAsync(Func<Task<IActionResult>> operation)
     {

@@ -1,0 +1,19 @@
+{
+  "requestId": 1,
+  "requiredDate": "2026-10-15",
+  "reason": "Foundation materials",
+  "collectedAt": "2026-10-01T10:00:00Z",
+  "selectedQuotationId": 11,
+  "requirements": [{"evidenceRef":"request-item:1","itemId":1,"materialName":"Cement","unit":"bags","quantity":250,"notes":null}],
+  "quotations": [
+    {"evidenceRef":"quotation:11","quotationId":11,"supplierId":1,"totalAmount":525000,"calculatedTotal":525000,"eligible":true,"rank":1,"validationPassed":true,"validationErrors":[],"offeredQuantities":{"1":250}},
+    {"evidenceRef":"quotation:12","quotationId":12,"supplierId":2,"totalAmount":510000,"calculatedTotal":510000,"eligible":false,"rank":null,"validationPassed":false,"validationErrors":["Supplier is suspended."],"offeredQuantities":{"1":250}},
+    {"evidenceRef":"quotation:13","quotationId":13,"supplierId":3,"totalAmount":410000,"calculatedTotal":410000,"eligible":false,"rank":null,"validationPassed":false,"validationErrors":["Quantity coverage is incomplete."],"offeredQuantities":{"1":200}}
+  ],
+  "suppliers": [
+    {"evidenceRef":"supplier:1","supplierId":1,"name":"Supplier A","status":"Active","previousOrderCount":0,"completedOrderCount":0,"cancelledOrderCount":0},
+    {"evidenceRef":"supplier:2","supplierId":2,"name":"Supplier B","status":"Suspended","previousOrderCount":0,"completedOrderCount":0,"cancelledOrderCount":0},
+    {"evidenceRef":"supplier:3","supplierId":3,"name":"Supplier C","status":"Active","previousOrderCount":0,"completedOrderCount":0,"cancelledOrderCount":0}
+  ],
+  "evidenceRefs": ["request:1","request-item:1","quotation:11","quotation:12","quotation:13","supplier:1","supplier:2","supplier:3"]
+}

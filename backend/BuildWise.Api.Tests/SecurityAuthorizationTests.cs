@@ -22,7 +22,7 @@ namespace BuildWise.Api.Tests;
 
 // Real JWT bearer validation and MVC authorization, with an isolated in-memory
 // database. Does not execute Program.cs, database migrations, or the AI service.
-public class SecurityAuthorizationTests : IAsyncLifetime
+public partial class SecurityAuthorizationTests : IAsyncLifetime
 {
     private IHost _host = null!;
     private HttpClient _client = null!;
@@ -220,6 +220,8 @@ public class SecurityAuthorizationTests : IAsyncLifetime
         Assert.Equal(500, po.TotalAmount);
         Assert.Equal(1, Assert.Single(po.Items).MaterialId);
         Assert.Equal(po.Id, (await db.AgentWorkflows.SingleAsync()).PurchaseOrderId);
+        using var body = System.Text.Json.JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(po.Id, body.RootElement.GetProperty("purchaseOrderId").GetInt32());
         using var repeat = await _client.PostAsJsonAsync("/api/procurement-workflow/1/decision", new { decision = "Approved" });
         Assert.Equal(HttpStatusCode.BadRequest, repeat.StatusCode);
         Assert.Equal(1, await db.AgentApprovals.CountAsync());

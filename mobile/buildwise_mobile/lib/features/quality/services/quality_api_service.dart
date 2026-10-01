@@ -4,15 +4,12 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../../../core/api/api_client.dart';
+import '../../../core/api/api_exception.dart';
 import '../models/pending_inspection_delivery.dart';
 import '../models/inspection_record.dart';
 
-class QualityApiException implements Exception {
-  const QualityApiException(this.message, {this.statusCode});
-  final String message;
-  final int? statusCode;
-  @override
-  String toString() => message;
+class QualityApiException extends ApiException {
+  const QualityApiException(super.message, {super.statusCode});
 }
 
 class QualityApiService {
@@ -21,6 +18,22 @@ class QualityApiService {
       _ownsClient = apiClient == null;
   final ApiClient _apiClient;
   final bool _ownsClient;
+
+  Future<List<Map<String, dynamic>>> getNonConformances() =>
+      _request(() => _apiClient.get('/non-conformances'), 200, (json) {
+        if (json is! List) throw const FormatException();
+        return json
+            .map((item) => Map<String, dynamic>.from(item as Map))
+            .toList();
+      });
+
+  Future<List<Map<String, dynamic>>> getHistory() =>
+      _request(() => _apiClient.get('/inspections'), 200, (json) {
+        if (json is! List) throw const FormatException();
+        return json
+            .map((item) => Map<String, dynamic>.from(item as Map))
+            .toList();
+      });
 
   Future<List<PendingInspectionDelivery>> getPendingDeliveries() => _request(
     () => _apiClient.get('/inspections/pending-deliveries'),

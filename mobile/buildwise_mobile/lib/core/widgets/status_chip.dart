@@ -22,17 +22,20 @@ class StatusChip extends StatelessWidget {
       StatusTone.info => (const Color(0xFF1D4ED8), const Color(0xFFDBEAFE)),
       StatusTone.neutral => (AppColors.textMuted, const Color(0xFFEEF2F6)),
     };
-    return Chip(
-      label: Text(label),
-      labelStyle: TextStyle(
-        color: colors.$1,
-        fontSize: 12,
-        fontWeight: FontWeight.w700,
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: colors.$2,
+        borderRadius: BorderRadius.circular(4),
       ),
-      backgroundColor: colors.$2,
-      side: BorderSide.none,
-      visualDensity: VisualDensity.compact,
-      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: colors.$1,
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
     );
   }
 }

@@ -17,10 +17,12 @@ namespace BuildWise.Api.Services;
 public class DeliveryDiscrepancyAgentService
 {
     private readonly ApplicationDbContext _dbContext;
+    private readonly IDeliveryDiscrepancyAgentClient? _agentClient;
 
-    public DeliveryDiscrepancyAgentService(ApplicationDbContext dbContext)
+    public DeliveryDiscrepancyAgentService(ApplicationDbContext dbContext, IDeliveryDiscrepancyAgentClient? agentClient = null)
     {
         _dbContext = dbContext;
+        _agentClient = agentClient;
     }
 
     /// <summary>
@@ -44,31 +46,72 @@ public class DeliveryDiscrepancyAgentService
         _dbContext.AgentWorkflows.Add(workflow);
         await _dbContext.SaveChangesAsync();
 
+        AgentWorkflowStep? currentStep = null;
         try
         {
             // Step 1: Data Retrieval (Controlled read-only tool)
-            var step1 = await CreateStep(workflow.Id, "Data Retrieval",
+            var step1 = currentStep = await CreateStep(workflow.Id, "Data Retrieval",
                 "Retrieve delivery, PO items, prior receipts, and damage records", 1);
             var deliveryData = await RetrieveDeliveryDataTool(deliveryId);
             await CompleteStep(step1, deliveryData);
 
-            // Step 2: Discrepancy Analysis (Core reasoning)
-            var step2 = await CreateStep(workflow.Id, "Discrepancy Analysis",
-                "Compare ordered vs received vs damaged quantities and identify discrepancies", 2);
+            // All arithmetic is authoritative and validated before evidence crosses the service boundary.
+            var step2 = currentStep = await CreateStep(workflow.Id, "Discrepancy Analysis",
+                "Validate receiving arithmetic using shared fulfilment rules", 2);
             var analysis = PerformDiscrepancyAnalysis(deliveryData);
+            var validation = ValidateAnalysis(analysis);
+            if (!validation.IsValid) throw new InvalidOperationException("Invalid delivery quantity evidence.");
             await CompleteStep(step2, analysis);
 
-            // Step 3: Advisory Recommendations (Read-only — never modifies data)
-            var step3 = await CreateStep(workflow.Id, "Advisory Recommendations",
-                "Generate structured recommendations based on identified discrepancies", 3);
-            var recommendations = GenerateRecommendations(analysis);
-            await CompleteStep(step3, recommendations);
+            var step3 = currentStep = await CreateStep(workflow.Id, "Advisory Recommendations",
+                "Run bounded delivery-discrepancy agent; use labelled fallback on failure", 3);
+            var evidence = await CollectAgentEvidence(deliveryData, analysis);
+            // Persist only bounded authoritative evidence, never raw model messages.
+            step3.StructuredResult = JsonSerializer.Serialize(new { evidence });
+            await _dbContext.SaveChangesAsync();
+            DeliveryAgentAdvisory? advisory = null;
+            var execution = new DeliveryAgentExecution("DeterministicFallback", null, 0, [], "not_configured");
+            if (_agentClient != null)
+            {
+                try
+                {
+                    var response = await _agentClient.AnalyseAsync(evidence);
+                    DeliveryAgentValidator.Validate(response, evidence);
+                    advisory = response.Success ? response.Recommendation : null;
+                    execution = new(response.Success ? "AgenticAI" : "DeterministicFallback",
+                        response.ModelIdentifier, response.IterationCount, response.Trace, response.ErrorCode);
+                }
+                catch (Exception ex)
+                {
+                    // Provider exceptions may contain credentials or untrusted output. Store a fixed code only.
+                    execution = new("DeterministicFallback", null, 0, [], ex switch
+                    {
+                        OperationCanceledException => "timeout",
+                        JsonException => "invalid_output",
+                        InvalidOperationException => "not_configured",
+                        _ => "service_unavailable"
+                    });
+                }
+            }
+            var recommendations = advisory == null ? GenerateRecommendations(analysis)
+                : new List<DiscrepancyRecommendation>
+                {
+                    new()
+                    {
+                        Category = "DeliveryRisk", MaterialName = "Delivery", Severity = advisory.RiskLevel,
+                        Description = advisory.Summary,
+                        Advisory = advisory.Summary + (advisory.LikelyCauses.Count == 0 ? "" :
+                            " Possible causes (unconfirmed): " + string.Join("; ", advisory.LikelyCauses))
+                            + " Recommended follow-up: " + string.Join("; ", advisory.RecommendedActions),
+                        IsActionRequired = advisory.SupplierFollowUpRequired
+                    }
+                };
+            await CompleteStep(step3, new { evidence, execution, advisory, recommendations });
 
-            // Step 4: Output Validation
-            var step4 = await CreateStep(workflow.Id, "Result Validation",
-                "Validate analysis completeness and internal consistency", 4);
-            var validation = ValidateAnalysis(analysis, recommendations);
-            await CompleteStep(step4, validation, isValidation: true);
+            var step4 = currentStep = await CreateStep(workflow.Id, "Result Validation",
+                "Record arithmetic and advisory validation outcome", 4);
+            await CompleteStep(step4, new { validation.IsValid, validation.Errors,
+                advisoryValidated = advisory != null, execution.Mode, execution.FallbackReason }, isValidation: true);
 
             // Build final result
             var result = new DiscrepancyAnalysisResult
@@ -86,7 +129,9 @@ public class DeliveryDiscrepancyAgentService
                 Items = analysis.Items,
                 Recommendations = recommendations,
                 Validation = validation,
-                ExecutionMode = "Deterministic"
+                ExecutionMode = execution.Mode,
+                Advisory = advisory,
+                Execution = execution
             };
 
             // Finalize workflow
@@ -94,16 +139,23 @@ public class DeliveryDiscrepancyAgentService
             workflow.FinalOutcome = result.HasDiscrepancies
                 ? $"Discrepancies found: Shortage={result.TotalShortage}, Damaged={result.TotalDamaged}"
                 : "No discrepancies — all quantities match purchase order.";
+            workflow.FinalOutcome += $" Mode: {execution.Mode}.";
             workflow.CompletedAt = DateTime.UtcNow;
             workflow.UpdatedAt = DateTime.UtcNow;
             await _dbContext.SaveChangesAsync();
 
             return result;
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             workflow.Status = WorkflowStatus.Failed;
-            workflow.FinalOutcome = $"Analysis failed: {ex.Message}";
+            workflow.FinalOutcome = "Delivery discrepancy analysis failed. No business action was executed.";
+            if (currentStep != null)
+            {
+                currentStep.Status = WorkflowStepStatus.Failed;
+                currentStep.ErrorMessage = "Delivery discrepancy step failed.";
+                currentStep.CompletedAt = currentStep.UpdatedAt = DateTime.UtcNow;
+            }
             workflow.CompletedAt = DateTime.UtcNow;
             workflow.UpdatedAt = DateTime.UtcNow;
             await _dbContext.SaveChangesAsync();
@@ -119,7 +171,7 @@ public class DeliveryDiscrepancyAgentService
         var workflows = await _dbContext.AgentWorkflows
             .Include(w => w.Steps)
             .Where(w => w.DeliveryId == deliveryId
-                && w.Objective.Contains("discrepanc", StringComparison.OrdinalIgnoreCase))
+                && w.Objective.ToLower().Contains("discrepanc"))
             .OrderByDescending(w => w.CreatedAt)
             .ToListAsync();
 
@@ -128,6 +180,8 @@ public class DeliveryDiscrepancyAgentService
             WorkflowId = w.Id,
             DeliveryId = deliveryId,
             Status = w.Status.ToString(),
+            CreatedAt = w.CreatedAt,
+            ExecutionMode = ReadExecutionMode(w),
             Objective = w.Objective,
             FinalOutcome = w.FinalOutcome,
             StartedAt = w.StartedAt,
@@ -161,6 +215,9 @@ public class DeliveryDiscrepancyAgentService
             .Include(d => d.PurchaseOrder)
                 .ThenInclude(po => po!.Items)
                     .ThenInclude(poi => poi.Material)
+            .Include(d => d.PurchaseOrder).ThenInclude(po => po!.Quotation).ThenInclude(q => q!.Supplier)
+            .Include(d => d.Items).ThenInclude(di => di.PurchaseOrderItem)
+                .ThenInclude(poi => poi!.QuotationItem).ThenInclude(qi => qi!.MaterialRequestItem).ThenInclude(ri => ri.Material)
             .Include(d => d.Items)
                 .ThenInclude(di => di.PurchaseOrderItem)
                     .ThenInclude(poi => poi!.Material)
@@ -172,10 +229,16 @@ public class DeliveryDiscrepancyAgentService
         if (delivery.ReceivedAt == null)
             throw new InvalidOperationException("Delivery has not been received yet. Record quantities first.");
 
-        // Get prior deliveries for the same PO (excluding this one)
+        if (delivery.Items.Count == 0 || delivery.Items.Select(i => i.PurchaseOrderItemId).Distinct().Count() != delivery.Items.Count
+            || delivery.Items.Any(i => i.PurchaseOrderItem == null || i.PurchaseOrderItem.PurchaseOrderId != delivery.PurchaseOrderId))
+            throw new InvalidOperationException("Invalid delivery item evidence.");
+
+        // Receipt-time analysis: later receipts must never be treated as prior receipts.
         var priorDeliveries = await _dbContext.DeliveryItems.AsNoTracking()
             .Where(i => i.DeliveryId != deliveryId
                 && i.Delivery!.PurchaseOrderId == delivery.PurchaseOrderId
+                && (i.Delivery.ReceivedAt < delivery.ReceivedAt
+                    || (i.Delivery.ReceivedAt == delivery.ReceivedAt && i.DeliveryId < deliveryId))
                 && (i.Delivery.Status == DeliveryStatus.Received
                     || i.Delivery.Status == DeliveryStatus.PartiallyReceived
                     || i.Delivery.Status == DeliveryStatus.DiscrepancyReported))
@@ -194,7 +257,8 @@ public class DeliveryDiscrepancyAgentService
         {
             DeliveryId = delivery.Id,
             PurchaseOrderId = delivery.PurchaseOrderId,
-            SupplierName = delivery.PurchaseOrder?.Supplier?.Name ?? "Unknown",
+            SupplierId = delivery.PurchaseOrder?.QuotationId != null ? delivery.PurchaseOrder.Quotation?.SupplierId : delivery.PurchaseOrder?.SupplierId,
+            SupplierName = (delivery.PurchaseOrder?.QuotationId != null ? delivery.PurchaseOrder.Quotation?.Supplier?.Name : delivery.PurchaseOrder?.Supplier?.Name) ?? "Unknown",
             DeliveryReference = delivery.DeliveryReference ?? $"DEL-{delivery.Id}",
             DeliveryStatus = delivery.Status.ToString(),
             ReceivedAt = delivery.ReceivedAt,
@@ -202,8 +266,8 @@ public class DeliveryDiscrepancyAgentService
             Items = delivery.Items.Select(di => new DeliveryItemSnapshot
             {
                 PurchaseOrderItemId = di.PurchaseOrderItemId,
-                MaterialName = di.PurchaseOrderItem?.Material?.Name ?? "Unknown",
-                MaterialUnit = di.PurchaseOrderItem?.Material?.Unit ?? "units",
+                MaterialName = (di.PurchaseOrderItem?.QuotationItemId != null ? di.PurchaseOrderItem.QuotationItem?.MaterialRequestItem?.Material?.Name : di.PurchaseOrderItem?.Material?.Name) ?? "Unknown",
+                MaterialUnit = (di.PurchaseOrderItem?.QuotationItemId != null ? di.PurchaseOrderItem.QuotationItem?.MaterialRequestItem?.Material?.Unit : di.PurchaseOrderItem?.Material?.Unit) ?? "units",
                 OrderedQuantity = di.PurchaseOrderItem?.OrderedQuantity ?? 0,
                 NewlyReceivedQuantity = di.ReceivedQuantity,
                 NewlyDamagedQuantity = di.DamagedQuantity,
@@ -225,19 +289,26 @@ public class DeliveryDiscrepancyAgentService
         {
             var totalReceivedAllDeliveries = item.PriorReceivedQuantity + item.NewlyReceivedQuantity;
             var totalDamagedAllDeliveries = item.PriorDamagedQuantity + item.NewlyDamagedQuantity;
-            var shortage = item.OrderedQuantity - totalReceivedAllDeliveries;
-            var undamagedThisDelivery = item.NewlyReceivedQuantity - item.NewlyDamagedQuantity;
+            var quantities = DeliveryQuantityRules.Calculate(item.OrderedQuantity, item.PriorReceivedQuantity,
+                item.PriorDamagedQuantity, item.NewlyReceivedQuantity, item.NewlyDamagedQuantity);
+            var shortage = quantities.PhysicalShortage;
+            var undamagedThisDelivery = quantities.CurrentUndamaged;
 
             var flags = new List<string>();
             if (shortage > 0) flags.Add("Shortage");
             if (item.NewlyDamagedQuantity > 0) flags.Add("Damage");
-            if (item.NewlyReceivedQuantity > item.OrderedQuantity - item.PriorReceivedQuantity)
+            if (quantities.OverDelivery)
                 flags.Add("OverDelivery");
-            if (item.NewlyReceivedQuantity == 0 && item.OrderedQuantity > 0)
+            if (item.NewlyReceivedQuantity == 0 && quantities.OutstandingBefore > 0)
                 flags.Add("NothingReceived");
 
             return new DiscrepancyItemAnalysis
             {
+                PurchaseOrderItemId = item.PurchaseOrderItemId,
+                PreviouslyFulfilledQuantity = quantities.PriorFulfilled,
+                TotalFulfilledQuantity = quantities.TotalFulfilled,
+                OutstandingBeforeReceipt = quantities.OutstandingBefore,
+                OutstandingAfterReceipt = quantities.OutstandingAfter,
                 MaterialName = item.MaterialName,
                 MaterialUnit = item.MaterialUnit,
                 OrderedQuantity = item.OrderedQuantity,
@@ -274,7 +345,7 @@ public class DeliveryDiscrepancyAgentService
                     MaterialName = item.MaterialName,
                     Severity = item.ShortageQuantity > item.OrderedQuantity * 0.1m ? "High" : "Medium",
                     Description = $"Shortage of {item.ShortageQuantity} {item.MaterialUnit} detected " +
-                        $"(ordered {item.OrderedQuantity}, total received to date {item.TotalReceivedToDate}).",
+                        $"(outstanding before receipt {item.OutstandingBeforeReceipt}, received now {item.NewlyReceivedQuantity}).",
                     Advisory = "Notify procurement team. Consider scheduling a follow-up delivery or " +
                         "contacting the supplier for the outstanding quantity.",
                     IsActionRequired = true
@@ -331,12 +402,23 @@ public class DeliveryDiscrepancyAgentService
     /// Tool 4: Validate internal consistency of the analysis output.
     /// </summary>
     private static DiscrepancyValidation ValidateAnalysis(
-        DiscrepancyAnalysis analysis, List<DiscrepancyRecommendation> recommendations)
+        DiscrepancyAnalysis analysis)
     {
         var errors = new List<string>();
 
         foreach (var item in analysis.Items)
         {
+            var q = DeliveryQuantityRules.Calculate(item.OrderedQuantity, item.PreviouslyReceivedQuantity,
+                item.PreviouslyDamagedQuantity, item.NewlyReceivedQuantity, item.DamagedQuantity);
+            if (item.OrderedQuantity < 0 || item.NewlyReceivedQuantity < 0 || item.DamagedQuantity < 0
+                || item.PreviouslyReceivedQuantity < 0 || item.PreviouslyDamagedQuantity < 0
+                || item.PreviouslyDamagedQuantity > item.PreviouslyReceivedQuantity
+                || item.PreviouslyFulfilledQuantity != q.PriorFulfilled || item.TotalFulfilledQuantity != q.TotalFulfilled
+                || item.OutstandingBeforeReceipt != q.OutstandingBefore || item.OutstandingAfterReceipt != q.OutstandingAfter
+                || item.ShortageQuantity != q.PhysicalShortage || item.UndamagedReceivedQuantity != q.CurrentUndamaged
+                || item.DiscrepancyFlags.Contains("OverDelivery") != q.OverDelivery)
+                errors.Add($"{item.MaterialName}: invalid fulfilment arithmetic.");
+
             if (item.DamagedQuantity > item.NewlyReceivedQuantity)
                 errors.Add($"{item.MaterialName}: damaged ({item.DamagedQuantity}) exceeds received ({item.NewlyReceivedQuantity}).");
 
@@ -347,19 +429,6 @@ public class DeliveryDiscrepancyAgentService
                 errors.Add($"{item.MaterialName}: shortage quantity is negative.");
         }
 
-        // Verify that every flagged item has at least one recommendation
-        var flaggedMaterials = analysis.Items
-            .Where(i => i.HasDiscrepancy)
-            .Select(i => i.MaterialName)
-            .ToHashSet();
-        var recommendedMaterials = recommendations
-            .Where(r => r.Category != "NoIssues")
-            .Select(r => r.MaterialName)
-            .ToHashSet();
-        var uncovered = flaggedMaterials.Except(recommendedMaterials).ToList();
-        if (uncovered.Count > 0)
-            errors.Add($"Flagged items without recommendations: {string.Join(", ", uncovered)}");
-
         return new DiscrepancyValidation
         {
             IsValid = errors.Count == 0,
@@ -369,6 +438,46 @@ public class DeliveryDiscrepancyAgentService
     }
 
     // ──────── Helper Methods ────────
+
+    private async Task<DeliveryAgentEvidence> CollectAgentEvidence(DeliveryDataSnapshot data, DiscrepancyAnalysis analysis)
+    {
+        var history = _dbContext.Deliveries.AsNoTracking().Where(d => data.SupplierId != null
+            && (d.PurchaseOrder!.QuotationId != null ? d.PurchaseOrder.Quotation!.SupplierId : d.PurchaseOrder.SupplierId) == data.SupplierId
+            && (d.ReceivedAt < data.ReceivedAt || (d.ReceivedAt == data.ReceivedAt && d.Id < data.DeliveryId))
+            && (d.Status == DeliveryStatus.Received || d.Status == DeliveryStatus.PartiallyReceived || d.Status == DeliveryStatus.DiscrepancyReported));
+        var rows = await history.OrderByDescending(d => d.ReceivedAt).ThenByDescending(d => d.Id).Take(21)
+            .Select(d => new DeliveryAgentHistory("delivery:" + d.Id, d.Id, d.ReceivedAt!.Value,
+                d.Status.ToString(), d.Items.Count, d.Items.Count(i => i.DamagedQuantity > 0))).ToListAsync();
+        var discrepancies = await history.Where(d => d.Status == DeliveryStatus.DiscrepancyReported || d.Status == DeliveryStatus.PartiallyReceived)
+            .OrderByDescending(d => d.ReceivedAt).ThenByDescending(d => d.Id).Take(21)
+            .Select(d => new DeliveryAgentHistory("delivery:" + d.Id, d.Id, d.ReceivedAt!.Value,
+                d.Status.ToString(), d.Items.Count, d.Items.Count(i => i.DamagedQuantity > 0))).ToListAsync();
+        var items = analysis.Items.Select(i => new DeliveryAgentItem($"po-item:{i.PurchaseOrderItemId}",
+            Clip(i.MaterialName, 200), Clip(i.MaterialUnit, 50), i.OrderedQuantity, i.PreviouslyFulfilledQuantity,
+            i.NewlyReceivedQuantity, i.DamagedQuantity, i.OutstandingBeforeReceipt, i.OutstandingAfterReceipt,
+            i.ShortageQuantity, i.DiscrepancyFlags.Contains("OverDelivery"))).ToList();
+        return new(data.DeliveryId, data.SupplierId, Clip(data.SupplierName, 200), data.ReceivedAt!.Value,
+            items, rows.Take(20).ToList(), rows.Count > 20, discrepancies.Take(20).ToList(), discrepancies.Count > 20,
+            new[] { $"delivery:{data.DeliveryId}" }.Concat(items.Select(i => i.EvidenceRef))
+                .Concat(rows.Take(20).Select(i => i.EvidenceRef)).Concat(discrepancies.Take(20).Select(i => i.EvidenceRef)).Distinct().ToList());
+    }
+
+    private static string Clip(string value, int max) => value.Length <= max ? value : value[..max];
+
+    private static string ReadExecutionMode(AgentWorkflow workflow)
+    {
+        var json = workflow.Steps.FirstOrDefault(s => s.StepOrder == 3)?.StructuredResult;
+        if (json != null)
+        {
+            using var document = JsonDocument.Parse(json);
+            if (document.RootElement.ValueKind == JsonValueKind.Object
+                && document.RootElement.TryGetProperty("execution", out var execution)
+                && execution.TryGetProperty("Mode", out var mode))
+                return mode.GetString() ?? "Unknown";
+        }
+        // Legacy successful runs had no provider path; do not mislabel them AgenticAI.
+        return workflow.Status == WorkflowStatus.Completed ? "Deterministic" : "Unknown";
+    }
 
     private async Task<AgentWorkflowStep> CreateStep(int workflowId, string role, string name, int order)
     {
@@ -408,6 +517,7 @@ public class DeliveryDiscrepancyAgentService
 
 public class DeliveryDataSnapshot
 {
+    public int? SupplierId { get; set; }
     public int DeliveryId { get; set; }
     public int PurchaseOrderId { get; set; }
     public string SupplierName { get; set; } = string.Empty;
@@ -445,6 +555,11 @@ public class DiscrepancyAnalysis
 
 public class DiscrepancyItemAnalysis
 {
+    public int PurchaseOrderItemId { get; set; }
+    public decimal PreviouslyFulfilledQuantity { get; set; }
+    public decimal TotalFulfilledQuantity { get; set; }
+    public decimal OutstandingBeforeReceipt { get; set; }
+    public decimal OutstandingAfterReceipt { get; set; }
     public string MaterialName { get; set; } = string.Empty;
     public string MaterialUnit { get; set; } = string.Empty;
     public decimal OrderedQuantity { get; set; }
@@ -492,11 +607,15 @@ public class DiscrepancyAnalysisResult
     public List<DiscrepancyItemAnalysis> Items { get; set; } = new();
     public List<DiscrepancyRecommendation> Recommendations { get; set; } = new();
     public DiscrepancyValidation Validation { get; set; } = new();
-    public string ExecutionMode { get; set; } = "Deterministic";
+    public string ExecutionMode { get; set; } = "DeterministicFallback";
+    public DeliveryAgentAdvisory? Advisory { get; set; }
+    public DeliveryAgentExecution? Execution { get; set; }
 }
 
 public class DiscrepancyWorkflowSummary
 {
+    public DateTime CreatedAt { get; set; }
+    public string ExecutionMode { get; set; } = string.Empty;
     public int WorkflowId { get; set; }
     public int DeliveryId { get; set; }
     public string Status { get; set; } = string.Empty;

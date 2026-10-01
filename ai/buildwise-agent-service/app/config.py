@@ -12,14 +12,14 @@ os.environ['LANGCHAIN_TRACING_V2'] = 'false'
 class Settings:
     api_key: str
     service_key: str
-    model: str = 'gemini-2.5-flash'
+    model: str = 'gemini-3.5-flash'
     max_iterations: int = 6
     max_tool_calls: int = 6
     timeout_seconds: float = 90
 
 
 def get_settings() -> Settings:
-    model = os.getenv('CHAT_MODEL', 'gemini-2.5-flash').strip()
+    model = os.getenv('CHAT_MODEL', 'gemini-3.5-flash').strip()
     if not model or len(model) > 100:
         raise ValueError('CHAT_MODEL must contain 1 to 100 characters')
     return Settings(api_key=os.getenv('GOOGLE_API_KEY', '').strip(),

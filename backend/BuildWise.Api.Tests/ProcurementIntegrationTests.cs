@@ -156,10 +156,10 @@ public class ProcurementIntegrationTests : IAsyncLifetime
         Assert.Single(rec.GetProperty("rankedAlternatives").EnumerateArray());
         Assert.Contains("Suspended", rec.GetProperty("warnings").ToString());
         Assert.Contains("200", rec.GetProperty("warnings").ToString());
-        Assert.Contains(rec.GetProperty("executionMode").GetString(), new[] { "PythonDeterministicFallback", "ProviderBacked" });
+        Assert.Contains(rec.GetProperty("executionMode").GetString(), new[] { "DeterministicFallback", "AgenticAI" });
         Assert.Equal(2, rec.GetProperty("toolsUsed").GetArrayLength());
         Assert.True(workflow.GetProperty("validation").GetProperty("isValid").GetBoolean());
-        Assert.Equal(3, workflow.GetProperty("steps").GetArrayLength());
+        Assert.Equal(4, workflow.GetProperty("steps").GetArrayLength());
         Assert.Equal(workflowId, (await Json(await officer.GetAsync($"/api/material-requests/{requestId}/procurement-workflow"))).GetProperty("id").GetInt32());
         return (workflowId, winnerQuote);
     }

@@ -1,18 +1,17 @@
-using System.Text;
 using System.Text.Json.Serialization;
 using BuildWise.Api.Data;
 using BuildWise.Api.Middleware;
 using BuildWise.Api.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
+JwtAccountValidation.RequireSigningKey(builder.Configuration);
 
 var connectionString =
     builder.Configuration.GetConnectionString("DefaultConnection")
-    ?? "Host=localhost;Database=buildwise;Username=postgres;Password=postgres";
+    ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is not configured.");
 
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseNpgsql(connectionString));
@@ -28,14 +27,12 @@ builder.Services.AddControllers()
 // Component 2 services: deterministic validation, agent client, workflow orchestration.
 builder.Services.AddScoped<ProcurementValidationService>();
 
-builder.Services.AddHttpClient<QuotationAgentClient>(client =>
+builder.Services.AddHttpClient<QuotationAgentClient>().RemoveAllLoggers();
+builder.Services.AddHttpClient<IProcurementAdvisoryClient, ProcurementAdvisoryClient>(client =>
 {
-    // Keep this default in step with appsettings.json ("AgentService:Url"), the agent
-    // service uvicorn port and the setup guide.
-    var agentUrl = builder.Configuration["AgentService:Url"] ?? "http://127.0.0.1:8001";
-    client.BaseAddress = new Uri(agentUrl);
-    client.Timeout = TimeSpan.FromSeconds(12);
-});
+    client.Timeout = TimeSpan.FromSeconds(100);
+}).RemoveAllLoggers();
+builder.Services.AddScoped<ProcurementAdvisoryService>();
 
 builder.Services.AddScoped<ProcurementWorkflowService>();
 
@@ -44,6 +41,10 @@ builder.Services.AddScoped<IEmailService, SmtpEmailService>();
 // Component 3 services: delivery risk analysis and receiving discrepancy agent.
 builder.Services.AddScoped<DeliveryRiskAgentService>();
 builder.Services.AddScoped<DeliveryDiscrepancyAgentService>();
+builder.Services.AddHttpClient<IDeliveryDiscrepancyAgentClient, DeliveryDiscrepancyAgentClient>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(100);
+}).RemoveAllLoggers();
 builder.Services.AddScoped<QualityInspectionService>();
 builder.Services.AddScoped<NonConformanceService>();
 builder.Services.AddScoped<QualityRiskEvidenceService>();
@@ -55,35 +56,21 @@ builder.Services.AddHttpClient<QualityRiskAgentClient>(client =>
 }).RemoveAllLoggers();
 
 builder.Services.AddScoped<ProcurementPlanningAgentService>();
+builder.Services.AddHttpClient<IPlanningAgentClient, PlanningAgentClient>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(100);
+}).RemoveAllLoggers();
 
 // Shared authentication (Core, used by every component controllers, React and Flutter)
 builder.Services.AddSingleton<JwtTokenService>();
 builder.Services.AddScoped<AuthService>();
-
-var jwtKey = builder.Configuration["Jwt:Key"]
-    ?? throw new InvalidOperationException("Jwt:Key is not configured. Set it in appsettings.json or user-secrets.");
-var jwtIssuer = builder.Configuration["Jwt:Issuer"] ?? "BuildWise";
-var jwtAudience = builder.Configuration["Jwt:Audience"] ?? "BuildWiseClients";
 
 builder.Services.AddAuthentication(options =>
 {
     options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
     options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
 })
-.AddJwtBearer(options =>
-{
-    options.TokenValidationParameters = new TokenValidationParameters
-    {
-        ValidateIssuer = true,
-        ValidateAudience = true,
-        ValidateLifetime = true,
-        ValidateIssuerSigningKey = true,
-        ValidIssuer = jwtIssuer,
-        ValidAudience = jwtAudience,
-        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
-        ClockSkew = TimeSpan.FromMinutes(1)
-    };
-});
+.AddJwtBearer(options => JwtAccountValidation.Configure(options, builder.Configuration));
 
 builder.Services.AddAuthorization();
 
