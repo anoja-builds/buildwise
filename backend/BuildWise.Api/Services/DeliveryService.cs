@@ -120,6 +120,37 @@ public class DeliveryService
         if (delivery.Items == null || delivery.Items.Count == 0)
             throw new InvalidOperationException("A delivery must contain at least one received item.");
 
+        if (delivery.Items.Select(item => item.MaterialId).Distinct().Count() != delivery.Items.Count)
+            throw new InvalidOperationException("Each material must occur only once in a delivery.");
+        if (delivery.DeliveryReference.Length > 100)
+            throw new InvalidOperationException("Delivery reference must be 100 characters or less.");
+        if (delivery.Evidence is null || delivery.Evidence.Count > 5)
+            throw new InvalidOperationException("A delivery may contain at most five evidence photos.");
+        foreach (var photo in delivery.Evidence)
+        {
+            var parts = photo.FileUrl.Split(',', 2);
+            if (parts.Length != 2 || parts[1].Length > 7_000_000 ||
+                parts[0] is not ("data:image/jpeg;base64" or "data:image/png;base64" or "data:image/webp;base64"))
+                throw new InvalidOperationException("Evidence must be a JPEG, PNG or WebP photo of at most 5 MB.");
+            try
+            {
+                if (Convert.FromBase64String(parts[1]).Length > 5 * 1024 * 1024)
+                    throw new InvalidOperationException("Evidence photo exceeds 5 MB.");
+            }
+            catch (FormatException)
+            {
+                throw new InvalidOperationException("Evidence photo contains invalid image data.");
+            }
+            photo.Id = 0;
+            photo.Delivery = null;
+            photo.DeliveryItem = null;
+            photo.DeliveryItemId = null;
+            photo.UploadedByUser = null;
+            photo.UploadedByUserId = delivery.ReceivedByUserId;
+            photo.FileType = parts[0][5..^7];
+            photo.UploadedAt = DateTime.UtcNow;
+        }
+
         // Quantities already received against this purchase order by earlier
         // deliveries. PO lines are received across several deliveries (partial
         // deliveries are normal), so the per-line check further down only sees
@@ -173,11 +204,9 @@ public class DeliveryService
                         $"already received {previouslyReceived:0.##}, this delivery {item.ReceivedQuantity:0.##} (total {cumulative:0.##}).");
             }
 
-            var agentRun = _agentClient == null
-                ? new AgentClientResult<DeliveryAgentResult>(
-                    DeliveryAgentResult.Deterministic(poItem.OrderedQuantity, item.ReceivedQuantity, item.DamagedQuantity),
-                    "DeterministicFallback")
-                : await _agentClient.AnalyzeDiscrepancyAsync(poItem.OrderedQuantity, item.ReceivedQuantity, item.DamagedQuantity);
+            var agentRun = new AgentClientResult<DeliveryAgentResult>(
+                DeliveryAgentResult.Deterministic(poItem.OrderedQuantity, item.ReceivedQuantity, item.DamagedQuantity),
+                "DeterministicValidation");
             var assessment = agentRun.Output;
             agentResults.Add(new { materialId = item.MaterialId, ordered = poItem.OrderedQuantity, received = item.ReceivedQuantity, damaged = item.DamagedQuantity, assessment });
             executionSources.Add(agentRun.ExecutionSource);
@@ -193,6 +222,12 @@ public class DeliveryService
 
         _context.Deliveries.Add(delivery);
         await _context.SaveChangesAsync();
+
+        foreach (var photo in delivery.Evidence)
+        {
+            photo.DeliveryId = delivery.Id;
+            _context.DeliveryEvidences.Add(photo);
+        }
 
         foreach (var item in delivery.Items)
         {
@@ -246,6 +281,17 @@ public class DeliveryService
     {
         var hasDiscrepancy = AgentDiscrepancyDetected;
 
+        if (_agentClient is not null)
+        {
+            foreach (var item in delivery.Items)
+            {
+                var ordered = delivery.PurchaseOrder!.Items.First(line => line.MaterialId == item.MaterialId).OrderedQuantity;
+                var result = await _agentClient.AnalyzeDiscrepancyAsync(ordered, item.ReceivedQuantity, item.DamagedQuantity);
+                agentResults.Add(new { materialId = item.MaterialId, assessment = result.Output });
+                executionSources.Add(result.ExecutionSource);
+            }
+        }
+
         if (_auditService is not null)
         {
             await _auditService.RecordAsync(
@@ -281,7 +327,7 @@ public class DeliveryService
 
     public async Task<List<Delivery>> GetDeliveriesAsync()
     {
-        return await _context.Deliveries
+        var deliveries = await _context.Deliveries
             .Include(d => d.PurchaseOrder)
                 .ThenInclude(p => p!.Supplier)
             .Include(d => d.PurchaseOrder)
@@ -296,5 +342,11 @@ public class DeliveryService
                 .ThenInclude(i => i.Material)
             .OrderByDescending(d => d.DeliveredAt)
             .ToListAsync();
+        var ids = deliveries.Select(delivery => delivery.Id).ToList();
+        var photos = await _context.DeliveryEvidences.AsNoTracking()
+            .Where(photo => ids.Contains(photo.DeliveryId)).ToListAsync();
+        foreach (var delivery in deliveries)
+            delivery.Evidence = photos.Where(photo => photo.DeliveryId == delivery.Id).ToList();
+        return deliveries;
     }
 }

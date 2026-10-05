@@ -18,9 +18,10 @@ class AppDropdown extends StatelessWidget {
   @override
   Widget build(BuildContext context) => DropdownButtonFormField<String>(
     initialValue: value,
+    isExpanded: true,
     decoration: InputDecoration(labelText: label),
     items: items
-        .asMap().entries.map((entry) => DropdownMenuItem(value: entry.value, child: Text(itemLabels?[entry.key] ?? entry.value)))
+        .asMap().entries.map((entry) => DropdownMenuItem(value: entry.value, child: Text(itemLabels?[entry.key] ?? entry.value, overflow: TextOverflow.ellipsis)))
         .toList(),
     onChanged: onChanged,
   );

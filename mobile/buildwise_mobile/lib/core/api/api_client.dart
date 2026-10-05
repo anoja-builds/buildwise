@@ -67,6 +67,8 @@ class ApiClient {
 
   Future<bool> isSignedIn() async => (await readToken()) != null;
 
+  void close() => _client.close();
+
   Future<void> signOut() async {
     await _storage.delete(key: _tokenKey);
     await _storage.delete(key: _userKey);

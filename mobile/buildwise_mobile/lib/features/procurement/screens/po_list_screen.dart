@@ -15,7 +15,7 @@ class _PoListScreenState extends State<PoListScreen> {
   @override
   void initState() {
     super.initState();
-    _futurePos = _service.getPurchaseOrders();
+    _futurePos = _service.listPurchaseOrders();
   }
 
   @override

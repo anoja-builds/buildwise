@@ -207,6 +207,36 @@ public class DeliveryServiceTests
         Assert.Equal("INV-2", created.DeliveryReference);
     }
 
+    [Fact]
+    public async Task RecordDelivery_Persists_Photo_And_Uses_Receiver_Identity()
+    {
+        var scenario = await SeedScenarioAsync();
+        var service = new DeliveryService(scenario.Db);
+        var delivery = BuildDelivery(scenario);
+        delivery.Evidence.Add(new DeliveryEvidence
+        {
+            FileUrl = "data:image/png;base64,iVBORw0KGgo=", UploadedByUserId = 999
+        });
+
+        await service.RecordDeliveryAsync(delivery);
+
+        var saved = await scenario.Db.DeliveryEvidences.SingleAsync();
+        Assert.Equal(delivery.Id, saved.DeliveryId);
+        Assert.Equal(delivery.ReceivedByUserId, saved.UploadedByUserId);
+        Assert.Single((await service.GetDeliveriesAsync()).Single().Evidence);
+    }
+
+    [Fact]
+    public async Task RecordDelivery_Rejects_Duplicate_Lines_Before_Persistence()
+    {
+        var scenario = await SeedScenarioAsync();
+        var delivery = BuildDelivery(scenario);
+        delivery.Items.Add(new DeliveryItem { MaterialId = scenario.Material.Id, ReceivedQuantity = 250 });
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => new DeliveryService(scenario.Db).RecordDeliveryAsync(delivery));
+        Assert.Empty(await scenario.Db.Deliveries.ToListAsync());
+    }
+
     private static async Task<DeliveryScenario> SeedScenarioAsync(
         PurchaseOrderStatus status = PurchaseOrderStatus.Confirmed)
     {

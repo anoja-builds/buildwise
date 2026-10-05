@@ -242,6 +242,7 @@ public class DeliveriesController : ControllerBase
         Status = d.Status.ToString(),
         d.DeliveredAt,
         d.ReceivedByUserId,
+        Evidence = d.Evidence.Select(photo => new { photo.Id, photo.FileUrl, photo.FileType, photo.UploadedAt }).ToList(),
         Items = d.Items.Select(di => new
         {
             di.Id,

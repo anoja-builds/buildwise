@@ -95,21 +95,18 @@ class OperationsService {
   Future<Map<String, dynamic>> recordDelivery({
     required int purchaseOrderId,
     required String reference,
-    required int materialId,
-    required double received,
-    required double damaged,
+    required List<Map<String, dynamic>> items,
+    List<Map<String, dynamic>> evidence = const [],
   }) async {
     final response = await _apiClient.post('/deliveries', body: {
       'purchaseOrderId': purchaseOrderId,
       'deliveryReference': reference,
       'status': 'Arrived',
-      'items': [
-        {'materialId': materialId, 'receivedQuantity': received, 'damagedQuantity': damaged},
-      ],
-    });
+      'items': items,
+      'evidence': evidence,
+    }, timeout: _agentTimeout);
     return _map(response, 'record delivery');
   }
-
   Future<List<Map<String, dynamic>>> listInspections({String? status}) async {
     final query = status == null ? '' : '?status=$status';
     final response = await _apiClient.get('/quality-inspections$query');

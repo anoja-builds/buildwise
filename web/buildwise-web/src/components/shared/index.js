@@ -24,3 +24,4 @@ export {
   requestAnalysisFlagLabel,
 } from './materialRequestStatus'
 export { default as SuccessDialog } from './SuccessDialog'
+export { default as FormErrorSummary } from './FormErrorSummary'
