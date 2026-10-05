@@ -1,7 +1,13 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import QuotationEntryForm from './QuotationEntryForm'
+
+vi.mock('../services/procurementApi', () => ({
+  procurementApi: {
+    listSuppliers: vi.fn().mockResolvedValue({ items: [{ id: 1, name: 'Test supplier' }] })
+  }
+}))
 
 const requestDetail = {
   id: 101,
