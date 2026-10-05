@@ -57,7 +57,7 @@ export const canSeeCommercialTerms = (roles = []) => hasAnyRole(roles, COMMERCIA
  */
 export const NAVIGATION = [
   { path: '/dashboard', label: 'Dashboard', screen: 'Dashboard', section: 'Dashboard', roles: INTERNAL_STAFF },
-  { path: '/material-requests', label: 'Material Requests', screen: 'Material Requests', roles: [ROLES.SiteEngineer, ROLES.ProcurementOfficer, ROLES.ProcurementManager, ROLES.SiteManager, ROLES.QualityInspector, ROLES.Administrator] },
+  { path: '/material-requests', label: 'Material Requests', screen: 'Material Requests', roles: [ROLES.SiteEngineer, ROLES.SiteOfficer, ROLES.ProcurementOfficer, ROLES.ProcurementManager, ROLES.SiteManager, ROLES.QualityInspector, ROLES.Administrator] },
   { path: '/suppliers', label: 'Suppliers', screen: 'Procurement', section: 'Suppliers', roles: [ROLES.ProcurementOfficer, ROLES.ProcurementManager, ROLES.Administrator] },
   { path: '/quotations', label: 'Quotations', screen: 'Procurement', section: 'Approved Requests', roles: [ROLES.ProcurementOfficer, ROLES.ProcurementManager, ROLES.Administrator] },
   { path: '/rfqs', label: 'RFQs', screen: 'RFQs', section: 'RFQs', roles: [ROLES.ProcurementOfficer, ROLES.ProcurementManager, ROLES.Administrator] },

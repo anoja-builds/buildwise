@@ -110,7 +110,7 @@ class _MaterialRequestReviewScreenState
       await _api.decideMaterialRequest(
         id,
         decision: decision,
-        comments: comment.isEmpty ? null : comment,
+        comments: comment,
       );
       if (!mounted) return;
       setState(() => _outcome = decision);
