@@ -24,6 +24,7 @@ public record MaterialRequestSummaryDto(
     string Priority = "Normal",
     string? SiteNotes = null,
     int? RevisionOfRequestId = null,
+<<<<<<< HEAD
     int RevisionNumber = 1,
     /// <summary>
     /// The material names on this request, in line order.
@@ -45,6 +46,9 @@ public record MaterialRequestSummaryDto(
     /// </summary>
     string? RequestedByName = null,
     int? RequestedByUserId = null
+=======
+    int RevisionNumber = 1
+>>>>>>> origin/intergration/final-buildwise
 );
 
 public record MaterialRequestDetailDto(

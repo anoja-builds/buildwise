@@ -29,6 +29,7 @@ public class SupplierConfiguration : IEntityTypeConfiguration<Supplier>
 
         builder.Property(s => s.Status)
             .HasConversion<string>()
+            .HasMaxLength(50)
             .IsRequired();
 
         builder.HasIndex(s => s.Name);

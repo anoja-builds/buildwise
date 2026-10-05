@@ -16,4 +16,6 @@ public class Supplier : BaseEntity
     public string? Address { get; set; }
 
     public SupplierStatus Status { get; set; } = SupplierStatus.Active;
+
+    public ICollection<Quotation> Quotations { get; set; } = new List<Quotation>();
 }

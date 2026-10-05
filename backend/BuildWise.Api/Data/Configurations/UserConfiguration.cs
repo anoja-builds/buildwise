@@ -1,4 +1,4 @@
-using BuildWise.Api.Models.Entities;
+﻿using BuildWise.Api.Models.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
@@ -19,6 +19,22 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
         builder.Property(u => u.Email)
             .HasMaxLength(255)
             .IsRequired();
+
+        builder.Property(u => u.PasswordHash)
+            .IsRequired();
+
+        builder.Property(u => u.IsActive)
+            .HasDefaultValue(true);
+
+        // Supplier portal binding. Set only for Supplier role accounts; the API
+        // treats this as the authoritative supplier scope for that login.
+        builder.Property(u => u.SupplierId);
+
+        builder.HasOne(u => u.Supplier)
+            .WithMany()
+            .HasForeignKey(u => u.SupplierId)
+            .IsRequired(false)
+            .OnDelete(DeleteBehavior.Restrict);
 
         builder.HasIndex(u => u.Email)
             .IsUnique();

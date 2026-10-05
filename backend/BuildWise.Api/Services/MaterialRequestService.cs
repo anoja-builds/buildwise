@@ -28,10 +28,15 @@ public class MaterialRequestService
         if (request.RequestDate == default) request.RequestDate = DateOnly.FromDateTime(DateTime.UtcNow);
         if (request.Priority == default) request.Priority = MaterialRequestPriority.Normal;
 
+<<<<<<< HEAD
         var project = await ResolveProjectAsync(request);
         if (project == null)
             throw new InvalidOperationException("Enter a project name for this request.");
         if (project.Status != ProjectStatus.Active)
+=======
+        var project = await _context.Projects.FindAsync(request.ProjectId);
+        if (project == null || project.Status != ProjectStatus.Active)
+>>>>>>> origin/intergration/final-buildwise
             throw new InvalidOperationException("Material requests can only be created for Active projects.");
         if (request.RequiredDate < request.RequestDate)
             throw new InvalidOperationException("Required date cannot be earlier than the request date.");
@@ -44,11 +49,16 @@ public class MaterialRequestService
         if (request.Items.Any(item => item.RequiredDate.HasValue && item.RequiredDate.Value < request.RequestDate))
             throw new InvalidOperationException("Item required date cannot be earlier than the request date.");
 
+<<<<<<< HEAD
         var materialIds = request.Items.Where(item => item.MaterialId != 0).Select(item => item.MaterialId).Distinct().ToList();
+=======
+        var materialIds = request.Items.Select(item => item.MaterialId).Distinct().ToList();
+>>>>>>> origin/intergration/final-buildwise
         var activeCount = await _context.Materials.CountAsync(m => materialIds.Contains(m.Id) && m.IsActive);
         if (activeCount != materialIds.Count)
             throw new InvalidOperationException("Every material request item must reference an Active material.");
 
+<<<<<<< HEAD
         foreach (var item in request.Items.Where(item => item.MaterialId == 0))
         {
             var name = item.MaterialName?.Trim();
@@ -70,6 +80,8 @@ public class MaterialRequestService
             item.MaterialId = material.Id;
         }
 
+=======
+>>>>>>> origin/intergration/final-buildwise
         request.Status = MaterialRequestStatus.PendingApproval;
         request.CreatedAt = DateTime.UtcNow;
         request.UpdatedAt = DateTime.UtcNow;
@@ -79,6 +91,7 @@ public class MaterialRequestService
         return request;
     }
 
+<<<<<<< HEAD
     /// Resolves the project a request is filed against.
     ///
     /// The form sends the project two ways, because the engineer works in names
@@ -115,6 +128,8 @@ public class MaterialRequestService
         return project;
     }
 
+=======
+>>>>>>> origin/intergration/final-buildwise
     public async Task<MaterialRequest> ReviseRequestAsync(int requestId, int userId, ReviseMaterialRequestRequestDto dto)
     {
         var original = await _context.MaterialRequests.Include(r => r.Items).FirstOrDefaultAsync(r => r.Id == requestId)

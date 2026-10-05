@@ -55,3 +55,30 @@ Thumbs.db
 # ==============================
 *.log
 logs/
+
+# Python
+__pycache__/
+*.pyc
+
+# ==============================
+# Local tooling / agent scratch
+# ==============================
+# Agent worktrees are local scratch copies of the repo, not source. They contain
+# a full duplicate tree and must never be committed or pushed.
+.kilo/
+
+# Stray process output from manually launched runtimes.
+api-out.txt
+api-err.txt
+dev-server.log
+
+# Accidental test-run console dumps (vitest/npm output saved as .txt).
+web/fv.txt
+web/fve.txt
+web/vall.txt
+web/valle.txt
+web/vq.txt
+web/vqe.txt
+web/vw.txt
+web/vwe.txt
+

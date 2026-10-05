@@ -1,0 +1,334 @@
+using System.Text.Json.Serialization;
+
+using System.Text.Json;
+using BuildWise.Api.Data;
+using BuildWise.Api.DTOs;
+using BuildWise.Api.Models.Entities;
+using BuildWise.Api.Models.Enums;
+using Microsoft.EntityFrameworkCore;
+
+namespace BuildWise.Api.Services;
+
+public class ProcurementValidationResult
+{
+    [JsonIgnore]
+    public bool IsValid => Errors.Count == 0;
+    public bool Valid => IsValid;
+    public List<string> Errors { get; set; } = new();
+    public List<string> Warnings { get; set; } = new();
+}
+
+public class ProcurementValidationService
+{
+    private readonly ApplicationDbContext _db;
+
+    public ProcurementValidationService(ApplicationDbContext db)
+    {
+        _db = db;
+    }
+
+    /// <summary>
+    /// Validates an AI recommendation against deterministic business rules (§5.1 - §5.6).
+    /// Hard gate: if this returns invalid, the recommendation cannot proceed to AwaitingApproval.
+    /// </summary>
+    public async Task<ProcurementValidationResult> ValidateRecommendationAsync(
+        int recommendedQuotationId,
+        int materialRequestId,
+        int? recommendedSupplierId = null)
+    {
+        var result = new ProcurementValidationResult();
+
+        // Rule 1: Material Request exists and status = Approved
+        var request = await _db.MaterialRequests
+            .Include(r => r.Items)
+            .FirstOrDefaultAsync(r => r.Id == materialRequestId);
+
+        if (request is null)
+        {
+            result.Errors.Add($"Material request #{materialRequestId} does not exist.");
+            return result;
+        }
+
+        if (request.Status != MaterialRequestStatus.Approved)
+        {
+            result.Errors.Add($"Material request #{materialRequestId} has status '{request.Status}', but must be 'Approved'.");
+        }
+
+        // Rule 2 & 3: Quotation and Supplier existence, Active status, and validity period
+        var quotation = await _db.Quotations
+            .Include(q => q.Supplier)
+            .Include(q => q.Items)
+            .FirstOrDefaultAsync(q => q.Id == recommendedQuotationId);
+
+        if (quotation is null)
+        {
+            result.Errors.Add($"Recommended quotation #{recommendedQuotationId} does not exist.");
+            return result;
+        }
+
+        if (quotation.MaterialRequestId != materialRequestId)
+        {
+            result.Errors.Add($"Quotation #{recommendedQuotationId} belongs to request #{quotation.MaterialRequestId}, not #{materialRequestId}.");
+        }
+
+        if (request.Items.Any(i => i.RequestedQuantity <= 0))
+            result.Errors.Add("Every requested material quantity must be greater than zero.");
+        if (request.Items.Count == 0)
+            result.Errors.Add("Material request must contain at least one item.");
+
+        if (quotation.Items.Count == 0)
+            result.Errors.Add($"Quotation #{quotation.Id} must contain at least one item.");
+        if (quotation.Items.Any(i => i.Quantity <= 0))
+            result.Errors.Add("Every quotation quantity must be greater than zero.");
+        if (quotation.Items.Any(i => i.UnitPrice < 0))
+            result.Errors.Add("Quotation unit prices cannot be negative.");
+
+        if (quotation.Supplier is null)
+        {
+            result.Errors.Add($"Supplier for quotation #{recommendedQuotationId} not found.");
+        }
+        else if (quotation.Supplier.Status != SupplierStatus.Active)
+        {
+            result.Errors.Add($"Supplier '{quotation.Supplier.Name}' is {quotation.Supplier.Status}. Only Active suppliers are eligible.");
+        }
+
+        if (recommendedSupplierId.HasValue && recommendedSupplierId.Value != quotation.SupplierId)
+            result.Errors.Add($"Unsupported supplier identity: recommendation supplier #{recommendedSupplierId.Value} does not own quotation #{quotation.Id} (actual supplier #{quotation.SupplierId}).");
+
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        if (quotation.ValidUntil < today)
+        {
+            result.Errors.Add($"Quotation #{recommendedQuotationId} expired on {quotation.ValidUntil:yyyy-MM-dd}.");
+        }
+        if (quotation.PromisedDeliveryDate is null)
+        {
+            result.Warnings.Add($"Quotation #{quotation.Id} has no promised delivery date; delivery risk cannot be fully evaluated.");
+        }
+        else if (quotation.PromisedDeliveryDate < quotation.QuotationDate)
+        {
+            result.Errors.Add($"Invalid promised delivery date {quotation.PromisedDeliveryDate:yyyy-MM-dd}: it precedes quotation date {quotation.QuotationDate:yyyy-MM-dd}.");
+        }
+        else if (quotation.PromisedDeliveryDate > quotation.ValidUntil)
+        {
+            result.Errors.Add($"Invalid promised delivery date {quotation.PromisedDeliveryDate:yyyy-MM-dd}: it is after quotation validity {quotation.ValidUntil:yyyy-MM-dd}.");
+        }
+        else if (quotation.PromisedDeliveryDate > request.RequiredDate)
+        {
+            result.Errors.Add($"Delivery risk: promised delivery {quotation.PromisedDeliveryDate:yyyy-MM-dd} is after the site required date {request.RequiredDate:yyyy-MM-dd}.");
+        }
+
+        // Rule 4: Every quotation_item references a material_request_item that belongs to this request
+        var validRequestItemIds = request.Items.Select(i => i.Id).ToHashSet();
+        foreach (var qItem in quotation.Items)
+        {
+            if (!validRequestItemIds.Contains(qItem.MaterialRequestItemId))
+            {
+                result.Errors.Add($"Quotation item #{qItem.Id} references request item #{qItem.MaterialRequestItemId}, which does not belong to request #{materialRequestId}.");
+            }
+        }
+
+        // Rule 5: Full quantity coverage per item (>= requested_quantity)
+        foreach (var reqItem in request.Items)
+        {
+            var offeredQuantity = quotation.Items
+                .Where(qi => qi.MaterialRequestItemId == reqItem.Id)
+                .Sum(qi => qi.Quantity);
+
+            if (offeredQuantity < reqItem.RequestedQuantity)
+            {
+                result.Errors.Add($"Quotation covers only {offeredQuantity} of {reqItem.RequestedQuantity} units for request item #{reqItem.Id}. Partial coverage cannot be recommended as sole winner.");
+            }
+        }
+
+        // Rule 6: Recalculate quotation total amount (must match sum of quantity * unit_price)
+        var calculatedTotal = quotation.Items.Sum(i => i.Quantity * i.UnitPrice);
+        if (Math.Abs(calculatedTotal - quotation.TotalAmount) > 0.01m)
+        {
+            result.Errors.Add($"Quotation total mismatch: recorded total is {quotation.TotalAmount}, but calculated sum is {calculatedTotal}.");
+        }
+
+        // Rule 11: Budget check against the project's materials allocation.
+        //
+        // This is deliberately a WARNING, not an error. Exceeding the budget is a
+        // legitimate business outcome — the manager may knowingly approve a
+        // higher total to protect the construction schedule, or ask the client for
+        // a variation. Blocking it here would remove the human judgement the
+        // approval gate exists to provide. The flag is surfaced to the manager so
+        // the decision is informed rather than silent.
+        await ApplyBudgetCheckAsync(request, quotation, result);
+
+        // Rule 12: Quotation completeness. Incomplete quotations are still usable
+        // but carry a higher risk, so they are flagged rather than rejected.
+        ApplyCompletenessCheck(quotation, result);
+
+        return result;
+    }
+
+    /// <summary>
+    /// Compares the recommended quotation's landed total against the project's
+    /// materials budget. No-op when the project has no budget set.
+    /// </summary>
+    private async Task ApplyBudgetCheckAsync(
+        MaterialRequest request, Quotation quotation, ProcurementValidationResult result)
+    {
+        var project = await _db.Projects
+            .AsNoTracking()
+            .FirstOrDefaultAsync(p => p.Id == request.ProjectId);
+
+        if (project?.MaterialBudgetAmount is not > 0m) return;
+
+        // Landed cost = goods + transport, matching what the agent ranks on.
+        var landedTotal = quotation.TotalAmount + Math.Max(0m, quotation.TransportCharge);
+        var budget = project.MaterialBudgetAmount.Value;
+        var variance = landedTotal - budget;
+
+        if (variance > 0.01m)
+        {
+            result.Warnings.Add(
+                $"Budget exceeds planned amount: quotation #{quotation.Id} totals {landedTotal:N2} including transport, " +
+                $"which is {variance:N2} over the '{project.Name}' materials budget of {budget:N2}. " +
+                "Proceed only with a documented approval or a client-funded variation.");
+        }
+        else
+        {
+            result.Warnings.Add(
+                $"Within budget: quotation #{quotation.Id} totals {landedTotal:N2} against the " +
+                $"materials budget of {budget:N2} for project '{project.Name}' ({Math.Abs(variance):N2} remaining).");
+        }
+    }
+
+    /// <summary>
+    /// Flags quotations that omit commercial terms the procurement team needs.
+    /// These do not disqualify a quotation; they raise its risk.
+    /// <para>
+    /// The missing promised-delivery-date case is deliberately not repeated
+    /// here — it is already reported by the date-consistency rules above.
+    /// </para>
+    /// </summary>
+    private static void ApplyCompletenessCheck(Quotation quotation, ProcurementValidationResult result)
+    {
+        if (string.IsNullOrWhiteSpace(quotation.PaymentTerms))
+        {
+            result.Warnings.Add(
+                $"Quotation #{quotation.Id} is incomplete: no payment terms recorded.");
+        }
+
+        // DateOnly has no subtraction operator, so take the day count explicitly.
+        var daysRemaining = quotation.ValidUntil.DayNumber - DateOnly.FromDateTime(DateTime.UtcNow).DayNumber;
+        if (daysRemaining is >= 0 and < 7)
+        {
+            result.Warnings.Add(
+                $"Quotation #{quotation.Id} expires in {daysRemaining} day(s) on {quotation.ValidUntil:yyyy-MM-dd}; " +
+                "an award made later would need a refreshed quotation.");
+        }
+    }
+
+    /// <summary>
+    /// Rule 7: Validates structured JSON schema conformance of AI agent output.
+    /// </summary>
+    public ProcurementValidationResult ValidateRecommendationSchema(AgentRecommendationDto? recommendation)
+    {
+        var result = new ProcurementValidationResult();
+
+        if (recommendation is null)
+        {
+            result.Errors.Add("Recommendation payload is null.");
+            return result;
+        }
+
+        if (recommendation.RecommendedQuotationId == null || recommendation.RecommendedQuotationId <= 0)
+        {
+            result.Errors.Add("Schema violation: recommended_quotation_id is missing or non-positive.");
+        }
+
+        if (recommendation.RecommendedSupplierId == null || recommendation.RecommendedSupplierId <= 0)
+        {
+            result.Errors.Add("Schema violation: recommended_supplier_id is missing or non-positive.");
+        }
+
+        if (string.IsNullOrWhiteSpace(recommendation.Rationale))
+        {
+            result.Errors.Add("Schema violation: rationale is missing or empty.");
+        }
+
+        if (recommendation.RankedAlternatives == null)
+        {
+            result.Errors.Add("Schema violation: ranked_alternatives array is null.");
+        }
+        if (recommendation.Justification == null || recommendation.Justification.Count == 0)
+        {
+            result.Errors.Add("Schema violation: justification array is missing or empty.");
+        }
+        if (recommendation.RiskFlags == null)
+        {
+            result.Errors.Add("Schema violation: risk_flags array is missing.");
+        }
+        if (recommendation.Ranking == null || recommendation.Ranking.Count == 0)
+        {
+            result.Errors.Add("Schema violation: ranking array is missing or empty.");
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Validates conditions to create a Purchase Order (§5.8 - §5.10).
+    /// </summary>
+    public async Task<ProcurementValidationResult> ValidatePurchaseOrderCreationAsync(int workflowId)
+    {
+        var result = new ProcurementValidationResult();
+
+        var workflow = await _db.AgentWorkflows
+            .Include(w => w.Approvals)
+            .Include(w => w.MaterialRequest)
+            .FirstOrDefaultAsync(w => w.Id == workflowId);
+
+        if (workflow is null)
+        {
+            result.Errors.Add($"Workflow #{workflowId} does not exist.");
+            return result;
+        }
+
+        // Rule 8: Blocked until an agent_approvals row exists with decision = Approved
+        var approvedDecisions = workflow.Approvals
+            .Where(a => a.Decision == AgentApprovalStatus.Approved)
+            .Select(a => a.ReviewedByUserId)
+            .ToList();
+        var hasApprovedDecision = approvedDecisions.Count > 0;
+        if (approvedDecisions.Count > 0)
+        {
+            var authorizedManagerCount = await _db.Users
+                .Where(user => approvedDecisions.Contains(user.Id))
+                .CountAsync(user => user.IsActive && user.UserRoles.Any(role =>
+                    role.Role.Name == "ProcurementManager" || role.Role.Name == "SiteManager"));
+            if (authorizedManagerCount == 0)
+            {
+                result.Errors.Add("Purchase order creation blocked: the Approved decision was not recorded by an authorized ProcurementManager or SiteManager.");
+            }
+        }
+
+        if (!hasApprovedDecision)
+        {
+            result.Errors.Add($"Purchase order creation blocked: workflow #{workflowId} does not have an Approved manager decision.");
+        }
+
+        // Rule 1: Request must still be Approved
+        if (workflow.MaterialRequest.Status != MaterialRequestStatus.Approved)
+        {
+            result.Errors.Add($"Material request #{workflow.MaterialRequestId} is not in Approved state.");
+        }
+
+        // Rule 10: Idempotency check: Cannot create duplicate non-cancelled PO for the same material request
+        var existingPo = await _db.PurchaseOrders
+            .Include(po => po.Quotation)
+            .FirstOrDefaultAsync(po => po.Quotation.MaterialRequestId == workflow.MaterialRequestId
+                                       && po.Status != PurchaseOrderStatus.Cancelled);
+
+        if (existingPo != null)
+        {
+            result.Errors.Add($"Purchase Order #{existingPo.Id} already exists for material request #{workflow.MaterialRequestId}. Duplicate POs are prohibited.");
+        }
+
+        return result;
+    }
+}

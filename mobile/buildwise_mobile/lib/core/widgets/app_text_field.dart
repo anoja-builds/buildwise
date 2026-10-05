@@ -12,6 +12,8 @@ class AppTextField extends StatelessWidget {
     this.readOnly = false,
     this.suffixIcon,
     this.onTap,
+    this.obscureText = false,
+    this.onChanged,
   });
   final String label;
   final String? hint;
@@ -22,14 +24,18 @@ class AppTextField extends StatelessWidget {
   final bool readOnly;
   final Widget? suffixIcon;
   final VoidCallback? onTap;
+  final bool obscureText;
+  final ValueChanged<String>? onChanged;
 
   @override
   Widget build(BuildContext context) => TextField(
     controller: controller,
     keyboardType: keyboardType,
-    maxLines: maxLines,
+    maxLines: obscureText ? 1 : maxLines,
     readOnly: readOnly,
     onTap: onTap,
+    obscureText: obscureText,
+    onChanged: onChanged,
     decoration: InputDecoration(
       labelText: label,
       hintText: hint,

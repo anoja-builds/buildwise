@@ -6,6 +6,7 @@ import MaterialRequestsPage from './MaterialRequestsPage'
 // real session; qualityApi is mocked so no backend is needed.
 const authState = vi.hoisted(() => ({ roles: [] }))
 
+<<<<<<< HEAD
 // The project and material catalogues the create form reads. They are plain
 // state rather than mock functions because `vi.resetAllMocks()` below wipes
 // implementations: a `vi.fn(() => catalogue)` would return undefined in every
@@ -18,6 +19,8 @@ const catalogue = vi.hoisted(() => ({
 const defaultProjects = [{ id: 1, name: 'Riverside Apartments — Block C' }]
 const defaultMaterials = [{ id: 1, name: 'OPC Cement', unit: 'bags' }]
 
+=======
+>>>>>>> origin/intergration/final-buildwise
 vi.mock('../auth/AuthContext', () => ({
   useAuth: () => ({ hasRole: (role) => authState.roles.includes(role) }),
 }))
@@ -30,8 +33,13 @@ vi.mock('../services/qualityApi', () => ({
     decideMaterialRequest: vi.fn(),
     analyzeRequest: vi.fn(),
     createMaterialRequest: vi.fn(),
+<<<<<<< HEAD
     projects: () => catalogue.projects,
     materials: () => catalogue.materials,
+=======
+    projects: () => [{ id: 1, name: 'Riverside Apartments — Block C' }],
+    materials: () => [{ id: 1, name: 'OPC Cement', unit: 'bags' }],
+>>>>>>> origin/intergration/final-buildwise
   },
 }))
 
@@ -99,8 +107,11 @@ async function renderAsManager() {
 beforeEach(() => {
   vi.resetAllMocks()
   authState.roles = []
+<<<<<<< HEAD
   catalogue.projects = defaultProjects
   catalogue.materials = defaultMaterials
+=======
+>>>>>>> origin/intergration/final-buildwise
 })
 
 describe('MaterialRequestsPage (Step 2 — manager reviews request)', () => {
@@ -117,7 +128,11 @@ describe('MaterialRequestsPage (Step 2 — manager reviews request)', () => {
     expect(screen.getByRole('button', { name: 'Review' })).toBeInTheDocument()
     // Approvers load every status so a decision (→ Approved) stays visible.
     expect(qualityApi.listMaterialRequests).toHaveBeenCalledWith('all')
+<<<<<<< HEAD
     expect(screen.queryByRole('button', { name: '+ New Material Request' })).not.toBeInTheDocument()
+=======
+    expect(screen.queryByRole('button', { name: '+ Create Request' })).not.toBeInTheDocument()
+>>>>>>> origin/intergration/final-buildwise
   })
 
   it('keeps a freshly submitted request reachable by the manager, and keeps decided rows listed', async () => {
@@ -215,7 +230,11 @@ describe('MaterialRequestsPage (Step 2 — manager reviews request)', () => {
 
     render(<MaterialRequestsPage />)
 
+<<<<<<< HEAD
     const create = await screen.findByRole('button', { name: '+ New Material Request' })
+=======
+    const create = await screen.findByRole('button', { name: '+ Create Request' })
+>>>>>>> origin/intergration/final-buildwise
     expect(create.className).toContain('bw-button--primary')
 
     fireEvent.click(create)
@@ -274,6 +293,7 @@ describe('MaterialRequestsPage (Step 2 — manager reviews request)', () => {
 
     render(<MaterialRequestsPage />)
 
+<<<<<<< HEAD
     fireEvent.click(await screen.findByRole('button', { name: '+ New Material Request' }))
     fireEvent.change(screen.getByRole('combobox', { name: /^project/i }), {
       target: { value: 'Riverside Apartments — Block C' },
@@ -284,18 +304,24 @@ describe('MaterialRequestsPage (Step 2 — manager reviews request)', () => {
     fireEvent.change(screen.getByLabelText(/request date/i), {
       target: { value: '2026-10-01' },
     })
+=======
+    fireEvent.click(await screen.findByRole('button', { name: '+ Create Request' }))
+>>>>>>> origin/intergration/final-buildwise
     fireEvent.change(screen.getByLabelText(/required date/i), {
       target: { value: '2026-10-11' },
     })
     fireEvent.change(screen.getByLabelText(/quantity/i), {
       target: { value: '25' },
     })
+<<<<<<< HEAD
     fireEvent.change(screen.getByLabelText(/reason/i), {
       target: { value: 'Block C slab concreting' },
     })
     fireEvent.change(screen.getByLabelText(/site notes/i), {
       target: { value: 'Crane access from Gate 2.' },
     })
+=======
+>>>>>>> origin/intergration/final-buildwise
     fireEvent.click(screen.getByRole('button', { name: 'Submit Request' }))
 
     expect(await screen.findByText('Request submitted')).toBeInTheDocument()
@@ -468,10 +494,18 @@ describe('MaterialRequestsPage (site roles track the whole site queue)', () => {
     expect(screen.getByText(/Read-only\./)).toBeInTheDocument()
   })
 
+<<<<<<< HEAD
   it('hides the new material request button for Site Officers', async () => {
     await renderAsSiteOfficer()
 
     expect(screen.queryByRole('button', { name: '+ New Material Request' })).not.toBeInTheDocument()
+=======
+  it('keeps the own-request write path available', async () => {
+    await renderAsSiteOfficer()
+
+    // A site role must still be able to raise its own request.
+    expect(screen.getByRole('button', { name: '+ Create Request' })).toBeInTheDocument()
+>>>>>>> origin/intergration/final-buildwise
   })
 })
 
@@ -557,6 +591,7 @@ describe('MaterialRequestsPage (Procurement Officer reads the full queue)', () =
   })
 })
 
+<<<<<<< HEAD
 // Create-form validation: each field has a type (project/material/justification/
 // site notes are strings, quantity is numbers only) and the required date must
 // be after the request date. The backend re-validates; this is the fast answer.
@@ -753,3 +788,5 @@ describe('MaterialRequestsPage (create form validation)', () => {
   })
 })
 
+=======
+>>>>>>> origin/intergration/final-buildwise
