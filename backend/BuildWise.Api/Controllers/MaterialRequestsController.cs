@@ -72,11 +72,7 @@ public class MaterialRequestsController : ControllerBase
             query = query.Where(r => r.ProjectId == projectId.Value);
         }
 
-<<<<<<< HEAD
         var rows = await query
-=======
-        var requests = await query
->>>>>>> origin/intergration/final-buildwise
             .OrderByDescending(r => r.RequiredDate)
             .Select(r => new MaterialRequestSummaryDto(
                 r.Id,
@@ -91,7 +87,6 @@ public class MaterialRequestsController : ControllerBase
                 r.Priority.ToString(),
                 r.SiteNotes,
                 r.RevisionOfRequestId,
-<<<<<<< HEAD
                 r.RevisionNumber,
                 // Line-ordered material names so the list can label each row.
                 r.Items.Select(i => i.Material!.Name).ToList(),
@@ -101,13 +96,6 @@ public class MaterialRequestsController : ControllerBase
             .ToListAsync();
 
         return Ok(await WithRequesterNamesAsync(rows));
-=======
-                r.RevisionNumber
-            ))
-            .ToListAsync();
-
-        return Ok(requests);
->>>>>>> origin/intergration/final-buildwise
     }
 
     /// <summary>
@@ -130,11 +118,7 @@ public class MaterialRequestsController : ControllerBase
     [Authorize(Policy = Policies.SiteOperationsOnly)]
     public async Task<ActionResult<IEnumerable<MaterialRequestSummaryDto>>> GetMine()
     {
-<<<<<<< HEAD
         var rows = await _db.MaterialRequests
-=======
-        var requests = await _db.MaterialRequests
->>>>>>> origin/intergration/final-buildwise
             .Include(request => request.Project)
             .Include(request => request.Items)
             .Include(request => request.Quotations)
@@ -152,7 +136,6 @@ public class MaterialRequestsController : ControllerBase
                 request.Priority.ToString(),
                 request.SiteNotes,
                 request.RevisionOfRequestId,
-<<<<<<< HEAD
                 request.RevisionNumber,
                 request.Items.Select(i => i.Material!.Name).ToList(),
                 null,
@@ -203,11 +186,6 @@ public class MaterialRequestsController : ControllerBase
                         : null,
             })
             .ToList();
-=======
-                request.RevisionNumber))
-            .ToListAsync();
-        return Ok(requests);
->>>>>>> origin/intergration/final-buildwise
     }
 
     /// <summary>

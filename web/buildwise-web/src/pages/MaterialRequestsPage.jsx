@@ -4,17 +4,11 @@ import {
   Card,
   EmptyState,
   ErrorState,
-<<<<<<< HEAD
   FormErrorSummary,
   LoadingState,
   PageHeader,
   StatusBadge,
   SuccessDialog,
-=======
-  LoadingState,
-  PageHeader,
-  StatusBadge,
->>>>>>> origin/intergration/final-buildwise
   TextInput,
   SelectInput,
   isMaterialRequestDecidable,
@@ -47,13 +41,8 @@ export default function MaterialRequestsPage() {
   // Roles that may record Approve / Reject / Request Revision — mirrors the
   // backend MaterialRequestApprovalOnly policy.
   const canApprove = hasRole('ProcurementManager') || hasRole('SiteManager') || hasRole('Administrator')
-<<<<<<< HEAD
   const canCreate = hasRole('SiteEngineer')
   const isSiteUser = hasRole('SiteEngineer') || hasRole('SiteOfficer')
-=======
-  const canCreate = hasRole('SiteEngineer') || hasRole('Administrator')
-  const isSiteUser = hasRole('SiteEngineer')
->>>>>>> origin/intergration/final-buildwise
   // Procurement staff who may read the whole queue but cannot decide: the
   // Procurement Officer moves an Approved request through RFQ / quotation, so
   // the Approved rows are precisely the ones they need to see. They were
@@ -132,11 +121,7 @@ export default function MaterialRequestsPage() {
 
   if (mode === 'list') {
     // Client-side filtering on the already-loaded list
-<<<<<<< HEAD
     const filteredRequests = (requests || []).filter((r) => {
-=======
-    const filteredRequests = requests.filter((r) => {
->>>>>>> origin/intergration/final-buildwise
       const q = searchQuery.trim().toLowerCase()
       const matchesSearch = !q ||
         String(r.id).includes(q) ||
@@ -162,10 +147,7 @@ export default function MaterialRequestsPage() {
             )}
             <button
               className="bw-button bw-button--secondary"
-<<<<<<< HEAD
               aria-label="Refresh"
-=======
->>>>>>> origin/intergration/final-buildwise
               disabled={loading}
               onClick={() => loadRequests({ background: true })}
             >
@@ -173,11 +155,7 @@ export default function MaterialRequestsPage() {
             </button>
             {canCreate ? (
               <button className="bw-button bw-button--primary" onClick={() => setMode('create')}>
-<<<<<<< HEAD
                 + New Material Request
-=======
-                + Create Request
->>>>>>> origin/intergration/final-buildwise
               </button>
             ) : null}
           </div>
@@ -223,19 +201,11 @@ export default function MaterialRequestsPage() {
               onChange={(e) => setStatusFilter(e.target.value)}
             >
               <option value="all">All statuses</option>
-<<<<<<< HEAD
               <option value="PendingApproval">Status: Pending Approval</option>
               <option value="Approved">Status: Approved</option>
               <option value="Rejected">Status: Rejected</option>
               <option value="RevisionRequested">Status: Revision Requested</option>
               <option value="Fulfilled">Status: Fulfilled</option>
-=======
-              <option value="PendingApproval">Pending Approval</option>
-              <option value="Approved">Approved</option>
-              <option value="Rejected">Rejected</option>
-              <option value="RevisionRequested">Revision Requested</option>
-              <option value="Fulfilled">Fulfilled</option>
->>>>>>> origin/intergration/final-buildwise
             </select>
           </div>
 
@@ -248,17 +218,10 @@ export default function MaterialRequestsPage() {
               onChange={(e) => setPriorityFilter(e.target.value)}
             >
               <option value="all">All priorities</option>
-<<<<<<< HEAD
               <option value="Urgent">Urgent priority</option>
               <option value="High">High priority</option>
               <option value="Normal">Normal priority</option>
               <option value="Low">Low priority</option>
-=======
-              <option value="Urgent">Urgent</option>
-              <option value="High">High</option>
-              <option value="Normal">Normal</option>
-              <option value="Low">Low</option>
->>>>>>> origin/intergration/final-buildwise
             </select>
           </div>
         </div>
@@ -291,15 +254,9 @@ export default function MaterialRequestsPage() {
           >
             {filteredRequests.length === 0 ? (
               <EmptyState
-<<<<<<< HEAD
                 title={(requests || []).length === 0 ? 'No material requests' : 'No matches'}
                 message={
                   (requests || []).length === 0
-=======
-                title={requests.length === 0 ? 'No material requests' : 'No matches'}
-                message={
-                  requests.length === 0
->>>>>>> origin/intergration/final-buildwise
                     ? canApprove ? 'Requests awaiting your approval will appear here.' : 'Submitted requests will appear here.'
                     : 'Try adjusting your search or filters.'
                 }
@@ -426,7 +383,6 @@ export default function MaterialRequestsPage() {
 
 // ------------------------------------------------------------------ Form
 
-<<<<<<< HEAD
 /**
  * A text box that suggests the record the typed text points at.
  *
@@ -531,21 +487,12 @@ function TypeAheadInput({ label, id, value, options, onChange, error, hint, requ
 function CreateRequestForm({ onCancel }) {
   const [form, setForm] = useState({
     projectName: '',
-=======
-function CreateRequestForm({ onCancel }) {
-  const [form, setForm] = useState({
-    projectId: 1,
->>>>>>> origin/intergration/final-buildwise
     requiredDate: '',
     requestDate: new Date().toISOString().slice(0, 10),
     priority: 'Normal',
     reason: '',
     siteNotes: '',
-<<<<<<< HEAD
     materialName: '',
-=======
-    materialId: 1,
->>>>>>> origin/intergration/final-buildwise
     requestedQuantity: '',
     description: '',
     unit: 'bags',
@@ -553,10 +500,7 @@ function CreateRequestForm({ onCancel }) {
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState(null)
   const [submitOk, setSubmitOk] = useState(false)
-<<<<<<< HEAD
   const [fieldErrors, setFieldErrors] = useState({})
-=======
->>>>>>> origin/intergration/final-buildwise
 
   const projects = qualityApi.projects()
   const materials = qualityApi.materials()
@@ -564,7 +508,6 @@ function CreateRequestForm({ onCancel }) {
   const update = (field, value) =>
     setForm((f) => ({ ...f, [field]: value }))
 
-<<<<<<< HEAD
   /**
    * Client-side rules for the create form. The backend stays authoritative,
    * but each rule here answers before a round trip:
@@ -646,28 +589,14 @@ function CreateRequestForm({ onCancel }) {
       // name otherwise.
       projectId: projects.find((p) => String(p.name ?? '').trim().toLowerCase() === String(form.projectName ?? '').trim().toLowerCase())?.id ?? 0,
       projectName: String(form.projectName ?? '').trim(),
-=======
-  async function handleSubmit(e) {
-    e.preventDefault()
-    setSubmitting(true)
-    setSubmitError(null)
-    setSubmitOk(false)
-
-    const payload = {
-      projectId: form.projectId,
->>>>>>> origin/intergration/final-buildwise
       requestDate: form.requestDate,
       requiredDate: form.requiredDate,
       priority: form.priority,
       reason: form.reason || undefined,
       siteNotes: form.siteNotes || undefined,
       items: [{
-<<<<<<< HEAD
         materialId: materials.find((m) => String(m.name ?? '').trim().toLowerCase() === String(form.materialName ?? '').trim().toLowerCase())?.id ?? 0,
         materialName: String(form.materialName ?? '').trim(),
-=======
-        materialId: form.materialId,
->>>>>>> origin/intergration/final-buildwise
         requestedQuantity: Number(form.requestedQuantity),
         unit: form.unit || undefined,
         description: form.description || undefined,
@@ -680,21 +609,13 @@ function CreateRequestForm({ onCancel }) {
       await qualityApi.createMaterialRequest(payload)
       setSubmitOk(true)
       setForm({
-<<<<<<< HEAD
         projectName: '',
-=======
-        projectId: 1,
->>>>>>> origin/intergration/final-buildwise
         requiredDate: '',
         requestDate: new Date().toISOString().slice(0, 10),
         priority: 'Normal',
         reason: '',
         siteNotes: '',
-<<<<<<< HEAD
         materialName: '',
-=======
-        materialId: 1,
->>>>>>> origin/intergration/final-buildwise
         requestedQuantity: '',
         description: '',
         unit: 'bags',
@@ -706,39 +627,17 @@ function CreateRequestForm({ onCancel }) {
     }
   }
 
-<<<<<<< HEAD
   return (
     <>
     {/* noValidate: our own messages (type + date rules) replace the browser's
         generic bubbles, so they appear consistently on every browser. */}
     <form className="form-layout" onSubmit={handleSubmit} noValidate>
-=======
-  if (submitOk) {
-    return (
-      <Card>
-        <EmptyState
-          title="Request submitted"
-          message="Your material request has been created and is now awaiting approval."
-        />
-        <div className="form-actions">
-          <Button variant="secondary" onClick={onCancel}>
-            ← Back to list
-          </Button>
-        </div>
-      </Card>
-    )
-  }
-
-  return (
-    <form className="form-layout" onSubmit={handleSubmit}>
->>>>>>> origin/intergration/final-buildwise
       <PageHeader
         title="Create Material Request"
         description="Submit a new material request for procurement approval."
       />
 
       {submitError && <ErrorState message={submitError} />}
-<<<<<<< HEAD
       <FormErrorSummary fieldErrors={fieldErrors} />
 
       <Card>
@@ -753,18 +652,6 @@ function CreateRequestForm({ onCancel }) {
             value={form.projectName}
             options={projects.map((p) => ({ id: p.id, label: p.name }))}
             onChange={(text) => update('projectName', text)}
-=======
-
-      <Card>
-        <div className="field-grid">
-          <SelectInput
-            label="Project"
-            id="projectId"
-            required
-            value={form.projectId}
-            onChange={(e) => update('projectId', Number(e.target.value))}
-            options={projects.map((p) => ({ value: p.id, label: p.name }))}
->>>>>>> origin/intergration/final-buildwise
           />
 
           <TextInput
@@ -772,10 +659,7 @@ function CreateRequestForm({ onCancel }) {
             id="requestDate"
             type="date"
             required
-<<<<<<< HEAD
             error={fieldErrors.requestDate}
-=======
->>>>>>> origin/intergration/final-buildwise
             value={form.requestDate}
             onChange={(e) => update('requestDate', e.target.value)}
           />
@@ -785,10 +669,7 @@ function CreateRequestForm({ onCancel }) {
             id="requiredDate"
             type="date"
             required
-<<<<<<< HEAD
             error={fieldErrors.requiredDate}
-=======
->>>>>>> origin/intergration/final-buildwise
             value={form.requiredDate}
             onChange={(e) => update('requiredDate', e.target.value)}
           />
@@ -811,11 +692,8 @@ function CreateRequestForm({ onCancel }) {
             <TextInput
               label="Site Notes"
               id="siteNotes"
-<<<<<<< HEAD
               required
               error={fieldErrors.siteNotes}
-=======
->>>>>>> origin/intergration/final-buildwise
               value={form.siteNotes}
               onChange={(e) => update('siteNotes', e.target.value)}
               hint="Access, unloading, storage, or site coordination notes."
@@ -826,18 +704,14 @@ function CreateRequestForm({ onCancel }) {
             <TextInput
               label="Reason / Purpose"
               id="reason"
-<<<<<<< HEAD
               required
               error={fieldErrors.reason}
-=======
->>>>>>> origin/intergration/final-buildwise
               value={form.reason}
               onChange={(e) => update('reason', e.target.value)}
               hint="Brief description of why the material is needed."
             />
           </div>
 
-<<<<<<< HEAD
           <TypeAheadInput
             label="Material"
             allowFreeText
@@ -848,15 +722,6 @@ function CreateRequestForm({ onCancel }) {
             value={form.materialName}
             options={materials.map((m) => ({ id: m.id, label: m.name }))}
             onChange={(text) => update('materialName', text)}
-=======
-          <SelectInput
-            label="Material"
-            id="materialId"
-            required
-            value={form.materialId}
-            onChange={(e) => update('materialId', Number(e.target.value))}
-            options={materials.map((m) => ({ value: m.id, label: m.name }))}
->>>>>>> origin/intergration/final-buildwise
           />
 
           <TextInput
@@ -874,10 +739,7 @@ function CreateRequestForm({ onCancel }) {
             type="number"
             inputMode="decimal"
             required
-<<<<<<< HEAD
             error={fieldErrors.requestedQuantity}
-=======
->>>>>>> origin/intergration/final-buildwise
             value={form.requestedQuantity}
             onChange={(e) => update('requestedQuantity', e.target.value)}
             hint="Number of units required."
@@ -904,7 +766,6 @@ function CreateRequestForm({ onCancel }) {
         </div>
       </Card>
     </form>
-<<<<<<< HEAD
       <SuccessDialog
         open={submitOk}
         title="Request submitted"
@@ -913,8 +774,6 @@ function CreateRequestForm({ onCancel }) {
         onClose={onCancel}
       />
     </>
-=======
->>>>>>> origin/intergration/final-buildwise
   )
 }
 
@@ -1017,7 +876,6 @@ function ReviewRequest({ request, canApprove, isSiteUser, isProcurementReader, o
         message: 'The request was sent back to the site team with your comments.',
       },
     }[outcome]
-<<<<<<< HEAD
     // The decision outcome is a pop-up so the manager sees the result without
     // having to read the page: dismissing it returns to the (reloaded) queue.
     return (
@@ -1028,18 +886,6 @@ function ReviewRequest({ request, canApprove, isSiteUser, isProcurementReader, o
         confirmLabel="Back to list"
         onClose={onBack}
       />
-=======
-    return (
-      <div className="stack">
-        <PageHeader title={`Material Request #${request.id}`} description="Decision recorded." />
-        <Card>
-          <EmptyState title={copy.title} message={copy.message} />
-          <div className="form-actions">
-            <Button onClick={onBack}>Back to list</Button>
-          </div>
-        </Card>
-      </div>
->>>>>>> origin/intergration/final-buildwise
     )
   }
 

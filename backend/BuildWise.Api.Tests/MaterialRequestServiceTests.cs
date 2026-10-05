@@ -10,7 +10,6 @@ namespace BuildWise.Api.Tests;
 public class MaterialRequestServiceTests
 {
     [Fact]
-<<<<<<< HEAD
     public async Task CreateRequest_Resolves_New_Alphanumeric_Material_And_Reuses_It()
     {
         var db = TestDbFactory.CreateInMemory();
@@ -31,8 +30,6 @@ public class MaterialRequestServiceTests
     }
 
     [Fact]
-=======
->>>>>>> origin/intergration/final-buildwise
     public async Task CreateRequest_Rejects_NonActive_Project()
     {
         var db = TestDbFactory.CreateInMemory();

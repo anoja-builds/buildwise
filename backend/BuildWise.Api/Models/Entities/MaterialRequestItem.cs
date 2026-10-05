@@ -6,11 +6,8 @@ public class MaterialRequestItem
     public int MaterialRequestId { get; set; }
     public MaterialRequest? MaterialRequest { get; set; }
     public int MaterialId { get; set; }
-<<<<<<< HEAD
     [System.ComponentModel.DataAnnotations.Schema.NotMapped]
     public string? MaterialName { get; set; }
-=======
->>>>>>> origin/intergration/final-buildwise
     public Material? Material { get; set; }
     public string? Description { get; set; }
     public decimal RequestedQuantity { get; set; }

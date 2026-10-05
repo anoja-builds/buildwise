@@ -1,7 +1,4 @@
-<<<<<<< HEAD
 using System.ComponentModel.DataAnnotations.Schema;
-=======
->>>>>>> origin/intergration/final-buildwise
 using BuildWise.Api.Models.Common;
 using BuildWise.Api.Models.Enums;
 
@@ -12,7 +9,6 @@ public class MaterialRequest : BaseEntity
     public int ProjectId { get; set; }
     public Project? Project { get; set; }
 
-<<<<<<< HEAD
     /// <summary>
     /// The project named as plain text on the request form, used when no
     /// <see cref="ProjectId"/> is supplied.
@@ -31,8 +27,6 @@ public class MaterialRequest : BaseEntity
     [NotMapped]
     public string? ProjectName { get; set; }
 
-=======
->>>>>>> origin/intergration/final-buildwise
     public int RequestedByUserId { get; set; }
     public User? RequestedByUser { get; set; }
     public DateOnly RequestDate { get; set; } = DateOnly.FromDateTime(DateTime.UtcNow);
