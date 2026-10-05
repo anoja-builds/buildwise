@@ -4,9 +4,11 @@ import {
   Card,
   EmptyState,
   ErrorState,
+  FormErrorSummary,
   LoadingState,
   PageHeader,
   StatusBadge,
+  SuccessDialog,
   TextInput,
   SelectInput,
   isMaterialRequestDecidable,
@@ -39,7 +41,7 @@ export default function MaterialRequestsPage() {
   // Roles that may record Approve / Reject / Request Revision — mirrors the
   // backend MaterialRequestApprovalOnly policy.
   const canApprove = hasRole('ProcurementManager') || hasRole('SiteManager') || hasRole('Administrator')
-  const canCreate = hasRole('SiteEngineer') || hasRole('SiteOfficer') || hasRole('Administrator')
+  const canCreate = hasRole('SiteEngineer') || hasRole('Administrator')
   const isSiteUser = hasRole('SiteEngineer') || hasRole('SiteOfficer')
   // Procurement staff who may read the whole queue but cannot decide: the
   // Procurement Officer moves an Approved request through RFQ / quotation, so
@@ -119,7 +121,7 @@ export default function MaterialRequestsPage() {
 
   if (mode === 'list') {
     // Client-side filtering on the already-loaded list
-    const filteredRequests = requests.filter((r) => {
+    const filteredRequests = (requests || []).filter((r) => {
       const q = searchQuery.trim().toLowerCase()
       const matchesSearch = !q ||
         String(r.id).includes(q) ||
@@ -145,6 +147,7 @@ export default function MaterialRequestsPage() {
             )}
             <button
               className="bw-button bw-button--secondary"
+              aria-label="Refresh"
               disabled={loading}
               onClick={() => loadRequests({ background: true })}
             >
@@ -152,7 +155,7 @@ export default function MaterialRequestsPage() {
             </button>
             {canCreate ? (
               <button className="bw-button bw-button--primary" onClick={() => setMode('create')}>
-                + Create Request
+                + New Material Request
               </button>
             ) : null}
           </div>
@@ -198,11 +201,11 @@ export default function MaterialRequestsPage() {
               onChange={(e) => setStatusFilter(e.target.value)}
             >
               <option value="all">All statuses</option>
-              <option value="PendingApproval">Pending Approval</option>
-              <option value="Approved">Approved</option>
-              <option value="Rejected">Rejected</option>
-              <option value="RevisionRequested">Revision Requested</option>
-              <option value="Fulfilled">Fulfilled</option>
+              <option value="PendingApproval">Status: Pending Approval</option>
+              <option value="Approved">Status: Approved</option>
+              <option value="Rejected">Status: Rejected</option>
+              <option value="RevisionRequested">Status: Revision Requested</option>
+              <option value="Fulfilled">Status: Fulfilled</option>
             </select>
           </div>
 
@@ -215,10 +218,10 @@ export default function MaterialRequestsPage() {
               onChange={(e) => setPriorityFilter(e.target.value)}
             >
               <option value="all">All priorities</option>
-              <option value="Urgent">Urgent</option>
-              <option value="High">High</option>
-              <option value="Normal">Normal</option>
-              <option value="Low">Low</option>
+              <option value="Urgent">Urgent priority</option>
+              <option value="High">High priority</option>
+              <option value="Normal">Normal priority</option>
+              <option value="Low">Low priority</option>
             </select>
           </div>
         </div>
@@ -251,9 +254,9 @@ export default function MaterialRequestsPage() {
           >
             {filteredRequests.length === 0 ? (
               <EmptyState
-                title={requests.length === 0 ? 'No material requests' : 'No matches'}
+                title={(requests || []).length === 0 ? 'No material requests' : 'No matches'}
                 message={
-                  requests.length === 0
+                  (requests || []).length === 0
                     ? canApprove ? 'Requests awaiting your approval will appear here.' : 'Submitted requests will appear here.'
                     : 'Try adjusting your search or filters.'
                 }
@@ -380,15 +383,116 @@ export default function MaterialRequestsPage() {
 
 // ------------------------------------------------------------------ Form
 
+/**
+ * A text box that suggests the record the typed text points at.
+ *
+ * The field's value is ordinary text, which is what the engineer works in.
+ * `allowFreeText` decides what happens when the text matches nothing:
+ *
+ * - Project: free text is kept and submitted as a name. The API resolves it to a
+ *   project, creating one when the site is new, so a request can be raised for a
+ *   project BuildWise has never seen.
+ * - Material: free text is refused, because a request line has to reference a
+ *   catalogue material (it carries the unit and feeds the quotation agents).
+ */
+function TypeAheadInput({ label, id, value, options, onChange, error, hint, required, allowFreeText = false }) {
+  const [isOpen, setIsOpen] = useState(false)
+  const [highlighted, setHighlighted] = useState(0)
+  const listId = `${id}-listbox`
+
+  const matches = value.trim() === ''
+    ? options
+    : options.filter((option) => option.label.toLowerCase().includes(value.trim().toLowerCase()))
+
+  function choose(option) {
+    onChange(option.label)
+    setIsOpen(false)
+  }
+
+  function handleKeyDown(event) {
+    if (event.key === 'ArrowDown') {
+      event.preventDefault()
+      setIsOpen(true)
+      setHighlighted((index) => Math.min(index + 1, matches.length - 1))
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault()
+      setHighlighted((index) => Math.max(index - 1, 0))
+    } else if (event.key === 'Enter') {
+      // Only swallow Enter when a suggestion is highlighted, so the key still
+      // submits the form the rest of the time.
+      if (isOpen && matches[highlighted]) {
+        event.preventDefault()
+        choose(matches[highlighted])
+      }
+    } else if (event.key === 'Escape') {
+      setIsOpen(false)
+    }
+  }
+
+  return (
+    <div className="field field--typeahead">
+      <label className="field__label" htmlFor={id}>
+        {label}
+        {required ? ' *' : ''}
+      </label>
+      <input
+        id={id}
+        className="field__control"
+        type="text"
+        role="combobox"
+        autoComplete="off"
+        aria-expanded={isOpen}
+        aria-controls={listId}
+        aria-autocomplete="list"
+        aria-invalid={Boolean(error)}
+        value={value}
+        onChange={(event) => {
+          onChange(event.target.value)
+          setIsOpen(true)
+          setHighlighted(0)
+        }}
+        onFocus={() => setIsOpen(true)}
+        onBlur={() => setIsOpen(false)}
+        onKeyDown={handleKeyDown}
+      />
+      {isOpen && matches.length > 0 && (
+        <ul className="typeahead__list" id={listId} role="listbox">
+          {matches.map((option, index) => (
+            <li
+              key={option.id}
+              role="option"
+              aria-selected={option.label === value}
+              className={index === highlighted ? 'typeahead__option typeahead__option--active' : 'typeahead__option'}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => choose(option)}
+            >
+              {option.label}
+            </li>
+          ))}
+        </ul>
+      )}
+      {isOpen && matches.length === 0 && (
+        <p className="field__hint">
+          {allowFreeText
+            ? `No match — this will be used as a new ${label.toLowerCase()} name.`
+            : 'No match. Start typing to choose from the list.'}
+        </p>
+      )}
+      {!isOpen && hint && <p className="field__hint">{hint}</p>}
+      {error && <p className="field__error">{error}</p>}
+    </div>
+  )
+}
+
 function CreateRequestForm({ onCancel }) {
   const [form, setForm] = useState({
-    projectId: 1,
+    projectName: '',
     requiredDate: '',
     requestDate: new Date().toISOString().slice(0, 10),
     priority: 'Normal',
     reason: '',
     siteNotes: '',
-    materialId: 1,
+    materialName: '',
     requestedQuantity: '',
     description: '',
     unit: 'bags',
@@ -396,6 +500,7 @@ function CreateRequestForm({ onCancel }) {
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState(null)
   const [submitOk, setSubmitOk] = useState(false)
+  const [fieldErrors, setFieldErrors] = useState({})
 
   const projects = qualityApi.projects()
   const materials = qualityApi.materials()
@@ -403,21 +508,95 @@ function CreateRequestForm({ onCancel }) {
   const update = (field, value) =>
     setForm((f) => ({ ...f, [field]: value }))
 
+  /**
+   * Client-side rules for the create form. The backend stays authoritative,
+   * but each rule here answers before a round trip:
+   *
+   * - Project, Material, Justification and Site Notes must be a non-empty
+   *   string (project/material resolve to their string name).
+   * - Quantity accepts numbers only — digits with an optional decimal part.
+   * - The required date must be after the request date, so material can never
+   *   be requested for a day that has already passed.
+   */
+  function validate(values) {
+    const errors = {}
+
+    // The project is free text: the engineer types the site they are working on
+    // and the API resolves the name to a project, creating one when the site is
+    // new to BuildWise. The material, by contrast, must be a catalogue record,
+    // so its typed name has to match one exactly.
+    const projectName = String(values.projectName ?? '').trim()
+    if (!projectName) {
+      errors.projectName = 'Enter a project name.'
+    }
+
+    const materialName = String(values.materialName ?? '').trim()
+    if (!materialName) {
+      errors.materialName = 'Enter a material.'
+    } else if (materialName.length > 200) {
+      errors.materialName = 'Enter a material name of 200 characters or less.'
+    }
+
+    const rawQuantity = String(values.requestedQuantity ?? '').trim()
+    if (!rawQuantity) {
+      errors.requestedQuantity = 'Enter a quantity.'
+    } else if (!/^\d+(\.\d+)?$/.test(rawQuantity)) {
+      errors.requestedQuantity = 'Quantity must be a number (digits only).'
+    } else {
+      const quantityCheck = validateQuantity(rawQuantity, values.unit)
+      if (!quantityCheck.isValid) errors.requestedQuantity = quantityCheck.error
+    }
+
+    if (!values.requestDate) {
+      errors.requestDate = 'Request date is required.'
+    } else if (!values.requiredDate) {
+      errors.requiredDate = 'Required date is required.'
+    } else if (values.requiredDate <= values.requestDate) {
+      errors.requiredDate = 'Required date must be after the request date.'
+    } else {
+      const minimumDate = new Date()
+      minimumDate.setUTCDate(minimumDate.getUTCDate() + 3)
+      if (values.requiredDate < minimumDate.toISOString().slice(0, 10)) {
+        errors.requiredDate = 'Required date must be at least 3 days in the future.'
+      }
+    }
+
+    if (!String(values.reason ?? '').trim()) {
+      errors.reason = 'Enter a justification for this request.'
+    }
+
+    if (!String(values.siteNotes ?? '').trim()) {
+      errors.siteNotes = 'Enter site notes for this request.'
+    }
+
+    return errors
+  }
+
   async function handleSubmit(e) {
     e.preventDefault()
-    setSubmitting(true)
     setSubmitError(null)
     setSubmitOk(false)
 
+    const errors = validate(form)
+    setFieldErrors(errors)
+    if (Object.keys(errors).length > 0) return
+
+    setSubmitting(true)
+
     const payload = {
-      projectId: form.projectId,
+      // Both the name and the id go out: the API prefers the id when it still
+      // matches the typed text, and falls back to resolving (or creating) by
+      // name otherwise.
+      projectId: projects.find((p) => String(p.name ?? '').trim().toLowerCase() === String(form.projectName ?? '').trim().toLowerCase())?.id ?? 0,
+      projectName: String(form.projectName ?? '').trim(),
       requestDate: form.requestDate,
       requiredDate: form.requiredDate,
       priority: form.priority,
       reason: form.reason || undefined,
       siteNotes: form.siteNotes || undefined,
       items: [{
-        materialId: form.materialId,
+        materialId: materials.find((m) => String(m.name ?? '').trim().toLowerCase() === String(form.materialName ?? '').trim().toLowerCase())?.id ?? 0,
+        materialName: String(form.materialName ?? '').trim(),
         requestedQuantity: Number(form.requestedQuantity),
         unit: form.unit || undefined,
         description: form.description || undefined,
@@ -430,13 +609,13 @@ function CreateRequestForm({ onCancel }) {
       await qualityApi.createMaterialRequest(payload)
       setSubmitOk(true)
       setForm({
-        projectId: 1,
+        projectName: '',
         requiredDate: '',
         requestDate: new Date().toISOString().slice(0, 10),
         priority: 'Normal',
         reason: '',
         siteNotes: '',
-        materialId: 1,
+        materialName: '',
         requestedQuantity: '',
         description: '',
         unit: 'bags',
@@ -448,40 +627,31 @@ function CreateRequestForm({ onCancel }) {
     }
   }
 
-  if (submitOk) {
-    return (
-      <Card>
-        <EmptyState
-          title="Request submitted"
-          message="Your material request has been created and is now awaiting approval."
-        />
-        <div className="form-actions">
-          <Button variant="secondary" onClick={onCancel}>
-            ← Back to list
-          </Button>
-        </div>
-      </Card>
-    )
-  }
-
   return (
-    <form className="form-layout" onSubmit={handleSubmit}>
+    <>
+    {/* noValidate: our own messages (type + date rules) replace the browser's
+        generic bubbles, so they appear consistently on every browser. */}
+    <form className="form-layout" onSubmit={handleSubmit} noValidate>
       <PageHeader
         title="Create Material Request"
         description="Submit a new material request for procurement approval."
       />
 
       {submitError && <ErrorState message={submitError} />}
+      <FormErrorSummary fieldErrors={fieldErrors} />
 
       <Card>
         <div className="field-grid">
-          <SelectInput
+          <TypeAheadInput
             label="Project"
-            id="projectId"
+            id="projectName"
             required
-            value={form.projectId}
-            onChange={(e) => update('projectId', Number(e.target.value))}
-            options={projects.map((p) => ({ value: p.id, label: p.name }))}
+            allowFreeText
+            error={fieldErrors.projectName}
+            hint="Type the project name. A site BuildWise has not seen before is created from here."
+            value={form.projectName}
+            options={projects.map((p) => ({ id: p.id, label: p.name }))}
+            onChange={(text) => update('projectName', text)}
           />
 
           <TextInput
@@ -489,6 +659,7 @@ function CreateRequestForm({ onCancel }) {
             id="requestDate"
             type="date"
             required
+            error={fieldErrors.requestDate}
             value={form.requestDate}
             onChange={(e) => update('requestDate', e.target.value)}
           />
@@ -498,6 +669,7 @@ function CreateRequestForm({ onCancel }) {
             id="requiredDate"
             type="date"
             required
+            error={fieldErrors.requiredDate}
             value={form.requiredDate}
             onChange={(e) => update('requiredDate', e.target.value)}
           />
@@ -520,6 +692,8 @@ function CreateRequestForm({ onCancel }) {
             <TextInput
               label="Site Notes"
               id="siteNotes"
+              required
+              error={fieldErrors.siteNotes}
               value={form.siteNotes}
               onChange={(e) => update('siteNotes', e.target.value)}
               hint="Access, unloading, storage, or site coordination notes."
@@ -530,19 +704,24 @@ function CreateRequestForm({ onCancel }) {
             <TextInput
               label="Reason / Purpose"
               id="reason"
+              required
+              error={fieldErrors.reason}
               value={form.reason}
               onChange={(e) => update('reason', e.target.value)}
               hint="Brief description of why the material is needed."
             />
           </div>
 
-          <SelectInput
+          <TypeAheadInput
             label="Material"
-            id="materialId"
+            allowFreeText
+            id="materialName"
             required
-            value={form.materialId}
-            onChange={(e) => update('materialId', Number(e.target.value))}
-            options={materials.map((m) => ({ value: m.id, label: m.name }))}
+            error={fieldErrors.materialName}
+            hint="Type a material name with letters and numbers, e.g. Cement 50kg, or choose a suggestion."
+            value={form.materialName}
+            options={materials.map((m) => ({ id: m.id, label: m.name }))}
+            onChange={(text) => update('materialName', text)}
           />
 
           <TextInput
@@ -560,6 +739,7 @@ function CreateRequestForm({ onCancel }) {
             type="number"
             inputMode="decimal"
             required
+            error={fieldErrors.requestedQuantity}
             value={form.requestedQuantity}
             onChange={(e) => update('requestedQuantity', e.target.value)}
             hint="Number of units required."
@@ -586,6 +766,14 @@ function CreateRequestForm({ onCancel }) {
         </div>
       </Card>
     </form>
+      <SuccessDialog
+        open={submitOk}
+        title="Request submitted"
+        message="Your material request has been created and is now awaiting approval."
+        confirmLabel="Back to list"
+        onClose={onCancel}
+      />
+    </>
   )
 }
 
@@ -688,16 +876,16 @@ function ReviewRequest({ request, canApprove, isSiteUser, isProcurementReader, o
         message: 'The request was sent back to the site team with your comments.',
       },
     }[outcome]
+    // The decision outcome is a pop-up so the manager sees the result without
+    // having to read the page: dismissing it returns to the (reloaded) queue.
     return (
-      <div className="stack">
-        <PageHeader title={`Material Request #${request.id}`} description="Decision recorded." />
-        <Card>
-          <EmptyState title={copy.title} message={copy.message} />
-          <div className="form-actions">
-            <Button onClick={onBack}>Back to list</Button>
-          </div>
-        </Card>
-      </div>
+      <SuccessDialog
+        open
+        title={copy.title}
+        message={copy.message}
+        confirmLabel="Back to list"
+        onClose={onBack}
+      />
     )
   }
 

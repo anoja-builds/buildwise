@@ -45,9 +45,14 @@ class OperationsService {
     String? description,
     String? unit,
     String? itemRequiredDate,
+    String? projectName,
+    String? materialName,
+    String? requestDate,
   }) async {
     final response = await _apiClient.post('/material-requests', body: {
       'projectId': projectId,
+      'projectName': ?projectName,
+      'requestDate': ?requestDate,
       'requiredDate': requiredDate,
       'priority': priority,
       'reason': reason,
@@ -56,6 +61,7 @@ class OperationsService {
       'items': [
         {
           'materialId': materialId,
+          'materialName': ?materialName,
           'requestedQuantity': quantity,
           'unit': unit,
           'description': description,
@@ -294,6 +300,14 @@ class OperationsService {
     }
   }
 
+  Future<Map<String, dynamic>> getMaterialRequestDetail(int id) async =>
+      _map(await _apiClient.get('/material-requests/$id'), 'load material request');
+
+  Future<List<Map<String, dynamic>>> listProjects() async =>
+      _list(await _apiClient.get('/projects'), 'projects');
+
+  Future<List<Map<String, dynamic>>> listMaterials() async =>
+      _list(await _apiClient.get('/materials'), 'materials');
   List<Map<String, dynamic>> _list(dynamic response, String label) {
     if (response.statusCode != 200) {
       throw Exception(_error(response, 'Could not load $label'));

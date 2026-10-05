@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations.Schema;
 using BuildWise.Api.Models.Common;
 using BuildWise.Api.Models.Enums;
 
@@ -7,6 +8,24 @@ public class MaterialRequest : BaseEntity
 {
     public int ProjectId { get; set; }
     public Project? Project { get; set; }
+
+    /// <summary>
+    /// The project named as plain text on the request form, used when no
+    /// <see cref="ProjectId"/> is supplied.
+    /// <para>
+    /// A site engineer types the project they are working on; they should not
+    /// have to know an internal id, and a project raised on a new site may not
+    /// exist yet. <c>MaterialRequestService</c> resolves this name against the
+    /// project list (case-insensitively) and creates the project when nothing
+    /// matches. An id, when present, always wins because it is exact.
+    /// </para>
+    /// <para>
+    /// Not a column: this is request input only, and the request itself always
+    /// ends up pointing at a real <see cref="ProjectId"/>.
+    /// </para>
+    /// </summary>
+    [NotMapped]
+    public string? ProjectName { get; set; }
 
     public int RequestedByUserId { get; set; }
     public User? RequestedByUser { get; set; }

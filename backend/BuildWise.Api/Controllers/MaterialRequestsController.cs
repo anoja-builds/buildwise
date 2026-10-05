@@ -72,7 +72,7 @@ public class MaterialRequestsController : ControllerBase
             query = query.Where(r => r.ProjectId == projectId.Value);
         }
 
-        var requests = await query
+        var rows = await query
             .OrderByDescending(r => r.RequiredDate)
             .Select(r => new MaterialRequestSummaryDto(
                 r.Id,
@@ -87,11 +87,15 @@ public class MaterialRequestsController : ControllerBase
                 r.Priority.ToString(),
                 r.SiteNotes,
                 r.RevisionOfRequestId,
-                r.RevisionNumber
+                r.RevisionNumber,
+                // Line-ordered material names so the list can label each row.
+                r.Items.Select(i => i.Material!.Name).ToList(),
+                null,
+                r.RequestedByUserId
             ))
             .ToListAsync();
 
-        return Ok(requests);
+        return Ok(await WithRequesterNamesAsync(rows));
     }
 
     /// <summary>
@@ -114,7 +118,7 @@ public class MaterialRequestsController : ControllerBase
     [Authorize(Policy = Policies.SiteOperationsOnly)]
     public async Task<ActionResult<IEnumerable<MaterialRequestSummaryDto>>> GetMine()
     {
-        var requests = await _db.MaterialRequests
+        var rows = await _db.MaterialRequests
             .Include(request => request.Project)
             .Include(request => request.Items)
             .Include(request => request.Quotations)
@@ -132,9 +136,56 @@ public class MaterialRequestsController : ControllerBase
                 request.Priority.ToString(),
                 request.SiteNotes,
                 request.RevisionOfRequestId,
-                request.RevisionNumber))
+                request.RevisionNumber,
+                request.Items.Select(i => i.Material!.Name).ToList(),
+                null,
+                request.RequestedByUserId))
             .ToListAsync();
-        return Ok(requests);
+
+        // Resolve the requester's name in one extra query rather than through the
+        // `RequestedByUser` navigation. Reaching it in the projection makes EF
+        // emit an INNER JOIN, which drops the whole request row when the owning
+        // user is missing — a purchase request would vanish from the approver's
+        // list instead of appearing without a name.
+        return Ok(await WithRequesterNamesAsync(rows));
+    }
+
+    /// <summary>
+    /// Fills in <see cref="MaterialRequestSummaryDto.RequestedByName"/> with one
+    /// extra query.
+    /// <para>
+    /// Deliberately a second query rather than the <c>RequestedByUser</c>
+    /// navigation inside the projection: EF turns that navigation into an INNER
+    /// JOIN, so a request whose owning user is missing is dropped from the
+    /// result entirely. That would hide a live purchase request from the
+    /// approver rather than show it without a name. Here a missing user simply
+    /// yields a null name and the row still appears.
+    /// </para>
+    /// </summary>
+    private async Task<List<MaterialRequestSummaryDto>> WithRequesterNamesAsync(
+        List<MaterialRequestSummaryDto> rows)
+    {
+        var ids = rows
+            .Select(r => r.RequestedByUserId)
+            .Where(id => id.HasValue)
+            .Select(id => id!.Value)
+            .Distinct()
+            .ToList();
+        if (ids.Count == 0) return rows;
+
+        var names = await _db.Users
+            .Where(user => ids.Contains(user.Id))
+            .ToDictionaryAsync(user => user.Id, user => user.FullName);
+
+        return rows
+            .Select(row => row with
+            {
+                RequestedByName = row.RequestedByUserId.HasValue
+                    && names.TryGetValue(row.RequestedByUserId.Value, out var name)
+                        ? name
+                        : null,
+            })
+            .ToList();
     }
 
     /// <summary>

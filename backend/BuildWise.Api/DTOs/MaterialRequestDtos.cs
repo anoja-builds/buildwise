@@ -24,7 +24,27 @@ public record MaterialRequestSummaryDto(
     string Priority = "Normal",
     string? SiteNotes = null,
     int? RevisionOfRequestId = null,
-    int RevisionNumber = 1
+    int RevisionNumber = 1,
+    /// <summary>
+    /// The material names on this request, in line order.
+    /// <para>
+    /// Optional and appended last so every existing caller and the React client
+    /// keep working untouched: <c>ItemCount</c> alone cannot tell a Site Officer
+    /// which material a row refers to, and the list needs a label a human can
+    /// read. A client that ignores this field is unaffected.
+    /// </para>
+    /// </summary>
+    IReadOnlyList<string>? MaterialNames = null,
+    /// <summary>
+    /// Who raised the request, as `FullName`, plus their id.
+    /// <para>
+    /// An approver works a queue raised by other people, so "Cement (50kg bag)"
+    /// alone does not say who wants it or who to ask when the request is
+    /// unclear. Optional and appended last, so the React client is unaffected.
+    /// </para>
+    /// </summary>
+    string? RequestedByName = null,
+    int? RequestedByUserId = null
 );
 
 public record MaterialRequestDetailDto(

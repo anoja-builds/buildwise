@@ -6,6 +6,18 @@ import MaterialRequestsPage from './MaterialRequestsPage'
 // real session; qualityApi is mocked so no backend is needed.
 const authState = vi.hoisted(() => ({ roles: [] }))
 
+// The project and material catalogues the create form reads. They are plain
+// state rather than mock functions because `vi.resetAllMocks()` below wipes
+// implementations: a `vi.fn(() => catalogue)` would return undefined in every
+// test and the form would crash on `.map`.
+const catalogue = vi.hoisted(() => ({
+  projects: [],
+  materials: [],
+}))
+
+const defaultProjects = [{ id: 1, name: 'Riverside Apartments — Block C' }]
+const defaultMaterials = [{ id: 1, name: 'OPC Cement', unit: 'bags' }]
+
 vi.mock('../auth/AuthContext', () => ({
   useAuth: () => ({ hasRole: (role) => authState.roles.includes(role) }),
 }))
@@ -18,8 +30,8 @@ vi.mock('../services/qualityApi', () => ({
     decideMaterialRequest: vi.fn(),
     analyzeRequest: vi.fn(),
     createMaterialRequest: vi.fn(),
-    projects: () => [{ id: 1, name: 'Riverside Apartments — Block C' }],
-    materials: () => [{ id: 1, name: 'OPC Cement', unit: 'bags' }],
+    projects: () => catalogue.projects,
+    materials: () => catalogue.materials,
   },
 }))
 
@@ -87,6 +99,8 @@ async function renderAsManager() {
 beforeEach(() => {
   vi.resetAllMocks()
   authState.roles = []
+  catalogue.projects = defaultProjects
+  catalogue.materials = defaultMaterials
 })
 
 describe('MaterialRequestsPage (Step 2 — manager reviews request)', () => {
@@ -103,7 +117,7 @@ describe('MaterialRequestsPage (Step 2 — manager reviews request)', () => {
     expect(screen.getByRole('button', { name: 'Review' })).toBeInTheDocument()
     // Approvers load every status so a decision (→ Approved) stays visible.
     expect(qualityApi.listMaterialRequests).toHaveBeenCalledWith('all')
-    expect(screen.queryByRole('button', { name: '+ Create Request' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '+ New Material Request' })).not.toBeInTheDocument()
   })
 
   it('keeps a freshly submitted request reachable by the manager, and keeps decided rows listed', async () => {
@@ -201,7 +215,7 @@ describe('MaterialRequestsPage (Step 2 — manager reviews request)', () => {
 
     render(<MaterialRequestsPage />)
 
-    const create = await screen.findByRole('button', { name: '+ Create Request' })
+    const create = await screen.findByRole('button', { name: '+ New Material Request' })
     expect(create.className).toContain('bw-button--primary')
 
     fireEvent.click(create)
@@ -260,12 +274,27 @@ describe('MaterialRequestsPage (Step 2 — manager reviews request)', () => {
 
     render(<MaterialRequestsPage />)
 
-    fireEvent.click(await screen.findByRole('button', { name: '+ Create Request' }))
+    fireEvent.click(await screen.findByRole('button', { name: '+ New Material Request' }))
+    fireEvent.change(screen.getByRole('combobox', { name: /^project/i }), {
+      target: { value: 'Riverside Apartments — Block C' },
+    })
+    fireEvent.change(screen.getByRole('combobox', { name: /^material/i }), {
+      target: { value: 'OPC Cement' },
+    })
+    fireEvent.change(screen.getByLabelText(/request date/i), {
+      target: { value: '2026-10-01' },
+    })
     fireEvent.change(screen.getByLabelText(/required date/i), {
       target: { value: '2026-10-11' },
     })
     fireEvent.change(screen.getByLabelText(/quantity/i), {
       target: { value: '25' },
+    })
+    fireEvent.change(screen.getByLabelText(/reason/i), {
+      target: { value: 'Block C slab concreting' },
+    })
+    fireEvent.change(screen.getByLabelText(/site notes/i), {
+      target: { value: 'Crane access from Gate 2.' },
     })
     fireEvent.click(screen.getByRole('button', { name: 'Submit Request' }))
 
@@ -439,11 +468,10 @@ describe('MaterialRequestsPage (site roles track the whole site queue)', () => {
     expect(screen.getByText(/Read-only\./)).toBeInTheDocument()
   })
 
-  it('keeps the own-request write path available', async () => {
+  it('hides the new material request button for Site Officers', async () => {
     await renderAsSiteOfficer()
 
-    // A site role must still be able to raise its own request.
-    expect(screen.getByRole('button', { name: '+ Create Request' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '+ New Material Request' })).not.toBeInTheDocument()
   })
 })
 
@@ -526,6 +554,202 @@ describe('MaterialRequestsPage (Procurement Officer reads the full queue)', () =
 
     expect(screen.getByText(/Read-only\./)).toBeInTheDocument()
     expect(screen.getByText(/RFQ/i)).toBeInTheDocument()
+  })
+})
+
+// Create-form validation: each field has a type (project/material/justification/
+// site notes are strings, quantity is numbers only) and the required date must
+// be after the request date. The backend re-validates; this is the fast answer.
+describe('MaterialRequestsPage (create form validation)', () => {
+  beforeEach(() => {
+    authState.roles = ['SiteEngineer']
+    qualityApi.listMyMaterialRequests.mockResolvedValue([])
+  })
+
+  async function openCreateForm() {
+    render(<MaterialRequestsPage />)
+    fireEvent.click(await screen.findByRole('button', { name: '+ New Material Request' }))
+  }
+
+  function fillValidForm() {
+    // Project and Material are typed text now, so they start empty and have to
+    // be filled like any other field.
+    fireEvent.change(screen.getByRole('combobox', { name: /^project/i }), {
+      target: { value: 'Riverside Apartments — Block C' },
+    })
+    fireEvent.change(screen.getByRole('combobox', { name: /^material/i }), {
+      target: { value: 'OPC Cement' },
+    })
+    fireEvent.change(screen.getByLabelText(/request date/i), { target: { value: '2026-10-01' } })
+    fireEvent.change(screen.getByLabelText(/required date/i), { target: { value: '2026-10-11' } })
+    fireEvent.change(screen.getByLabelText(/quantity/i), { target: { value: '25' } })
+    fireEvent.change(screen.getByLabelText(/reason/i), { target: { value: 'Block C slab concreting' } })
+    fireEvent.change(screen.getByLabelText(/site notes/i), { target: { value: 'Crane access from Gate 2.' } })
+  }
+
+  it('refuses an empty project, because the project is typed in as a name', async () => {
+    await openCreateForm()
+    fillValidForm()
+    fireEvent.change(screen.getByRole('combobox', { name: /^project/i }), { target: { value: '  ' } })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Submit Request' }))
+
+    expect(await screen.findAllByText('Enter a project name.')).not.toHaveLength(0)
+    expect(qualityApi.createMaterialRequest).not.toHaveBeenCalled()
+  })
+
+  it('refuses a required date that is not after the request date', async () => {
+    await openCreateForm()
+    fillValidForm()
+    fireEvent.change(screen.getByLabelText(/required date/i), { target: { value: '2026-10-01' } })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Submit Request' }))
+
+    // The message appears both beside the field and in the summary banner.
+    expect(await screen.findAllByText('Required date must be after the request date.')).not.toHaveLength(0)
+    expect(qualityApi.createMaterialRequest).not.toHaveBeenCalled()
+  })
+
+  it('requires justification and site notes to be non-empty strings', async () => {
+    await openCreateForm()
+    fireEvent.change(screen.getByLabelText(/request date/i), { target: { value: '2026-10-01' } })
+    fireEvent.change(screen.getByLabelText(/required date/i), { target: { value: '2026-10-11' } })
+    fireEvent.change(screen.getByLabelText(/quantity/i), { target: { value: '25' } })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Submit Request' }))
+
+    expect(await screen.findAllByText('Enter a justification for this request.')).not.toHaveLength(0)
+    expect(screen.getAllByText('Enter site notes for this request.').length).toBeGreaterThan(0)
+    expect(qualityApi.createMaterialRequest).not.toHaveBeenCalled()
+  })
+
+  it('accepts numbers only for quantity and refuses zero', async () => {
+    await openCreateForm()
+    fillValidForm()
+    fireEvent.change(screen.getByLabelText(/quantity/i), { target: { value: '0' } })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Submit Request' }))
+
+    expect(await screen.findAllByText('Quantity must be a positive number greater than 0.')).not.toHaveLength(0)
+    expect(qualityApi.createMaterialRequest).not.toHaveBeenCalled()
+  })
+
+  it('pops a success dialog after the request is created', async () => {
+    qualityApi.listMyMaterialRequests
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ ...submittedRequest, id: 60 }])
+    qualityApi.createMaterialRequest.mockResolvedValue({ id: 60, status: 'PendingApproval' })
+
+    await openCreateForm()
+    fillValidForm()
+    fireEvent.click(screen.getByRole('button', { name: 'Submit Request' }))
+
+    expect(await screen.findByText('Request submitted')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Back to list' })).toBeInTheDocument()
+  })
+
+  it('accepts a new typed alphanumeric material without a catalogue suggestion', async () => {
+    qualityApi.createMaterialRequest.mockResolvedValue({ id: 61, status: 'PendingApproval' })
+    await openCreateForm()
+    fillValidForm()
+    fireEvent.change(screen.getByRole('combobox', { name: /^material/i }), { target: { value: 'Steel 12mm Grade 500' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Submit Request' }))
+    await screen.findByText('Request submitted')
+    expect(qualityApi.createMaterialRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ items: [expect.objectContaining({ materialId: 0, materialName: 'Steel 12mm Grade 500' })] }),
+    )
+  })
+
+  it('accepts material names containing letters and numbers without selecting a suggestion', async () => {
+    catalogue.materials = [{ id: 12, name: 'Steel 12mm Grade 500', unit: 'kg' }]
+    qualityApi.createMaterialRequest.mockResolvedValue({ id: 61, status: 'PendingApproval' })
+    await openCreateForm()
+    fillValidForm()
+    fireEvent.change(screen.getByRole('combobox', { name: /^material/i }), {
+      target: { value: 'steel 12mm grade 500' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Submit Request' }))
+    await screen.findByText('Request submitted')
+    expect(qualityApi.createMaterialRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ items: [expect.objectContaining({ materialId: 12 })] }),
+    )
+  })
+
+  it('resolves the project and material from typed text, not a drop-down', async () => {
+    catalogue.projects = [
+      { id: 1, name: 'Riverside Apartments — Block C' },
+      { id: 7, name: 'Hilltop Villa' },
+    ]
+    catalogue.materials = [
+      { id: 1, name: 'OPC Cement', unit: 'bags' },
+      { id: 9, name: 'TMT Reinforcement Bar' },
+    ]
+    qualityApi.createMaterialRequest.mockResolvedValue({ id: 61, status: 'PendingApproval' })
+
+    await openCreateForm()
+    fillValidForm()
+
+    // The engineer types ordinary text and picks from what matches.
+    const projectField = screen.getByRole('combobox', { name: /^project/i })
+    fireEvent.change(projectField, { target: { value: 'hilltop' } })
+    fireEvent.click(await screen.findByRole('option', { name: 'Hilltop Villa' }))
+    expect(projectField).toHaveValue('Hilltop Villa')
+
+    const materialField = screen.getByRole('combobox', { name: /^material/i })
+    fireEvent.change(materialField, { target: { value: 'tmt' } })
+    fireEvent.click(await screen.findByRole('option', { name: 'TMT Reinforcement Bar' }))
+    expect(materialField).toHaveValue('TMT Reinforcement Bar')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Submit Request' }))
+
+    await screen.findByText('Request submitted')
+    // The IDs are still what goes to the API; only the way of choosing changed.
+    // The material rides on the request's item line, not at the top level.
+    expect(qualityApi.createMaterialRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectId: 7,
+        items: [expect.objectContaining({ materialId: 9 })],
+      }),
+    )
+  })
+
+  it('accepts a project name that is not in the list and sends it as text', async () => {
+    qualityApi.createMaterialRequest.mockResolvedValue({ id: 62, status: 'PendingApproval' })
+
+    await openCreateForm()
+    fillValidForm()
+
+    // A site BuildWise has not seen before. The form does not refuse it: the
+    // name goes out and the API creates the project.
+    const projectField = screen.getByRole('combobox', { name: /^project/i })
+    fireEvent.change(projectField, { target: { value: 'Galle Face Promenade' } })
+    expect(await screen.findByText(/used as a new project name/i)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Submit Request' }))
+
+    await screen.findByText('Request submitted')
+    expect(qualityApi.createMaterialRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectName: 'Galle Face Promenade',
+        // No id to send, so the API resolves the name itself.
+        projectId: 0,
+      }),
+    )
+  })
+
+  it('submits text even when the material matches no catalogue record', async () => {
+    await openCreateForm()
+    fillValidForm()
+
+    const materialField = screen.getByRole('combobox', { name: /^material/i })
+    fireEvent.change(materialField, { target: { value: 'unobtainium' } })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Submit Request' }))
+
+    await screen.findByText('Request submitted')
+    expect(qualityApi.createMaterialRequest).toHaveBeenCalledWith(expect.objectContaining({
+      items: [expect.objectContaining({ materialId: 0, materialName: 'unobtainium' })],
+    }))
   })
 })
 
