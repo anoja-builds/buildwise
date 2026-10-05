@@ -25,10 +25,10 @@ public class SmtpEmailService : IEmailService
         _logger = logger;
     }
 
-    public async Task SendAsync(string toEmail, string subject, string body, CancellationToken cancellationToken = default)
+    public async Task<bool> SendAsync(string toEmail, string subject, string body, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(toEmail))
-            return;
+            return false;
 
         var section = _config.GetSection("Smtp");
         var host = section["Host"];
@@ -38,7 +38,7 @@ public class SmtpEmailService : IEmailService
             _logger.LogInformation(
                 "SMTP not configured — logging email instead of sending. To: {To} | Subject: {Subject}\n{Body}",
                 toEmail, subject, body);
-            return;
+            return false;
         }
 
         var port = int.TryParse(section["Port"], out var p) ? p : 587;
@@ -74,11 +74,13 @@ public class SmtpEmailService : IEmailService
             cts.CancelAfter(timeoutMs);
             await client.SendMailAsync(message, cts.Token);
             _logger.LogInformation("Notification email sent to {To}: {Subject}", toEmail, subject);
+            return true;
         }
         catch (Exception ex)
         {
             // Never let a notification failure break the procurement workflow that triggered it.
             _logger.LogWarning(ex, "Failed to send notification email to {To}", toEmail);
+            return false;
         }
     }
 }

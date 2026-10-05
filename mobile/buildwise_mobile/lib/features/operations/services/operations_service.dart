@@ -186,8 +186,9 @@ class OperationsService {
   }
 
   /// Agent workflow runs, newest first. The backend returns a paged envelope.
-  Future<Map<String, dynamic>> listAgentWorkflows({int page = 1, int pageSize = 20}) async {
-    final response = await _apiClient.get('/agent-workflows?page=$page&pageSize=$pageSize');
+  Future<Map<String, dynamic>> listAgentWorkflows({int page = 1, int pageSize = 20, String? status}) async {
+    final filter = status == null || status == 'all' ? '' : '&status=${Uri.encodeQueryComponent(status)}';
+    final response = await _apiClient.get('/agent-workflows?page=$page&pageSize=$pageSize$filter');
     return _map(response, 'load agent workflows');
   }
 

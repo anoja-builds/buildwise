@@ -1,19 +1,94 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/widgets/error_widget.dart' as buildwise;
+import '../../../core/widgets/field_format.dart';
 import '../../../core/widgets/widgets.dart' hide ErrorWidget;
 import '../services/procurement_service.dart';
 import '../widgets/procurement_status_tone.dart';
 
+class _RfqEmailDialog extends StatefulWidget {
+  const _RfqEmailDialog();
+  @override
+  State<_RfqEmailDialog> createState() => _RfqEmailDialogState();
+}
+
+class _RfqEmailDialogState extends State<_RfqEmailDialog> {
+  final _email = TextEditingController();
+  final _message = TextEditingController();
+  String? _error;
+  @override
+  void dispose() {
+    _email.dispose();
+    _message.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Send RFQ email'),
+    content: SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          AppTextField(
+            label: 'Recipient email',
+            controller: _email,
+            keyboardType: TextInputType.emailAddress,
+          ),
+          AppTextField(
+            label: 'Custom message',
+            controller: _message,
+            maxLines: 3,
+          ),
+          if (_error != null)
+            Text(_error!, style: const TextStyle(color: Colors.red)),
+        ],
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Cancel'),
+      ),
+      TextButton(
+        onPressed: () {
+          if (!RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$')
+              .hasMatch(_email.text.trim())) {
+            setState(() => _error = 'Enter a valid recipient email.');
+            return;
+          }
+          Navigator.pop(context, {
+            'email': _email.text.trim(),
+            'message': _message.text.trim(),
+          });
+        },
+        child: const Text('Send email'),
+      ),
+    ],
+  );
+}
+
 /// RFQ register — mirrors the web app's RFQs page.
+///
+/// Reached by the Procurement Officer and Procurement Manager
+/// (`BuildWiseRoles.procurementDesk`). It points at the same endpoints the
+/// React page uses, so the two clients cannot drift in behaviour.
 ///
 /// An RFQ can only be raised against an **Approved** material request, and at
 /// least one active supplier must be invited, because the whole point is to open
-/// a quotation window with real suppliers.
+/// a quotation window with real suppliers. Suppliers themselves are external
+/// parties: BuildWise emails them, they never log in.
 class RfqScreen extends StatefulWidget {
-  const RfqScreen({super.key, this.service});
+  const RfqScreen({
+    super.key,
+    this.service,
+    this.canIssue = true,
+    this.canClose = true,
+  });
 
   final ProcurementService? service;
+  final bool canIssue;
+  final bool canClose;
 
   @override
   State<RfqScreen> createState() => _RfqScreenState();
@@ -40,7 +115,9 @@ class _RfqScreenState extends State<RfqScreen> {
       final rfqs = await (widget.service ?? _service).listRfqs();
       if (mounted) setState(() => _rfqs = rfqs);
     } catch (e) {
-      if (mounted) setState(() => _error = e.toString().replaceFirst('Exception: ', ''));
+      if (mounted) {
+        setState(() => _error = e.toString().replaceFirst('Exception: ', ''));
+      }
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -55,12 +132,46 @@ class _RfqScreenState extends State<RfqScreen> {
     if (created == true) _load();
   }
 
+  Future<void> _email(Map<String, dynamic> rfq) async {
+    final result = await showDialog<Map<String, String>>(
+      context: context,
+      builder: (_) => const _RfqEmailDialog(),
+    );
+    if (result == null) return;
+    try {
+      final response = await (widget.service ?? _service).sendRfqEmail(
+        (rfq['id'] as num).toInt(),
+        recipientEmail: result['email']!,
+        customMessage: result['message'],
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              response['message']?.toString() ?? 'Email request processed.',
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
+        );
+      }
+    }
+  }
+
   Future<void> _close(Map<String, dynamic> rfq) async {
     final id = (rfq['id'] as num).toInt();
     try {
-      await (widget.service ?? _service).closeRfq(id, 'Closed from the mobile RFQ workspace.');
+      await (widget.service ?? _service).closeRfq(
+        id,
+        'Closed from the mobile RFQ workspace.',
+      );
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('RFQ #$id closed.')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('RFQ #$id closed.')));
       _load();
     } catch (e) {
       if (!mounted) return;
@@ -75,44 +186,50 @@ class _RfqScreenState extends State<RfqScreen> {
     final body = _loading
         ? const Center(child: CircularProgressIndicator())
         : _error != null
-            ? buildwise.ErrorWidget(message: _error!, onRetry: _load)
-            : _rfqs.isEmpty
-                ? const EmptyStateWidget(
-                    title: 'No RFQs yet',
-                    message: 'Issue an RFQ from an approved material request.',
-                  )
-                : RefreshIndicator(
-                    onRefresh: _load,
-                    child: ListView.separated(
-                      padding: const EdgeInsets.all(16),
-                      itemCount: _rfqs.length,
-                      separatorBuilder: (_, _) => const SizedBox(height: 10),
-                      itemBuilder: (_, index) => _RfqCard(
-                        rfq: _rfqs[index],
-                        onClose: () => _close(_rfqs[index]),
-                      ),
-                    ),
-                  );
+        ? buildwise.ErrorWidget(message: _error!, onRetry: _load)
+        : _rfqs.isEmpty
+        ? const EmptyStateWidget(
+            title: 'No RFQs yet',
+            message: 'Issue an RFQ from an approved material request.',
+          )
+        : RefreshIndicator(
+            onRefresh: _load,
+            child: ListView.separated(
+              padding: const EdgeInsets.all(16),
+              itemCount: _rfqs.length,
+              separatorBuilder: (_, _) => const SizedBox(height: 10),
+              itemBuilder: (_, index) => _RfqCard(
+                rfq: _rfqs[index],
+                onClose: widget.canClose ? () => _close(_rfqs[index]) : null,
+                onEmail: widget.canClose ? () => _email(_rfqs[index]) : null,
+              ),
+            ),
+          );
     return Scaffold(
       appBar: AppBar(
         title: const Text('RFQs'),
-        actions: [IconButton(onPressed: _load, icon: const Icon(Icons.refresh))],
+        actions: [
+          IconButton(onPressed: _load, icon: const Icon(Icons.refresh)),
+        ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _issue,
-        icon: const Icon(Icons.add),
-        label: const Text('Issue RFQ'),
-      ),
+      floatingActionButton: widget.canIssue
+          ? FloatingActionButton.extended(
+              onPressed: _issue,
+              icon: const Icon(Icons.add),
+              label: const Text('Issue RFQ'),
+            )
+          : null,
       body: body,
     );
   }
 }
 
 class _RfqCard extends StatelessWidget {
-  const _RfqCard({required this.rfq, required this.onClose});
+  const _RfqCard({required this.rfq, required this.onClose, this.onEmail});
 
   final Map<String, dynamic> rfq;
-  final VoidCallback onClose;
+  final VoidCallback? onClose;
+  final VoidCallback? onEmail;
 
   @override
   Widget build(BuildContext context) {
@@ -125,12 +242,18 @@ class _RfqCard extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text('RFQ #${rfq['id']}', style: Theme.of(context).textTheme.titleMedium),
+              Text(
+                'RFQ #${rfq['id']}',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
               StatusChip(label: status, tone: procurementStatusTone(status)),
             ],
           ),
           const SizedBox(height: 6),
-          Text(rfq['projectName']?.toString() ?? '', style: Theme.of(context).textTheme.bodySmall),
+          Text(
+            rfq['projectName']?.toString() ?? '',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
           const SizedBox(height: 4),
           Text(
             'Responses by ${rfq['requiredResponseDate'] ?? '—'} · '
@@ -145,7 +268,8 @@ class _RfqCard extends StatelessWidget {
               children: [
                 for (final entry in suppliers.cast<Map<String, dynamic>>())
                   StatusChip(
-                    label: '${entry['supplierName'] ?? 'Supplier'} · ${entry['invitationStatus'] ?? 'Invited'}',
+                    label:
+                        '${entry['supplierName'] ?? 'Supplier'} · ${entry['invitationStatus'] ?? 'Invited'}',
                     tone: entry['invitationStatus']?.toString() == 'Accepted'
                         ? StatusTone.success
                         : StatusTone.neutral,
@@ -153,10 +277,12 @@ class _RfqCard extends StatelessWidget {
               ],
             ),
           ],
+          if (onEmail != null)
+            TextButton(onPressed: onEmail, child: const Text('Send RFQ email')),
           // Only an Issued RFQ can still be closed; closing a Draft or an
           // already-Closed one is not a valid transition, so the control is
           // withheld rather than shown and failing.
-          if (status == 'Issued') ...[
+          if (status == 'Issued' && onClose != null) ...[
             const SizedBox(height: 12),
             AppButton(
               label: 'Close RFQ',
@@ -192,6 +318,17 @@ class _IssueRfqSheetState extends State<_IssueRfqSheet> {
   bool _submitting = false;
   String? _error;
 
+  /// The same rule the web RFQ form enforces: suppliers must be given time to
+  /// respond, so the response date has to fall after today.
+  bool get _responseDateIsFuture {
+    final now = DateTime.now();
+    return _responseDate.isAfter(DateTime(now.year, now.month, now.day));
+  }
+
+  String get _responseDateHint => _responseDateIsFuture
+      ? 'Suppliers must respond by this date (must be in the future).'
+      : 'Response date must be after today.';
+
   @override
   void initState() {
     super.initState();
@@ -225,10 +362,14 @@ class _IssueRfqSheetState extends State<_IssueRfqSheet> {
             .cast<Map<String, dynamic>>()
             .where((s) => s['status']?.toString() == 'Active')
             .toList();
-        _requestId = requests.isEmpty ? null : (requests.first['id'] as num).toInt();
+        _requestId = requests.isEmpty
+            ? null
+            : (requests.first['id'] as num).toInt();
       });
     } catch (e) {
-      if (mounted) setState(() => _error = e.toString().replaceFirst('Exception: ', ''));
+      if (mounted) {
+        setState(() => _error = e.toString().replaceFirst('Exception: ', ''));
+      }
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -236,6 +377,32 @@ class _IssueRfqSheetState extends State<_IssueRfqSheet> {
 
   Future<void> _submit() async {
     if (_requestId == null) return;
+    final request = _requests
+        .where((row) => row['id'] == _requestId)
+        .firstOrNull;
+    final required = DateTime.tryParse(
+      request?['requiredDate']?.toString() ?? '',
+    );
+    if (required != null &&
+        DateUtils.dateOnly(_responseDate)
+            .isAfter(DateUtils.dateOnly(required))) {
+      setState(
+        () => _error =
+            'Response date cannot be later than the material required date.',
+      );
+      return;
+    }
+    if (_selectedSuppliers.isEmpty) {
+      setState(() => _error = 'Select at least one active supplier.');
+      return;
+    }
+    if (!_responseDateIsFuture) {
+      setState(
+        () => _error =
+            'Required response date must be a future date (after today).',
+      );
+      return;
+    }
     setState(() {
       _submitting = true;
       _error = null;
@@ -249,18 +416,24 @@ class _IssueRfqSheetState extends State<_IssueRfqSheet> {
       );
       if (mounted) Navigator.of(context).pop(true);
     } catch (e) {
-      if (mounted) setState(() => _error = e.toString().replaceFirst('Exception: ', ''));
+      if (mounted) {
+        setState(() => _error = e.toString().replaceFirst('Exception: ', ''));
+      }
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
   }
 
-
   @override
   Widget build(BuildContext context) {
-    final ready = _requestId != null && _selectedSuppliers.isNotEmpty;
+    final ready =
+        _requestId != null &&
+        _selectedSuppliers.isNotEmpty &&
+        _responseDateIsFuture;
     return Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+      ),
       child: SingleChildScrollView(
         child: Padding(
           padding: const EdgeInsets.all(20),
@@ -285,20 +458,37 @@ class _IssueRfqSheetState extends State<_IssueRfqSheet> {
               else ...[
                 if (_requests.isEmpty)
                   const AppCard(
-                    child: Text('No approved material requests to raise an RFQ against.'),
+                    child: Text(
+                      'No approved material requests to raise an RFQ against.',
+                    ),
                   )
                 else
                   AppDropdown(
                     label: 'Approved material request',
                     value: _requestId?.toString(),
                     items: _requests.map((r) => r['id'].toString()).toList(),
-                    onChanged: (value) =>
-                        setState(() => _requestId = value == null ? null : int.parse(value)),
+                    // Label each option with the material, not the bare id.
+                    itemLabels: _requests
+                        .map(FieldFormat.materialRequestLabel)
+                        .toList(),
+                    onChanged: (value) => setState(
+                      () =>
+                          _requestId = value == null ? null : int.parse(value),
+                    ),
                   ),
                 const SizedBox(height: 12),
                 ListTile(
                   contentPadding: EdgeInsets.zero,
                   title: const Text('Required response date'),
+                  subtitle: Text(
+                    _responseDateHint,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: _responseDateIsFuture
+                          ? Theme.of(context).textTheme.bodySmall?.color
+                          : Colors.red,
+                    ),
+                  ),
                   trailing: Text(
                     _responseDate.toIso8601String().substring(0, 10),
                     style: Theme.of(context).textTheme.bodyMedium,
@@ -316,7 +506,10 @@ class _IssueRfqSheetState extends State<_IssueRfqSheet> {
                 const SizedBox(height: 8),
                 AppTextField(label: 'Notes', controller: _notes, maxLines: 2),
                 const SizedBox(height: 16),
-                Text('Invite active suppliers', style: Theme.of(context).textTheme.titleSmall),
+                Text(
+                  'Invite active suppliers',
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
                 const SizedBox(height: 8),
                 if (_suppliers.isEmpty)
                   const AppCard(child: Text('No active suppliers available.'))
@@ -361,4 +554,3 @@ class _IssueRfqSheetState extends State<_IssueRfqSheet> {
     );
   }
 }
-

@@ -123,7 +123,7 @@ describe('MaterialRequestsPage (Step 2 — manager reviews request)', () => {
     expect(qualityApi.listMaterialRequests).toHaveBeenCalledWith('all')
 
     // The undecided row is actionable, the decided one stays visible but frozen.
-    expect(screen.getByText('Approved')).toBeInTheDocument()
+    expect(screen.getByText('Approved', { selector: '.badge' })).toBeInTheDocument()
     expect(screen.getAllByRole('button', { name: 'Review' })).toHaveLength(1)
   })
 
@@ -242,7 +242,7 @@ describe('MaterialRequestsPage (Step 2 — manager reviews request)', () => {
     render(<MaterialRequestsPage />)
 
     await screen.findByText('PendingApproval')
-    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
+    fireEvent.click(screen.getByRole('button', { name: /Refresh/ }))
 
     await waitFor(() =>
       expect(qualityApi.listMaterialRequests).toHaveBeenCalledTimes(2)
@@ -413,7 +413,7 @@ describe('MaterialRequestsPage (site roles track the whole site queue)', () => {
     await renderAsSiteOfficer()
 
     // The row and its Approved status are both visible without any action click.
-    expect(await screen.findByText('Approved')).toBeInTheDocument()
+    expect(await screen.findByText('Approved', { selector: '.badge' })).toBeInTheDocument()
     expect(qualityApi.listMyMaterialRequests).toHaveBeenCalledTimes(1)
   })
 
@@ -482,15 +482,15 @@ describe('MaterialRequestsPage (Procurement Officer reads the full queue)', () =
     // asked for PendingApproval and MR-52 (Approved) never arrived.
     await renderAsOfficer()
 
-    expect(await screen.findByText('Approved')).toBeInTheDocument()
+    expect(await screen.findByText('Approved', { selector: '.badge' })).toBeInTheDocument()
     expect(qualityApi.listMaterialRequests).toHaveBeenCalledWith('all')
   })
 
   it('shows MR-52 with its Approved status and Urgent priority', async () => {
     await renderAsOfficer()
 
-    expect(await screen.findByText('Approved')).toBeInTheDocument()
-    expect(screen.getByText('Urgent')).toBeInTheDocument()
+    expect(await screen.findByText('Approved', { selector: '.badge' })).toBeInTheDocument()
+    expect(screen.getAllByText('Urgent').some((node) => node.tagName !== 'OPTION')).toBe(true)
     expect(screen.getByText('Riverside Apartments — Block C')).toBeInTheDocument()
   })
 

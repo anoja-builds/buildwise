@@ -23,3 +23,4 @@ export {
   requestAnalysisFlagTone,
   requestAnalysisFlagLabel,
 } from './materialRequestStatus'
+export { default as SuccessDialog } from './SuccessDialog'

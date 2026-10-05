@@ -39,8 +39,8 @@ export default function MaterialRequestsPage() {
   // Roles that may record Approve / Reject / Request Revision — mirrors the
   // backend MaterialRequestApprovalOnly policy.
   const canApprove = hasRole('ProcurementManager') || hasRole('SiteManager') || hasRole('Administrator')
-  const canCreate = hasRole('SiteEngineer') || hasRole('Administrator')
-  const isSiteUser = hasRole('SiteEngineer')
+  const canCreate = hasRole('SiteEngineer') || hasRole('SiteOfficer') || hasRole('Administrator')
+  const isSiteUser = hasRole('SiteEngineer') || hasRole('SiteOfficer')
   // Procurement staff who may read the whole queue but cannot decide: the
   // Procurement Officer moves an Approved request through RFQ / quotation, so
   // the Approved rows are precisely the ones they need to see. They were
