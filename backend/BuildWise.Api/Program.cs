@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 using System.Text.Json.Serialization;
 using BuildWise.Api.Data;
 using BuildWise.Api.Middleware;
@@ -7,15 +7,20 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
+using BuildWise.Api.Models.Entities;
+using BuildWise.Api.Security;
 
 var builder = WebApplication.CreateBuilder(args);
 
-var connectionString =
-    builder.Configuration.GetConnectionString("DefaultConnection")
-    ?? "Host=localhost;Database=buildwise;Username=postgres;Password=postgres";
+var configuredConnection = builder.Configuration.GetConnectionString("DefaultConnection");
+if (string.IsNullOrWhiteSpace(configuredConnection))
+{
+    throw new InvalidOperationException(
+        "ConnectionStrings:DefaultConnection is not configured. Use dotnet user-secrets or ConnectionStrings__DefaultConnection.");
+}
 
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
-    options.UseNpgsql(connectionString));
+    options.UseNpgsql(configuredConnection));
 
 // Add services to the container.
 builder.Services.AddControllers()
@@ -24,6 +29,12 @@ builder.Services.AddControllers()
         options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
         options.JsonSerializerOptions.ReferenceHandler = ReferenceHandler.IgnoreCycles;
     });
+
+// Component 1 service: material request creation and approval validation.
+builder.Services.AddScoped<MaterialRequestService>();
+
+// Integrated service covering all components (Component 1, 2, 3).
+builder.Services.AddScoped<IntegratedProcurementService>();
 
 // Component 2 services: deterministic validation, agent client, workflow orchestration.
 builder.Services.AddScoped<ProcurementValidationService>();
@@ -37,19 +48,55 @@ builder.Services.AddHttpClient<QuotationAgentClient>(client =>
     client.Timeout = TimeSpan.FromSeconds(12);
 });
 
+builder.Services.AddScoped<ProcurementPlanningAgentService>();
 builder.Services.AddScoped<ProcurementWorkflowService>();
 
 builder.Services.AddScoped<IEmailService, SmtpEmailService>();
 
-// Component 3 service: delivery risk analysis over confirmed purchase orders.
-builder.Services.AddScoped<DeliveryRiskAgentService>();
+builder.Services.AddHttpClient("RequestAgent", client =>
+{
+    client.BaseAddress = new Uri(builder.Configuration["AgentService:RequestUrl"] ?? "http://127.0.0.1:8002/");
+    client.Timeout = TimeSpan.FromSeconds(5);
+});
+builder.Services.AddHttpClient("DeliveryAgent", client =>
+{
+    client.BaseAddress = new Uri(builder.Configuration["AgentService:DeliveryUrl"] ?? "http://127.0.0.1:8003/");
+    client.Timeout = TimeSpan.FromSeconds(5);
+});
+builder.Services.AddHttpClient("QualityAgent", client =>
+{
+    client.BaseAddress = new Uri(builder.Configuration["AgentService:QualityUrl"] ?? "http://127.0.0.1:8004/");
+    client.Timeout = TimeSpan.FromSeconds(5);
+});
+builder.Services.AddHttpClient("Gemini", client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(10);
+});
+builder.Services.AddScoped<OperationalAgentClient>();
+builder.Services.AddScoped<OperationalAgentAuditService>();
+
+// Component 3 service: delivery recording against confirmed purchase orders.
+builder.Services.AddScoped<DeliveryService>();
+
+// Component 3 service: auditable delivery-risk assessment with deterministic fallback.
+builder.Services.AddScoped<DeliveryAgentService>();
+
+// Component 4 service: quality inspection, NCR management, and notification events.
+builder.Services.AddScoped<QualityInspectionService>();
+builder.Services.AddScoped<NotificationService>();
+builder.Services.AddScoped<DashboardService>();
 
 // Shared authentication (Core, used by every component controllers, React and Flutter)
 builder.Services.AddSingleton<JwtTokenService>();
 builder.Services.AddScoped<AuthService>();
 
-var jwtKey = builder.Configuration["Jwt:Key"]
-    ?? throw new InvalidOperationException("Jwt:Key is not configured. Set it in appsettings.json or user-secrets.");
+var configuredJwtKey = builder.Configuration["Jwt:Key"];
+if (string.IsNullOrWhiteSpace(configuredJwtKey) || configuredJwtKey.Length < 32)
+{
+    throw new InvalidOperationException(
+        "Jwt:Key is not configured or is too short. Use dotnet user-secrets or Jwt__Key.");
+}
+var jwtKey = configuredJwtKey;
 var jwtIssuer = builder.Configuration["Jwt:Issuer"] ?? "BuildWise";
 var jwtAudience = builder.Configuration["Jwt:Audience"] ?? "BuildWiseClients";
 
@@ -73,7 +120,65 @@ builder.Services.AddAuthentication(options =>
     };
 });
 
-builder.Services.AddAuthorization();
+builder.Services.AddAuthorization(options =>
+{
+    // Every policy below is registered from the Roles/Policies constants so that
+    // the [Authorize] attributes on controllers and these grants can never drift
+    // apart (Phase 1 RBAC hardening).
+
+    options.AddPolicy(Policies.SiteOperationsOnly, policy =>
+        policy.RequireRole(Roles.SiteEngineer, Roles.SiteOfficer));
+
+    options.AddPolicy(Policies.ProcurementStaffOnly, policy =>
+        policy.RequireRole(Roles.ProcurementOfficer, Roles.ProcurementManager, Roles.Administrator));
+
+    options.AddPolicy(Policies.SupplierAdministrationOnly, policy =>
+        policy.RequireRole(Roles.ProcurementOfficer, Roles.Administrator));
+
+    options.AddPolicy(Policies.QualityControlOnly, policy =>
+        policy.RequireRole(Roles.QualityInspector, Roles.Administrator));
+
+    options.AddPolicy(Policies.MaterialRequestApprovalOnly, policy =>
+        policy.RequireRole(Roles.ProcurementManager, Roles.SiteManager, Roles.Administrator));
+
+    options.AddPolicy(Policies.ProcurementDecisionOnly, policy =>
+        policy.RequireRole(Roles.ProcurementManager, Roles.SiteManager, Roles.Administrator));
+
+    options.AddPolicy(Policies.MaterialRequestReaders, policy =>
+        policy.RequireRole(
+            Roles.SiteEngineer, Roles.SiteOfficer,
+            Roles.ProcurementOfficer, Roles.ProcurementManager, Roles.SiteManager,
+            Roles.Administrator));
+
+    options.AddPolicy(Policies.QualityReaders, policy =>
+        policy.RequireRole(
+            Roles.SiteEngineer, Roles.SiteOfficer,
+            Roles.ProcurementManager, Roles.SiteManager,
+            Roles.QualityInspector, Roles.Administrator));
+
+    options.AddPolicy(Policies.ProcurementStaffAndAdmin, policy =>
+        policy.RequireRole(Roles.ProcurementOfficer, Roles.ProcurementManager, Roles.SiteManager, Roles.Administrator));
+
+    // Internal staff surface. Supplier portal users are authenticated but must
+    // never reach procurement, supplier master data, or other suppliers' data.
+    options.AddPolicy(Policies.InternalStaffOnly, policy =>
+        policy.RequireRole(
+            Roles.SiteEngineer, Roles.SiteOfficer,
+            Roles.ProcurementOfficer, Roles.ProcurementManager, Roles.SiteManager,
+            Roles.ReceivingOfficer, Roles.QualityInspector,
+            Roles.ProjectManager, Roles.Administrator));
+
+    options.AddPolicy(Policies.DeliveryParticipantsOnly, policy =>
+        policy.RequireRole(
+            Roles.SiteEngineer, Roles.SiteOfficer,
+            Roles.ReceivingOfficer, Roles.QualityInspector,
+            Roles.ProcurementOfficer, Roles.ProcurementManager, Roles.SiteManager,
+            Roles.Administrator));
+
+    // Supplier portal: a dedicated external role, never mixed with internal staff.
+    options.AddPolicy(Policies.SupplierPortalOnly, policy =>
+        policy.RequireRole(Roles.Supplier));
+});
 
 // CORS: permissive dev policy (covers React on localhost:5173 and Flutter/Chrome).
 builder.Services.AddCors(options =>
@@ -139,11 +244,30 @@ app.UseMiddleware<ExceptionHandlingMiddleware>();
 
 app.UseCors("AllowAll");
 
-app.UseHttpsRedirection();
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHttpsRedirection();
+}
 
 app.UseAuthentication();
+app.UseMiddleware<AuditLoggingMiddleware>();
 app.UseAuthorization();
+
+// Public deployment probe. It intentionally exposes no database details,
+// secrets, or workflow data; the API's protected business endpoints remain JWT/RBAC protected.
+app.MapGet("/health", () => Results.Ok(new
+{
+    status = "healthy",
+    service = "BuildWise API",
+    version = "1.0.0"
+}));
 
 app.MapControllers();
 
 app.Run();
+
+// Exposed so BuildWise.Api.Tests can boot the real pipeline through
+// WebApplicationFactory<Program>. The RBAC suite asserts 401/403 behaviour
+// against this exact middleware order and policy set, so it must not be tested
+// against a replica of Program.cs.
+public partial class Program;

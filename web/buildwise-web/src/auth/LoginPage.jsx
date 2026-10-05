@@ -1,30 +1,44 @@
 import { useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { Button, Card, TextInput } from '../components/shared'
 import { useAuth } from './AuthContext'
+import { defaultRouteForRoles } from './accessControl'
 import './auth.css'
 
 const DEMO_ACCOUNTS = [
   { label: 'Procurement Officer', email: 'procurement.officer@buildwise.demo' },
   { label: 'Procurement Manager', email: 'procurement.manager@buildwise.demo' },
   { label: 'Site Engineer', email: 'site.engineer@buildwise.demo' },
+  { label: 'Site Officer', email: 'site.officer@buildwise.demo' },
+  { label: 'Site Manager', email: 'site.manager@buildwise.demo' },
+  { label: 'Quality Inspector', email: 'quality.inspector@buildwise.demo' },
   { label: 'Administrator', email: 'admin@buildwise.demo' }
 ]
 const DEMO_PASSWORD = 'Passw0rd!'
 
 export default function LoginPage() {
-  const { login, loading, error } = useAuth()
+  const { login, roles, loading, error } = useAuth()
+  const navigate = useNavigate()
+  const location = useLocation()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
 
+  const completeLogin = async (loginEmail, loginPassword) => {
+    if (await login(loginEmail, loginPassword)) {
+      const requestedPath = location.state?.from
+      navigate(requestedPath && requestedPath !== '/login' ? requestedPath : defaultRouteForRoles(roles), { replace: true })
+    }
+  }
+
   const handleSubmit = (event) => {
     event.preventDefault()
-    login(email, password)
+    completeLogin(email, password)
   }
 
   const handleDemoLogin = (demoEmail) => {
     setEmail(demoEmail)
     setPassword(DEMO_PASSWORD)
-    login(demoEmail, DEMO_PASSWORD)
+    completeLogin(demoEmail, DEMO_PASSWORD)
   }
 
   return (
@@ -34,7 +48,7 @@ export default function LoginPage() {
           <div className="auth-brand__mark">BW</div>
           <div>
             <div className="auth-brand__name">BuildWise</div>
-            <div className="auth-brand__tagline">Construction materials procurement, delivery & quality</div>
+            <div className="auth-brand__tagline">Construction Procurement &amp; Quality Management</div>
           </div>
         </div>
 

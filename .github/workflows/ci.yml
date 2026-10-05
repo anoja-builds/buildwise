@@ -34,6 +34,9 @@ jobs:
           name: backend-test-results
           path: backend/BuildWise.Api.Tests/TestResults/test-results.trx
 
+      - name: Verify API builds (release)
+        run: dotnet build backend/BuildWise.Api/BuildWise.Api.csproj --configuration Release --no-restore
+
   agent-service:
     name: Agent service (Python)
     runs-on: ubuntu-latest
@@ -54,7 +57,7 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Test
-        run: pytest test_quotation_agent.py -v
+        run: pytest -q
 
   web:
     name: Web (React)
@@ -83,6 +86,14 @@ jobs:
 
       - name: Build
         run: npm run build
+        env:
+          VITE_API_BASE_URL: https://buildwise-api.railway.app/api
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: web/buildwise-web/dist
 
   mobile:
     name: Mobile (Flutter)
@@ -92,6 +103,12 @@ jobs:
         working-directory: mobile/buildwise_mobile
     steps:
       - uses: actions/checkout@v4
+
+      - name: Setup Java (required for Android build)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -106,3 +123,12 @@ jobs:
 
       - name: Test
         run: flutter test
+
+      - name: Build APK (release)
+        run: flutter build apk --release
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: buildwise-release-apk
+          path: mobile/buildwise_mobile/build/app/outputs/flutter-apk/app-release.apk

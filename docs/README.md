@@ -4,6 +4,8 @@ Everything for **Component 2 — Supplier, Quotation & Procurement Management** 
 
 | Document | What it is for |
 |---|---|
+| [project_verification_guide.md](project_verification_guide.md) | **Complete-project release guide:** current pass/fail audit; API/database, React, Flutter, all four agents, four business components, RFQ, administration, RBAC, and manual evidence. |
+| [assignment_compliance_audit.md](assignment_compliance_audit.md) | **SE3090 rubric evidence index:** verified local evidence, remaining submission blockers, and excellent-mark priorities. |
 | [component2_spec.md](component2_spec.md) | The component specification: roles, features, business rules (§5), entities, endpoints, screens, agent contract, required tests. |
 | [component2_build_guide.md](component2_build_guide.md) | Step-by-step implementation guide, phase by phase, with code. |
 | [component2_setup_guide.md](component2_setup_guide.md) | Manual setup and verification: prerequisites, migrations, configuration, running the four apps, the end-to-end walkthrough. |
@@ -16,16 +18,12 @@ Everything for **Component 2 — Supplier, Quotation & Procurement Management** 
 
 | Script | What it does |
 |---|---|
-| [`scripts\start-dev.ps1`](../scripts/start-dev.ps1) | Builds (optional) and starts the API, the Python agent service and the Vite web server in the background; logs to `logs\`, then calls the checker. |
-| [`scripts\check-services.ps1`](../scripts/check-services.ps1) | Reports whether each of the four services is up (ports + real HTTP calls + a database query). Exit code 0 = all up. |
+| [`scripts\verify-project.ps1`](../scripts/verify-project.ps1) | Runs backend, four-agent, web, Flutter, live service, agent-contract, RBAC, performance, and Component 2 smoke gates; supports `-SkipLive` and `-SkipMobile`. |
+| [`scripts\verify-full-journey.ps1`](../scripts/verify-full-journey.ps1) | Writes a fresh C1 → C2 → C3 → C4 scenario and proves all four agents, approval, PO, discrepancy, NCR, persisted history, and final cross-client status. |
+| [`scripts\verify-rfq-admin.ps1`](../scripts/verify-rfq-admin.ps1) | Proves the RFQ lifecycle, protected Administrator user/health/audit APIs, and the 403 role boundary. |
+| [`scripts\start-dev.ps1`](../scripts/start-dev.ps1) | Starts the API, all four Python agents, Vite, and PostgreSQL. |
+| [`scripts\check-services.ps1`](../scripts/check-services.ps1) | Reports whether each service is up (ports + real HTTP calls + a database query). Exit code 0 = all up. |
 | [`scripts\smoke-test.ps1`](../scripts/smoke-test.ps1) | Proves the stack *works*: login, suppliers, purchase orders and the agent's cement-scenario decision, with pass/fail assertions. |
 | [`scripts\stop-dev.ps1`](../scripts/stop-dev.ps1) | Stops the three background services (leaves PostgreSQL running). |
 
-Test suites referenced throughout the docs (all green on `feature/supplier-procurement` @ `6161ecc`):
-
-| Suite | Command | Count |
-|---|---|---|
-| Backend (.NET) | `dotnet test backend/BuildWise.Api.Tests` | 15 passed |
-| Agent service (Python) | `pytest backend/agent_service/test_quotation_agent.py` | 9 passed |
-| Web (React) | `npm test -- --run` in `web/buildwise-web` | 15 passed |
-| Mobile (Flutter) | `flutter test` in `mobile/buildwise_mobile` | requires the Flutter SDK locally |
+Every document is checked against the current working tree, not only the historical Component 2 baseline. The current audit is in [`project_verification_guide.md`](project_verification_guide.md); its release decision is **CONDITIONAL GO** until the listed external and manual evidence is completed.

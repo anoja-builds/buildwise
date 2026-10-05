@@ -1,6 +1,5 @@
 import { authApi } from '../../../services/authApi'
-
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5078/api'
+import { API_BASE, fetchOrThrow, isNetworkFailure } from '../../../services/apiTransport'
 
 const todayPlus = (days) => {
   const d = new Date()
@@ -75,7 +74,8 @@ async function request(path, { method = 'GET', body, mockFallback } = {}) {
     if (body) headers['Content-Type'] = 'application/json'
     if (session?.token) headers['Authorization'] = `Bearer ${session.token}`
 
-    const res = await fetch(`${API_BASE}${path}`, {
+    const url = `${API_BASE}${path}`
+    const res = await fetchOrThrow(url, {
       method,
       headers,
       body: body ? JSON.stringify(body) : undefined
@@ -95,21 +95,20 @@ async function request(path, { method = 'GET', body, mockFallback } = {}) {
     }
 
     if (!res.ok) {
-      let message = `Request failed (${res.status})`
-      try {
-        const data = await res.json()
-        message = data?.error || data?.title || (typeof data === 'string' ? data : message)
-      } catch {
-        // response had no JSON body
-      }
-      throw new Error(message)
+      let payload
+      try { payload = await res.json() } catch { /* No JSON response. */ }
+      const validation = payload?.errors && Object.values(payload.errors).flat().join(' ')
+      const message = validation || payload?.message || payload?.error || payload?.title ||
+        (typeof payload === 'string' ? payload : `Request failed (${res.status})`)
+      throw Object.assign(new Error(message), { status: res.status, payload })
     }
-
     usingMockFallback = false
     if (res.status === 204) return null
     return await res.json()
   } catch (err) {
-    if (mockFallback !== undefined && (err instanceof TypeError || err.message === 'Failed to fetch')) {
+    // Mock fallback still engages on either a real network failure or the
+    // deliberate TypeError thrown above for an unauthenticated 401.
+    if (mockFallback !== undefined && (isNetworkFailure(err) || err instanceof TypeError)) {
       usingMockFallback = true
       return typeof mockFallback === 'function' ? mockFallback() : mockFallback
     }
@@ -123,6 +122,12 @@ const qs = (params = {}) => {
 }
 
 export const procurementApi = {
+  // Project materials budget. Commercial information: readable by the
+  // procurement side only, which the API enforces server-side.
+  getProjectBudget: (projectId) => request(`/projects/${projectId}/budget`),
+  updateProjectBudget: (projectId, materialBudgetAmount) =>
+    request(`/projects/${projectId}/budget`, { method: 'PUT', body: { materialBudgetAmount } }),
+
   // Suppliers
   listSuppliers: (params) => request(`/suppliers${qs(params)}`, { mockFallback: () => ({ items: MOCK.suppliers, total: MOCK.suppliers.length, page: 1, pageSize: MOCK.suppliers.length }) }),
   getSupplier: (id) => request(`/suppliers/${id}`, { mockFallback: () => ({ ...MOCK.suppliers.find((s) => s.id === Number(id)), quotationHistory: MOCK.quotations.filter((q) => q.supplierId === Number(id)).map((q) => ({ quotationId: q.id, materialRequestId: q.materialRequestId, quotationDate: q.quotationDate, validUntil: q.validUntil, status: q.status, totalAmount: q.totalAmount })) }) }),
@@ -163,11 +168,21 @@ export const procurementApi = {
     })
   }),
 
+  // RFQs
+  listRfqs: (status) => request(`/rfqs${qs({ status })}`, { mockFallback: () => [] }),
+  getRfq: (id) => request(`/rfqs/${id}`, { mockFallback: () => null }),
+  createRfq: (data) => request('/rfqs', { method: 'POST', body: data }),
+  addRfqSuppliers: (id, supplierIds) => request(`/rfqs/${id}/suppliers`, { method: 'POST', body: { supplierIds } }),
+  closeRfq: (id, reason) => request(`/rfqs/${id}/close`, { method: 'POST', body: { reason } }),
+
+  sendRfqEmail: (id, data) => request(`/rfqs/${id}/send-email`, { method: 'POST', body: data }),
+
   // Agentic AI workflow
   startWorkflow: (requestId, body) => request(`/material-requests/${requestId}/procurement-workflow`, { method: 'POST', body: body ?? {}, mockFallback: () => ({ workflowId: MOCK.workflow.id, status: MOCK.workflow.status, message: 'Quotation & Supplier Analysis Agent completed (demo data — agent service not reachable).' }) }),
   getWorkflow: (workflowId) => request(`/procurement-workflow/${workflowId}`, { mockFallback: () => MOCK.workflow }),
   getWorkflowHistory: (workflowId) => request(`/procurement-workflow/${workflowId}/history`, { mockFallback: () => MOCK.workflow.steps }),
-  recordDecision: (workflowId, decision, comment) => request(`/procurement-workflow/${workflowId}/decision`, { method: 'POST', body: { decision, comment, reviewedByUserId: 1 } }),
+    recordDecision: (workflowId, decision, comment) => request(`/procurement-workflow/${workflowId}/decision`, { method: 'POST', body: { decision, comment } }),
+  analyzeRequest: (requestId) => request(`/agent/analyze-request/${requestId}`, { method: 'POST' }),
 
   // Purchase orders
   createPurchaseOrderFromWorkflow: (workflowId) => request(`/procurement-workflow/${workflowId}/purchase-order`, { method: 'POST' }),

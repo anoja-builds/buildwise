@@ -1,4 +1,4 @@
-﻿using System.Net;
+using System.Net;
 using System.Text.Json;
 using BuildWise.Api.Data;
 using BuildWise.Api.Models.Entities;
@@ -12,7 +12,7 @@ namespace BuildWise.Api.Tests;
 /// <summary>
 /// Step 5 of the real-world scenario: budget validation.
 /// <para>
-/// Before this, the word "budget" appeared nowhere in the backend â€” a
+/// Before this, the word "budget" appeared nowhere in the backend — a
 /// recommendation could be any price at all and nothing would flag it. These
 /// tests pin the intended behaviour: an over-budget award is surfaced as a
 /// warning to the approving manager but is never silently blocked, because
@@ -130,7 +130,7 @@ public class BudgetValidationTests : IAsyncLifetime
 
     /// <summary>
     /// Over budget must NOT block. The manager decides whether to absorb the
-    /// overrun, seek a client variation, or reject â€” which is exactly why the
+    /// overrun, seek a client variation, or reject — which is exactly why the
     /// human approval gate exists.
     /// </summary>
     [Fact]
@@ -213,7 +213,7 @@ public class BudgetValidationTests : IAsyncLifetime
     [Theory]
     [InlineData("SiteEngineer")]
     [InlineData("SiteOfficer")]
-    [InlineData("SiteOfficer")]
+    [InlineData("ReceivingOfficer")]
     [InlineData("QualityInspector")]
     public async Task Budget_is_not_readable_by_site_or_quality_roles(string role)
     {
@@ -225,11 +225,9 @@ public class BudgetValidationTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Budget_is_not_visible_to_a_legacy_supplier_token()
+    public async Task Budget_is_not_visible_to_the_supplier_portal()
     {
-        // A budget is commercial information. A supplier has no BuildWise
-        // account at all, so a token carrying the legacy role reaches nothing.
-        using var client = _factory.CreateClientFor("Supplier");
+        using var client = _factory.CreateSupplierClient(_supplier.Id);
 
         using var response = await client.GetAsync($"/api/projects/{_project.Id}/budget");
 

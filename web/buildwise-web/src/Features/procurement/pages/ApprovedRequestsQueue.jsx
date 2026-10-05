@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Card, EmptyState, ErrorState, LoadingState, PageHeader, StatusBadge } from '../../../components/shared'
+import { Card, EmptyState, ErrorState, LoadingState, PageHeader, StatusBadge, materialRequestTone } from '../../../components/shared'
 import { procurementApi } from '../services/procurementApi'
 
 export default function ApprovedRequestsQueue({ onOpenRequest }) {
@@ -39,7 +39,7 @@ export default function ApprovedRequestsQueue({ onOpenRequest }) {
                     <td>{r.requiredDate}</td>
                     <td>{r.reason || '—'}</td>
                     <td>{r.quotationCount}</td>
-                    <td><StatusBadge status="success">{r.status}</StatusBadge></td>
+                    <td><StatusBadge status={materialRequestTone(r.status)}>{r.status}</StatusBadge></td>
                     <td><button className="table-action" onClick={() => onOpenRequest(r.id)}>Open workspace</button></td>
                   </tr>
                 ))}

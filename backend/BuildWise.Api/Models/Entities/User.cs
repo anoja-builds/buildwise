@@ -16,5 +16,15 @@ public class User : BaseEntity
 
     public bool IsActive { get; set; } = true;
 
+    /// <summary>
+    /// The supplier this login represents. Set only for <c>Supplier</c> portal
+    /// users; null for every internal staff account. Emitted as a signed
+    /// <c>supplier_id</c> JWT claim so supplier-scoped endpoints can filter
+    /// without trusting a supplier id supplied by the client.
+    /// </summary>
+    public int? SupplierId { get; set; }
+
+    public Supplier? Supplier { get; set; }
+
     public ICollection<UserRole> UserRoles { get; set; } = new List<UserRole>();
 }

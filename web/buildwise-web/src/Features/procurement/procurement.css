@@ -63,3 +63,21 @@
 .board-dot { width: 10px; height: 10px; flex: 0 0 auto; border-radius: 50%; background: var(--color-accent-500); }
 
 @media (max-width: 700px) { .item-line { grid-template-columns: 1fr; } .ai-card__winner { flex-direction: column; align-items: flex-start; } }
+
+/* Approval pipeline: AI Recommendation → Deterministic Validation → Pending
+   Manager Approval → Procurement Manager → Approve/Reject/Revision → PO. */
+.pipeline { list-style: none; margin: 0; padding: 0; display: grid; }
+.pipeline__step { position: relative; display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: var(--space-3); padding: var(--space-3) 0; }
+.pipeline__step:not(:last-child)::before { content: ''; position: absolute; left: 13px; top: 34px; bottom: -6px; width: 2px; background: var(--color-border); }
+.pipeline__marker { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-size: 13px; font-weight: 800; background: var(--color-surface-muted); color: var(--color-text-muted); border: 2px solid var(--color-border); }
+.pipeline__label { font-weight: 650; font-size: var(--font-sm); }
+.pipeline__detail { color: var(--color-text-muted); font-size: var(--font-sm); margin-top: 2px; }
+.pipeline__step--done .pipeline__marker { background: var(--color-success-100); border-color: var(--color-success-700); color: var(--color-success-700); }
+.pipeline__step--failed .pipeline__marker { background: var(--color-danger-100); border-color: var(--color-danger-700); color: var(--color-danger-700); }
+.pipeline__step--active .pipeline__marker { background: var(--color-primary-700); border-color: var(--color-primary-700); color: var(--color-white); box-shadow: 0 0 0 4px var(--color-primary-100); }
+.pipeline__step--active .pipeline__label { color: var(--color-primary-800); }
+.pipeline__step--locked, .pipeline__step--waiting { opacity: 0.75; }
+.pipeline__budget { display: flex; flex-wrap: wrap; gap: var(--space-4); margin-top: var(--space-3); padding-top: var(--space-3); border-top: 1px dashed var(--color-border); font-size: var(--font-sm); }
+.pipeline__budget-ok { color: var(--color-success-700); font-weight: 650; }
+.pipeline__budget-flag { color: var(--color-danger-700); font-weight: 650; }
+

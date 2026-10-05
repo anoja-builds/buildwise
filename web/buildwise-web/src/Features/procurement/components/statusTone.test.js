@@ -17,4 +17,12 @@ describe('statusTone', () => {
   it('falls back to neutral for an unrecognized status', () => {
     expect(statusTone('SomethingUnexpected')).toBe('neutral')
   })
+
+  it('maps the RFQ statuses', () => {
+    // RfqStatus.cs: a Draft is not out yet, Issued still needs supplier
+    // responses, Closed is done.
+    expect(statusTone('Draft')).toBe('neutral')
+    expect(statusTone('Issued')).toBe('warning')
+    expect(statusTone('Closed')).toBe('success')
+  })
 })

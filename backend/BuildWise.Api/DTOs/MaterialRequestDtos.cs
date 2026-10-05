@@ -6,7 +6,9 @@ public record MaterialRequestItemSummaryDto(
     string MaterialName,
     string Unit,
     decimal RequestedQuantity,
-    string? Notes
+    string? Notes,
+    string? Description = null,
+    DateOnly? RequiredDate = null
 );
 
 public record MaterialRequestSummaryDto(
@@ -17,7 +19,12 @@ public record MaterialRequestSummaryDto(
     string? Reason,
     string Status,
     int ItemCount,
-    int QuotationCount
+    int QuotationCount,
+    DateOnly RequestDate = default,
+    string Priority = "Normal",
+    string? SiteNotes = null,
+    int? RevisionOfRequestId = null,
+    int RevisionNumber = 1
 );
 
 public record MaterialRequestDetailDto(
@@ -27,7 +34,39 @@ public record MaterialRequestDetailDto(
     DateOnly RequiredDate,
     string? Reason,
     string Status,
-    List<MaterialRequestItemSummaryDto> Items
+    List<MaterialRequestItemSummaryDto> Items,
+    DateOnly RequestDate = default,
+    string Priority = "Normal",
+    string? SiteNotes = null,
+    int? RevisionOfRequestId = null,
+    int RevisionNumber = 1
+);
+
+public record MaterialRequestHistoryDto(
+    int Id,
+    string Action,
+    string? FromStatus,
+    string? ToStatus,
+    int? ChangedByUserId,
+    string? Details,
+    DateTime CreatedAt
+);
+
+public record ReviseMaterialRequestRequestDto(
+    DateOnly RequiredDate,
+    string? Reason,
+    string? SiteNotes,
+    string Priority,
+    List<MaterialRequestItemRevisionDto> Items
+);
+
+public record MaterialRequestItemRevisionDto(
+    int MaterialId,
+    decimal RequestedQuantity,
+    string? Unit,
+    string? Description,
+    DateOnly? RequiredDate,
+    string? Notes
 );
 
 /// <summary>

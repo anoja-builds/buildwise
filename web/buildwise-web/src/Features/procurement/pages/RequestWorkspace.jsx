@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
-import { Button, Card, ErrorState, LoadingState, PageHeader, StatusBadge } from '../../../components/shared'
+import { Button, Card, ErrorState, LoadingState, PageHeader, StatusBadge, materialRequestTone } from '../../../components/shared'
 import { procurementApi } from '../services/procurementApi'
 import QuotationEntryForm from '../components/QuotationEntryForm'
+import ProjectBudgetPanel from '../components/ProjectBudgetPanel'
+import WorkflowPipeline from '../components/WorkflowPipeline'
 import QuotationComparisonView from '../components/QuotationComparisonView'
 import AIRecommendationReview from '../components/AIRecommendationReview'
 import ProcurementApprovalPanel from '../components/ProcurementApprovalPanel'
@@ -18,6 +20,7 @@ export default function RequestWorkspace({ requestId, role, onBack, onViewPurcha
   const [runningAnalysis, setRunningAnalysis] = useState(false)
   const [deciding, setDeciding] = useState(false)
   const [creatingPo, setCreatingPo] = useState(false)
+  const [budget, setBudget] = useState(null)
   const [notice, setNotice] = useState('')
 
   const loadCore = async () => {
@@ -27,6 +30,15 @@ export default function RequestWorkspace({ requestId, role, onBack, onViewPurcha
     ])
     setRequestDetail(detail)
     setComparison(compareData)
+    // The project materials budget is context for the deterministic budget
+    // check shown in the pipeline. Optional: a missing/unreadable budget must
+    // never block the workspace (the API also enforces who may read it).
+    try {
+      const budgetData = await procurementApi.getProjectBudget(detail.projectId)
+      setBudget(budgetData?.materialBudgetAmount ?? null)
+    } catch {
+      setBudget(null)
+    }
   }
 
   const load = async () => {
@@ -105,7 +117,7 @@ export default function RequestWorkspace({ requestId, role, onBack, onViewPurcha
     <div className="stack">
       <button type="button" className="proc-back" onClick={onBack}>← Back to approved requests</button>
       <PageHeader eyebrow={`MATERIAL REQUEST #${requestDetail.id}`} title={requestDetail.projectName} description={requestDetail.reason || 'Quote, compare, and approve procurement for this request.'} />
-      <div className="actions"><StatusBadge status="success">{requestDetail.status}</StatusBadge><span className="muted">Required by {requestDetail.requiredDate}</span></div>
+      <div className="actions"><StatusBadge status={materialRequestTone(requestDetail.status)}>{requestDetail.status}</StatusBadge><span className="muted">Required by {requestDetail.requiredDate}</span></div>
 
       {notice && <div className="proc-mock-banner" style={{ background: 'var(--color-success-100)', color: 'var(--color-success-700)', borderColor: 'var(--color-success-700)' }}>{notice}</div>}
       {error && requestDetail && <div className="proc-mock-banner" style={{ background: 'var(--color-danger-100)', color: 'var(--color-danger-700)', borderColor: 'var(--color-danger-700)' }}>{error}</div>}
@@ -123,12 +135,14 @@ export default function RequestWorkspace({ requestId, role, onBack, onViewPurcha
 
       {tab === TABS[1] && (
         <div className="stack">
+          <ProjectBudgetPanel projectId={requestDetail.projectId} />
           <Card>
             <div className="actions">
               <Button onClick={handleRunAnalysis} disabled={runningAnalysis}>{runningAnalysis ? 'Running AI analysis…' : workflow ? 'Re-run AI Analysis' : 'Run AI Analysis'}</Button>
               {creatingPo && <span className="muted">Creating purchase order…</span>}
             </div>
           </Card>
+          {workflow && <WorkflowPipeline workflow={workflow} budget={budget} />}
           <AIRecommendationReview workflow={workflow} />
           {workflow && <ProcurementApprovalPanel workflow={workflow} role={role} onDecide={handleDecision} deciding={deciding || creatingPo} />}
         </div>

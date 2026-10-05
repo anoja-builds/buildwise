@@ -6,10 +6,12 @@ class AppDropdown extends StatelessWidget {
     required this.label,
     required this.items,
     this.value,
+    this.itemLabels,
     this.onChanged,
   });
   final String label;
   final List<String> items;
+  final List<String>? itemLabels;
   final String? value;
   final ValueChanged<String?>? onChanged;
 
@@ -18,7 +20,7 @@ class AppDropdown extends StatelessWidget {
     initialValue: value,
     decoration: InputDecoration(labelText: label),
     items: items
-        .map((item) => DropdownMenuItem(value: item, child: Text(item)))
+        .asMap().entries.map((entry) => DropdownMenuItem(value: entry.value, child: Text(itemLabels?[entry.key] ?? entry.value)))
         .toList(),
     onChanged: onChanged,
   );

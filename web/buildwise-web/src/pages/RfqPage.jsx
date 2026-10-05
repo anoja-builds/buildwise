@@ -127,7 +127,7 @@ export default function RfqPage() {
         additionalEmail: additionalEmail || undefined,
       })
       setCreating(false)
-      setNotice(`✓ RFQ #${created.id} issued successfully! Automated email invitations have been dispatched to the invited suppliers and procurement desk.`)
+      setNotice(`✓ RFQ #${created.id} issued successfully. Email notifications were requested for the invited suppliers and procurement desk. Delivery depends on the server's email configuration.`)
       await load()
     } catch (err) {
       setFormError(err.message)

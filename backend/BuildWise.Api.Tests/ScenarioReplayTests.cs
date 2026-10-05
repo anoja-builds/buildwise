@@ -1,7 +1,9 @@
+using System.Text.Json;
 using BuildWise.Api.DTOs;
 using BuildWise.Api.Models.Entities;
 using BuildWise.Api.Models.Enums;
 using BuildWise.Api.Services;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -86,7 +88,8 @@ public class ScenarioReplayTests
 
         var validationService = new ProcurementValidationService(db);
         var workflowLogger = NullLogger<ProcurementWorkflowService>.Instance;
-        var workflowService = new ProcurementWorkflowService(db, agentClient, validationService, new NoOpEmailService(), workflowLogger);
+        var planningAgent = new ProcurementPlanningAgentService(db);
+        var workflowService = new ProcurementWorkflowService(db, agentClient, validationService, planningAgent, new NoOpEmailService(), workflowLogger);
 
         // 5. Procurement Officer starts Agent workflow (§4.2 / §7)
         var startResponse = await workflowService.StartWorkflowAsync(data.Request.Id, initiatedByUserId: 1);
@@ -99,6 +102,15 @@ public class ScenarioReplayTests
         Assert.NotNull(details);
         Assert.Equal("AwaitingApproval", details.Status);
         Assert.NotNull(details.Recommendation);
+
+        var planningStep = details.Steps.Single(s => s.AgentRole == ProcurementPlanningAgentService.AgentRole);
+        var plan = JsonSerializer.Deserialize<ProcurementPlanningOutput>(planningStep.StructuredResult!);
+        Assert.NotNull(plan);
+        Assert.Equal(4, plan.AllowedTools.Count);
+        Assert.Equal(5, plan.Steps.Count);
+        Assert.Contains("INELIGIBLE_SUPPLIER_PRESENT", plan.RiskFlags);
+        Assert.Contains(plan.Steps, s => s.DelegatedAgentRole == "ProcurementManager" && s.RequiresHumanApproval);
+        Assert.Contains("Issue purchase order", plan.ProhibitedCapabilities);
 
         // Assert: Winner is Supplier A (quoteA.Id)
         Assert.Equal(quoteA.Id, details.Recommendation.RecommendedQuotationId);
@@ -115,16 +127,30 @@ public class ScenarioReplayTests
         Assert.NotNull(details.Validation);
         Assert.True(details.Validation.IsValid);
         Assert.Empty(details.Validation.Errors);
+        const int managerUserId = 2;
+        var managerRole = await db.Roles.FirstAsync(role => role.Name == "ProcurementManager");
+        db.Users.Add(new User
+        {
+            Id = managerUserId,
+            FullName = "Scenario Manager",
+            Email = "scenario.manager@buildwise.test",
+            PasswordHash = "test-only",
+            IsActive = true,
+            UserRoles = { new UserRole { Role = managerRole } }
+        });
+        await db.SaveChangesAsync();
+
+        // 7. Procurement Manager authorizes decision: "Approve" (§4.5 / §7)
 
         // 7. Procurement Manager authorizes decision: "Approve" (§4.5 / §7)
         var decisionDto = new WorkflowDecisionDto(
             Decision: "Approve",
-            Comment: "Supplier A satisfies full delivery volume and quality standing. Approved for purchase order creation.",
-            ReviewedByUserId: 2
+            Comment: "Supplier A satisfies full delivery volume and quality standing. Approved for purchase order creation."
         );
 
-        var approval = await workflowService.RecordDecisionAsync(startResponse.WorkflowId, decisionDto);
+        var approval = await workflowService.RecordDecisionAsync(startResponse.WorkflowId, decisionDto, managerUserId);
         Assert.Equal(AgentApprovalStatus.Approved, approval.Decision);
+        Assert.Equal(managerUserId, approval.ReviewedByUserId);
 
         // 8. Verify Purchase Order creation and state transitions (§4.6)
         var updatedWorkflow = await workflowService.GetWorkflowDetailsAsync(startResponse.WorkflowId);
@@ -145,11 +171,14 @@ public class ScenarioReplayTests
         var po = db.PurchaseOrders.FirstOrDefault(p => p.QuotationId == quoteA.Id);
         Assert.NotNull(po);
         Assert.Equal(525000m, po.TotalAmount);
-        Assert.Equal(PurchaseOrderStatus.Created, po.Status);
+        Assert.Equal(PurchaseOrderStatus.Confirmed, po.Status);
 
         var poItems = db.PurchaseOrderItems.Where(poi => poi.PurchaseOrderId == po.Id).ToList();
         Assert.Single(poItems);
         Assert.Equal(250m, poItems[0].OrderedQuantity);
         Assert.Equal(2100m, poItems[0].UnitPrice);
+        // Component 3 receiving matches delivery lines to PO items by material —
+        // the workflow PO-creation path must carry MaterialId over (regression).
+        Assert.Equal(data.Material.Id, poItems[0].MaterialId);
     }
 }

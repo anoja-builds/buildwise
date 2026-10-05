@@ -1,4 +1,4 @@
-﻿using System.Net;
+using System.Net;
 using System.Text.Json;
 using BuildWise.Api.Models.Entities;
 using BuildWise.Api.Models.Enums;
@@ -9,8 +9,8 @@ namespace BuildWise.Api.Tests;
 /// <summary>
 /// Phase 1 regression tests for the purchase order information exposure fix.
 /// <para>
-/// Before the fix, a single <c>PurchaseOrderDto</c> â€” carrying
-/// <c>TotalAmount</c> and per-line <c>UnitPrice</c> â€” was returned to every role
+/// Before the fix, a single <c>PurchaseOrderDto</c> — carrying
+/// <c>TotalAmount</c> and per-line <c>UnitPrice</c> — was returned to every role
 /// covered by the class-level <c>[Authorize]</c>, and
 /// <c>GET /api/deliveries/confirmed-orders</c> returned the raw
 /// <c>PurchaseOrder</c> entity graph to any authenticated caller.
@@ -103,7 +103,7 @@ public class PurchaseOrderRedactionTests : IAsyncLifetime
     [Theory]
     [InlineData("SiteEngineer")]
     [InlineData("SiteOfficer")]
-    [InlineData("SiteOfficer")]
+    [InlineData("ReceivingOfficer")]
     [InlineData("QualityInspector")]
     public async Task Non_procurement_roles_receive_operational_fields_without_prices(string role)
     {
@@ -114,8 +114,8 @@ public class PurchaseOrderRedactionTests : IAsyncLifetime
 
         var body = await ReadJson(response);
 
-        // The order itself is still readable â€” the inspector needs to know what
-        // to expect â€” but the money is gone.
+        // The order itself is still readable — the inspector needs to know what
+        // to expect — but the money is gone.
         Assert.Equal(PurchaseOrderStatus.Confirmed.ToString(), body.GetProperty("status").GetString());
         Assert.Equal("Redaction Test Supplier", body.GetProperty("supplierName").GetString());
 
@@ -133,7 +133,7 @@ public class PurchaseOrderRedactionTests : IAsyncLifetime
     [Theory]
     [InlineData("SiteOfficer")]
     [InlineData("QualityInspector")]
-    [InlineData("SiteOfficer")]
+    [InlineData("ReceivingOfficer")]
     public async Task Purchase_order_list_applies_the_same_redaction(string role)
     {
         using var client = _factory.CreateClientFor(role);
@@ -155,7 +155,7 @@ public class PurchaseOrderRedactionTests : IAsyncLifetime
     [InlineData("SiteEngineer")]
     [InlineData("SiteOfficer")]
     [InlineData("QualityInspector")]
-    [InlineData("SiteOfficer")]
+    [InlineData("ReceivingOfficer")]
     public async Task Confirmed_orders_endpoint_never_returns_prices(string role)
     {
         using var client = _factory.CreateClientFor(role);

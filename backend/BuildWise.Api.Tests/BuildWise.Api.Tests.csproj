@@ -16,6 +16,12 @@
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="8.0.11" />
+    <!--
+      Needed by Phase 1 RBAC tests: WebApplicationFactory boots the real Program.cs
+      pipeline (authentication + authorization middleware + registered policies),
+      so 401/403 assertions test production configuration rather than a replica.
+    -->
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="8.0.11" />
   </ItemGroup>
 
   <ItemGroup>

@@ -33,6 +33,23 @@ class NotificationService {
     _initialized = true;
   }
 
+  Future<void> showQualityUpdate({
+    required int id,
+    required String title,
+    required String body,
+  }) async {
+    await initialize();
+    const androidDetails = AndroidNotificationDetails(
+      'quality_updates',
+      'Quality updates',
+      channelDescription: 'Notifies when inspection and NCR results are available.',
+      importance: Importance.high,
+      priority: Priority.high,
+    );
+    const details = NotificationDetails(android: androidDetails, iOS: DarwinNotificationDetails());
+    await _plugin.show(id, title, body, details);
+  }
+
   Future<void> showProcurementUpdate({
     required int id,
     required String title,
