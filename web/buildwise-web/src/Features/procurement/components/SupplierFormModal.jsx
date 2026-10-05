@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Button, TextInput } from '../../../components/shared'
+import { validateSriLankanMobile, isValidEmail } from '../../../utils/sriLankaValidation'
 
 const emptyForm = { name: '', contactPerson: '', email: '', phone: '', address: '' }
 
@@ -24,8 +25,21 @@ export default function SupplierFormModal({ open, supplier, onCancel, onSubmit, 
       setError('Supplier name is required.')
       return
     }
+    if (form.email && !isValidEmail(form.email)) {
+      setError('Please enter a valid email address (e.g. supplier@example.com).')
+      return
+    }
+    let normalizedPhone = form.phone?.trim() || ''
+    if (normalizedPhone) {
+      const phoneCheck = validateSriLankanMobile(normalizedPhone)
+      if (!phoneCheck.isValid) {
+        setError(phoneCheck.error)
+        return
+      }
+      normalizedPhone = phoneCheck.display || normalizedPhone
+    }
     setError('')
-    await onSubmit(form)
+    await onSubmit({ ...form, phone: normalizedPhone })
   }
 
   return (

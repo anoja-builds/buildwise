@@ -1,8 +1,9 @@
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5078/api'
+import { fetchOrThrow, API_BASE } from './apiTransport'
+
 const STORAGE_KEY = 'buildwise.auth'
 
 async function request(path, body) {
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await fetchOrThrow(`${API_BASE}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body)

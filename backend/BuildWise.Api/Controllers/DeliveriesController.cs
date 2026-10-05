@@ -1,8 +1,12 @@
+using System.Security.Claims;
 using BuildWise.Api.Data;
 using BuildWise.Api.Models.Entities;
 using BuildWise.Api.Models.Enums;
+using BuildWise.Api.Security;
 using BuildWise.Api.Services;
 using BuildWise.Api.Models.Dtos;
+using DeliveryStatusEnum = BuildWise.Api.Models.Enums.DeliveryStatus;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -10,17 +14,169 @@ namespace BuildWise.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[Authorize(Policy = Policies.DeliveryParticipantsOnly)]
 public class DeliveriesController : ControllerBase
 {
     private readonly ApplicationDbContext _dbContext;
-    private readonly DeliveryRiskAgentService _riskAgentService;
+    private readonly DeliveryService _deliveryService;
+    private readonly OperationalAgentClient _agentClient;
 
     public DeliveriesController(
         ApplicationDbContext dbContext,
-        DeliveryRiskAgentService riskAgentService)
+        DeliveryService deliveryService,
+        OperationalAgentClient agentClient)
     {
         _dbContext = dbContext;
-        _riskAgentService = riskAgentService;
+        _deliveryService = deliveryService;
+        _agentClient = agentClient;
+    }
+
+    /// <summary>
+    /// Confirmed purchase orders available for receiving.
+    /// <para>
+    /// Phase 1 RBAC fix: this previously returned raw <see cref="PurchaseOrder"/>
+    /// entities, so every authenticated caller — including Site Officers and
+    /// Quality Inspectors — received <c>TotalAmount</c> and every per-line
+    /// <c>UnitPrice</c>. It now returns an explicit receiving DTO with no
+    /// commercial terms, and requires a delivery-participant role.
+    /// </para>
+    /// </summary>
+    [HttpGet("confirmed-orders")]
+    public async Task<IActionResult> GetConfirmedOrders()
+    {
+        var orders = await _deliveryService.GetConfirmedPurchaseOrdersAsync();
+        return Ok(orders.Select(po => PurchaseOrderProjection.ToReceivingDto(po)).ToList());
+    }
+
+    /// <summary>
+    /// All recorded deliveries with their lines.
+    /// Returns a purpose-built projection rather than the <see cref="Delivery"/>
+    /// entity graph, which would otherwise carry the linked purchase order's
+    /// <c>TotalAmount</c> and per-line prices to non-procurement roles.
+    /// </summary>
+    [HttpGet]
+    public async Task<IActionResult> GetAll()
+    {
+        var deliveries = await _deliveryService.GetDeliveriesAsync();
+        return Ok(deliveries.Select(Project).ToList());
+    }
+
+    [HttpPost]
+    [Authorize(Policy = Policies.SiteOperationsOnly)]
+    public async Task<IActionResult> Record([FromBody] Delivery delivery)
+    {
+        try
+        {
+            delivery.ReceivedByUserId = ParseUserId();
+            var created = await _deliveryService.RecordDeliveryAsync(delivery);
+            return CreatedAtAction(nameof(GetAll), new { id = created.Id }, created);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Runs the DeliveryDiscrepancyAgent over one recorded delivery and returns
+    /// its structured analysis, so Component 3 visibly demonstrates agent 3
+    /// rather than asserting "analysis completed" in hardcoded UI copy.
+    /// <para>
+    /// The agent is advisory: nothing here changes the persisted delivery status.
+    /// That was already decided when the delivery was recorded, and the recorded
+    /// status is what the UI shows next to this result.
+    /// </para>
+    /// </summary>
+    [HttpPost("{id:int}/discrepancy-analysis")]
+    public async Task<IActionResult> AnalyzeDiscrepancy(int id)
+    {
+        // Items and the purchase order must be loaded: the ordered quantity is
+        // read from PurchaseOrder.Items and the received/damaged totals from
+        // Items. Without these includes the graph comes back empty and every
+        // figure would silently report 0 — reporting "Fully verified" for a
+        // delivery that actually had a 10-unit shortage.
+        var delivery = await _dbContext.Deliveries
+            .AsNoTracking()
+            .Include(d => d.Items)
+            .Include(d => d.PurchaseOrder)
+                .ThenInclude(po => po!.Items)
+            .FirstOrDefaultAsync(d => d.Id == id);
+        if (delivery is null) return NotFound(new { message = $"Delivery #{id} not found." });
+
+        var ordered = delivery.Items.Sum(item => OrderedQuantityFor(item, delivery));
+        var received = delivery.Items.Sum(item => item.ReceivedQuantity);
+        var damaged = delivery.Items.Sum(item => item.DamagedQuantity);
+
+        var analysis = await _agentClient.AnalyzeDiscrepancyAsync(ordered, received, damaged);
+
+        return Ok(new
+        {
+            DeliveryId = delivery.Id,
+            Agent = "DeliveryDiscrepancyAgent",
+            Tool = "analyze_discrepancy",
+            ExecutionSource = analysis.ExecutionSource,
+            OrderedQuantity = ordered,
+            ReceivedQuantity = received,
+            DamagedQuantity = damaged,
+            // Shortage is derived here, not returned by the agent, so the number
+            // shown to a user always matches the quantities displayed beside it.
+            ShortageQuantity = Math.Max(0m, ordered - received),
+            ShortageDetected = analysis.Output.ShortageDetected,
+            DamageDetected = analysis.Output.DamageDetected,
+            Summary = analysis.Output.Summary,
+            Recommendation = BuildRecommendation(analysis.Output, ordered, received, damaged),
+            DeliveryStatus = delivery.Status.ToString(),
+            AnalyzedAtUtc = DateTime.UtcNow
+        });
+    }
+
+    private static string BuildRecommendation(
+        DeliveryAgentResult result,
+        decimal ordered,
+        decimal received,
+        decimal damaged)
+    {
+        // An over-receipt cannot be reported as a shortage (ordered - received is
+        // negative), but it is still a real finding: the delivery agent only
+        // reasons about shortage and damage, so without this the recommendation
+        // would describe a 500-vs-250 over-delivery as "50 units damaged" and
+        // say nothing about the impossible quantity.
+        var overReceived = received - ordered;
+        var hasOverReceipt = overReceived > 0m;
+
+        if (!result.ShortageDetected && !result.DamageDetected && !hasOverReceipt)
+            return "No discrepancy. Proceed with standard receiving and quality inspection.";
+
+        var parts = new List<string>();
+        if (result.ShortageDetected) parts.Add($"short of {Math.Max(0m, ordered - received):0.##} unit(s)");
+        if (result.DamageDetected) parts.Add($"{damaged:0.##} unit(s) reported damaged");
+        if (hasOverReceipt) parts.Add($"over-received by {overReceived:0.##} unit(s) against the ordered quantity");
+
+        return $"Review this delivery and the supplier response: {string.Join(" and ", parts)}.";
+    }
+
+    [HttpGet("{id:int}/issues")]
+    public async Task<IActionResult> GetIssues(int id)
+    {
+        var issues = await _dbContext.DeliveryIssues
+            .Where(issue => issue.DeliveryId == id)
+            .OrderBy(issue => issue.ReportedAt)
+            .Select(issue => new
+            {
+                issue.Id,
+                issue.DeliveryId,
+                issue.DeliveryItemId,
+                IssueType = issue.IssueType.ToString(),
+                issue.Description,
+                Severity = issue.Severity.ToString(),
+                issue.Status,
+                issue.Resolution,
+                issue.ReportedByUserId,
+                issue.ReportedAt,
+                issue.ResolvedAt
+            })
+            .ToListAsync();
+        return Ok(issues);
     }
 
     [HttpGet("expected")]
@@ -32,10 +188,9 @@ public class DeliveriesController : ControllerBase
             .Include(d => d.PurchaseOrder)
                 .ThenInclude(po => po!.Project)
             .Include(d => d.Items)
-                .ThenInclude(di => di.PurchaseOrderItem)
-                    .ThenInclude(poi => poi!.Material)
-            .Where(d => d.Status == DeliveryStatus.Scheduled || d.Status == DeliveryStatus.InTransit)
-            .OrderByDescending(d => d.CreatedAt)
+                .ThenInclude(di => di.Material)
+            .Where(d => d.Status == DeliveryStatusEnum.Scheduled || d.Status == DeliveryStatusEnum.InTransit)
+            .OrderByDescending(d => d.DeliveredAt)
             .ToListAsync();
 
         var result = deliveries.Select(d => new
@@ -46,393 +201,73 @@ public class DeliveriesController : ControllerBase
             ProjectName = d.PurchaseOrder?.Project?.Name,
             d.DeliveryReference,
             d.Status,
-            ExpectedDate = d.PurchaseOrder?.ExpectedDeliveryDate,
+            d.DeliveredAt,
             ItemsCount = d.Items.Count,
             Items = d.Items.Select(di => new
             {
                 di.Id,
-                di.PurchaseOrderItemId,
-                MaterialName = di.PurchaseOrderItem?.Material?.Name,
-                MaterialUnit = di.PurchaseOrderItem?.Material?.Unit,
-                OrderedQuantity = di.PurchaseOrderItem?.OrderedQuantity ?? 0,
+                di.MaterialId,
+                MaterialName = di.Material?.Name,
+                MaterialUnit = di.Material?.Unit,
                 di.ReceivedQuantity,
-                di.DamagedQuantity,
-                di.Notes
+                di.DamagedQuantity
             })
         });
 
         return Ok(result);
     }
 
-    [HttpGet("history")]
-    public async Task<IActionResult> GetDeliveryHistory()
+    private int ParseUserId()
     {
-        var deliveries = await _dbContext.Deliveries
-            .Include(d => d.PurchaseOrder)
-                .ThenInclude(po => po!.Supplier)
-            .Include(d => d.PurchaseOrder)
-                .ThenInclude(po => po!.Project)
-            .Include(d => d.ReceivedByUser)
-            .Include(d => d.Items)
-                .ThenInclude(di => di.PurchaseOrderItem)
-                    .ThenInclude(poi => poi!.Material)
-            .OrderByDescending(d => d.UpdatedAt)
-            .ToListAsync();
-
-        var result = deliveries.Select(d => new
-        {
-            d.Id,
-            d.PurchaseOrderId,
-            SupplierName = d.PurchaseOrder?.Supplier?.Name,
-            ProjectName = d.PurchaseOrder?.Project?.Name,
-            d.DeliveryReference,
-            d.Status,
-            d.ActualArrivalDate,
-            d.ReceivedAt,
-            ReceivedBy = d.ReceivedByUser?.FullName,
-            d.Notes,
-            d.PhotographicEvidenceUrl,
-            Items = d.Items.Select(di => new
-            {
-                di.Id,
-                di.PurchaseOrderItemId,
-                MaterialName = di.PurchaseOrderItem?.Material?.Name,
-                MaterialUnit = di.PurchaseOrderItem?.Material?.Unit,
-                OrderedQuantity = di.PurchaseOrderItem?.OrderedQuantity ?? 0,
-                di.ReceivedQuantity,
-                di.DamagedQuantity,
-                ShortageQuantity = (di.PurchaseOrderItem?.OrderedQuantity ?? 0) - di.ReceivedQuantity,
-                InspectionQuantity = di.ReceivedQuantity - di.DamagedQuantity,
-                di.Notes
-            })
-        });
-
-        return Ok(result);
+        var value = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (!int.TryParse(value, out var userId) || userId <= 0)
+            throw new InvalidOperationException("Authenticated user identifier is missing or invalid.");
+        return userId;
     }
 
-    [HttpGet("{id}")]
-    public async Task<IActionResult> GetDeliveryById(int id)
+    /// <summary>
+    /// Explicit delivery projection. Carries only the operational fields needed to
+    /// receive and reconcile material — never the linked purchase order's price
+    /// or total. <c>ReferenceHandler.IgnoreCycles</c> previously made the raw
+    /// entity serialise "successfully", which is exactly how the commercial data
+    /// leak went unnoticed.
+    /// </summary>
+    private static object Project(Delivery d) => new
     {
-        var delivery = await _dbContext.Deliveries
-            .Include(d => d.PurchaseOrder)
-                .ThenInclude(po => po!.Supplier)
-            .Include(d => d.PurchaseOrder)
-                .ThenInclude(po => po!.Project)
-            .Include(d => d.ReceivedByUser)
-            .Include(d => d.Items)
-                .ThenInclude(di => di.PurchaseOrderItem)
-                    .ThenInclude(poi => poi!.Material)
-            .FirstOrDefaultAsync(d => d.Id == id);
-
-        if (delivery == null)
+        d.Id,
+        d.PurchaseOrderId,
+        SupplierName = d.PurchaseOrder?.Supplier?.Name ?? d.PurchaseOrder?.Quotation?.Supplier?.Name,
+        ProjectName = d.PurchaseOrder?.Project?.Name,
+        d.DeliveryReference,
+        Status = d.Status.ToString(),
+        d.DeliveredAt,
+        d.ReceivedByUserId,
+        Items = d.Items.Select(di => new
         {
-            return NotFound("Delivery record not found.");
-        }
+            di.Id,
+            di.MaterialId,
+            MaterialName = di.Material?.Name,
+            MaterialUnit = di.Material?.Unit,
+            // Ordered quantity is required to compute a shortage (ordered vs
+            // received) and to run the discrepancy agent. It comes from the
+            // linked purchase order, never the delivery item — DeliveryItem only
+            // records what actually arrived.
+            OrderedQuantity = OrderedQuantityFor(di, d),
+            di.ReceivedQuantity,
+            di.DamagedQuantity
+        }).ToList()
+    };
 
-        var result = new
-        {
-            delivery.Id,
-            delivery.PurchaseOrderId,
-            SupplierId = delivery.PurchaseOrder?.SupplierId,
-            SupplierName = delivery.PurchaseOrder?.Supplier?.Name,
-            ProjectName = delivery.PurchaseOrder?.Project?.Name,
-            delivery.DeliveryReference,
-            delivery.Status,
-            delivery.ActualArrivalDate,
-            delivery.ReceivedAt,
-            delivery.Notes,
-            delivery.PhotographicEvidenceUrl,
-            ExpectedDate = delivery.PurchaseOrder?.ExpectedDeliveryDate,
-            ReceivedBy = delivery.ReceivedByUser?.FullName,
-            Items = delivery.Items.Select(di => new
-            {
-                di.Id,
-                di.PurchaseOrderItemId,
-                MaterialId = di.PurchaseOrderItem?.MaterialId,
-                MaterialName = di.PurchaseOrderItem?.Material?.Name,
-                MaterialUnit = di.PurchaseOrderItem?.Material?.Unit,
-                OrderedQuantity = di.PurchaseOrderItem?.OrderedQuantity ?? 0,
-                di.ReceivedQuantity,
-                di.DamagedQuantity,
-                ShortageQuantity = (di.PurchaseOrderItem?.OrderedQuantity ?? 0) - di.ReceivedQuantity,
-                InspectionQuantity = di.ReceivedQuantity - di.DamagedQuantity,
-                di.Notes
-            })
-        };
-
-        return Ok(result);
-    }
-
-    [HttpPost]
-    public async Task<IActionResult> ScheduleDelivery([FromBody] CreateDeliveryDto dto)
+    /// <summary>
+    /// Resolves the ordered quantity for a delivery line by matching it to the
+    /// purchase-order line for the same material. Returns 0 when the order line
+    /// cannot be resolved, so the caller shows "0 ordered" rather than inventing
+    /// a number; a shortage is then judged from received alone.
+    /// </summary>
+    private static decimal OrderedQuantityFor(DeliveryItem item, Delivery delivery)
     {
-        var purchaseOrder = await _dbContext.PurchaseOrders
-            .Include(po => po.Items)
-            .FirstOrDefaultAsync(po => po.Id == dto.PurchaseOrderId);
-
-        if (purchaseOrder == null)
-        {
-            return BadRequest("Purchase Order not found.");
-        }
-
-        var delivery = new Delivery
-        {
-            PurchaseOrderId = dto.PurchaseOrderId,
-            DeliveryReference = dto.DeliveryReference,
-            Status = DeliveryStatus.Scheduled,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
-        };
-
-        _dbContext.Deliveries.Add(delivery);
-        await _dbContext.SaveChangesAsync();
-
-        foreach (var item in purchaseOrder.Items)
-        {
-            var deliveryItem = new DeliveryItem
-            {
-                DeliveryId = delivery.Id,
-                PurchaseOrderItemId = item.Id,
-                ReceivedQuantity = 0,
-                DamagedQuantity = 0,
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
-            };
-            _dbContext.DeliveryItems.Add(deliveryItem);
-        }
-
-        purchaseOrder.Status = PurchaseOrderStatus.InProgress;
-        await _dbContext.SaveChangesAsync();
-
-        return CreatedAtAction(nameof(GetDeliveryById), new { id = delivery.Id }, delivery);
-    }
-
-    [HttpPost("{id}/receive")]
-    public async Task<IActionResult> ReceiveDelivery(int id, [FromBody] ReceiveDeliveryDto dto)
-    {
-        var delivery = await _dbContext.Deliveries
-            .Include(d => d.Items)
-                .ThenInclude(di => di.PurchaseOrderItem)
-            .Include(d => d.PurchaseOrder)
-            .FirstOrDefaultAsync(d => d.Id == id);
-
-        if (delivery == null)
-        {
-            return NotFound("Delivery not found.");
-        }
-
-        if (delivery.Status == DeliveryStatus.Received || delivery.Status == DeliveryStatus.DiscrepancyReported)
-        {
-            return BadRequest("This delivery has already been processed.");
-        }
-
-        // Retrieve user
-        var user = await _dbContext.Users.FindAsync(dto.ReceivedByUserId);
-        if (user == null)
-        {
-            return BadRequest("Valid receiving officer/user is required.");
-        }
-
-        delivery.ReceivedByUserId = dto.ReceivedByUserId;
-        delivery.Notes = dto.Notes;
-        delivery.ActualArrivalDate = DateTime.UtcNow;
-        delivery.ReceivedAt = DateTime.UtcNow;
-        delivery.UpdatedAt = DateTime.UtcNow;
-
-        bool hasDiscrepancy = false;
-        bool allCompleted = true;
-
-        foreach (var itemDto in dto.Items)
-        {
-            var deliveryItem = delivery.Items
-                .FirstOrDefault(di => di.PurchaseOrderItemId == itemDto.PurchaseOrderItemId);
-
-            if (deliveryItem == null) continue;
-
-            deliveryItem.ReceivedQuantity = itemDto.ReceivedQuantity;
-            deliveryItem.DamagedQuantity = itemDto.DamagedQuantity;
-            deliveryItem.Notes = itemDto.Notes;
-            deliveryItem.UpdatedAt = DateTime.UtcNow;
-
-            var orderedQty = deliveryItem.PurchaseOrderItem?.OrderedQuantity ?? 0;
-            var shortage = orderedQty - itemDto.ReceivedQuantity;
-
-            if (shortage > 0 || itemDto.DamagedQuantity > 0)
-            {
-                hasDiscrepancy = true;
-            }
-
-            if (itemDto.ReceivedQuantity < orderedQty)
-            {
-                allCompleted = false;
-            }
-        }
-
-        if (hasDiscrepancy)
-        {
-            delivery.Status = DeliveryStatus.DiscrepancyReported;
-        }
-        else if (allCompleted)
-        {
-            delivery.Status = DeliveryStatus.Received;
-        }
-        else
-        {
-            delivery.Status = DeliveryStatus.PartiallyReceived;
-        }
-
-        // Check if all items in the Purchase Order are fully received across all deliveries
-        if (delivery.PurchaseOrder != null)
-        {
-            // If this delivery was received successfully or partially
-            var allPoItems = await _dbContext.PurchaseOrderItems
-                .Where(poi => poi.PurchaseOrderId == delivery.PurchaseOrderId)
-                .ToListAsync();
-
-            bool isPoComplete = true;
-            foreach (var poItem in allPoItems)
-            {
-                var totalReceivedForPoItem = await _dbContext.DeliveryItems
-                    .Where(di => di.PurchaseOrderItemId == poItem.Id && di.Delivery!.Status != DeliveryStatus.Scheduled && di.Delivery!.Status != DeliveryStatus.InTransit)
-                    .SumAsync(di => di.ReceivedQuantity) + dto.Items.FirstOrDefault(i => i.PurchaseOrderItemId == poItem.Id)?.ReceivedQuantity ?? 0;
-
-                if (totalReceivedForPoItem < poItem.OrderedQuantity)
-                {
-                    isPoComplete = false;
-                    break;
-                }
-            }
-
-            delivery.PurchaseOrder.Status = isPoComplete ? PurchaseOrderStatus.Completed : PurchaseOrderStatus.InProgress;
-        }
-
-        await _dbContext.SaveChangesAsync();
-
-        return Ok(new
-        {
-            Message = "Delivery received successfully reconciled.",
-            DeliveryId = delivery.Id,
-            Status = delivery.Status.ToString()
-        });
-    }
-
-    [HttpPost("{id}/evidence")]
-    public async Task<IActionResult> AddPhotographicEvidence(int id, [FromBody] EvidenceDto dto)
-    {
-        var delivery = await _dbContext.Deliveries.FindAsync(id);
-        if (delivery == null)
-        {
-            return NotFound("Delivery not found.");
-        }
-
-        delivery.PhotographicEvidenceUrl = dto.ImageUrl;
-        delivery.UpdatedAt = DateTime.UtcNow;
-        await _dbContext.SaveChangesAsync();
-
-        return Ok(new { Message = "Photographic evidence attached successfully.", ImageUrl = dto.ImageUrl });
-    }
-
-    [HttpGet("schedules")]
-    public async Task<IActionResult> GetSchedules()
-    {
-        var schedules = await _dbContext.DeliverySchedules
-            .Include(s => s.PurchaseOrder)
-                .ThenInclude(po => po!.Supplier)
-            .Include(s => s.PurchaseOrder)
-                .ThenInclude(po => po!.Project)
-            .OrderBy(s => s.ScheduledDate)
-            .ToListAsync();
-
-        return Ok(schedules);
-    }
-
-    [HttpPost("schedule")]
-    public async Task<IActionResult> CreateSchedule([FromBody] ScheduleDeliveryDto dto)
-    {
-        var schedule = new DeliverySchedule
-        {
-            PurchaseOrderId = dto.PurchaseOrderId,
-            ScheduledDate = dto.ScheduledDate,
-            ScheduledTimeSlot = dto.TimeSlot,
-            Status = "Confirmed",
-            Notes = dto.Notes,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
-        };
-
-        _dbContext.DeliverySchedules.Add(schedule);
-        await _dbContext.SaveChangesAsync();
-
-        return Ok(schedule);
-    }
-
-    [HttpGet("issues")]
-    public async Task<IActionResult> GetIssues()
-    {
-        var issues = await _dbContext.DeliveryIssues
-            .Include(i => i.Delivery)
-            .Include(i => i.ReportedByUser)
-            .OrderByDescending(i => i.ReportedAt)
-            .ToListAsync();
-
-        return Ok(issues);
-    }
-
-    [HttpPost("report-issue")]
-    public async Task<IActionResult> ReportIssue([FromBody] ReportIssueDto dto)
-    {
-        var issue = new DeliveryIssue
-        {
-            DeliveryId = dto.DeliveryId,
-            DeliveryItemId = dto.DeliveryItemId,
-            IssueType = dto.IssueType,
-            Description = dto.Description,
-            Severity = dto.Severity,
-            ReportedByUserId = dto.ReportedByUserId,
-            Status = "Open",
-            ReportedAt = DateTime.UtcNow,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
-        };
-
-        _dbContext.DeliveryIssues.Add(issue);
-        await _dbContext.SaveChangesAsync();
-
-        return Ok(issue);
-    }
-
-    [HttpPost("evaluate-risk/{purchaseOrderId}")]
-    public async Task<IActionResult> EvaluateDeliveryRisk(int purchaseOrderId, [FromQuery] int? userId)
-    {
-        try
-        {
-            var assessment = await _riskAgentService.EvaluateDeliveryRiskAsync(purchaseOrderId, userId);
-            return Ok(assessment);
-        }
-        catch (ArgumentException ex)
-        {
-            return NotFound(ex.Message);
-        }
-        catch (Exception ex)
-        {
-            return StatusCode(500, $"An error occurred during evaluation: {ex.Message}");
-        }
-    }
-
-    [HttpPost("{id}/risk-analysis")]
-    public async Task<IActionResult> AnalyzeDeliveryRisk(int id, [FromQuery] int? userId)
-    {
-        try
-        {
-            var delivery = await _dbContext.Deliveries.FindAsync(id);
-            if (delivery == null) return NotFound("Delivery not found.");
-
-            var assessment = await _riskAgentService.EvaluateDeliveryRiskAsync(delivery.PurchaseOrderId, userId, id);
-            return Ok(assessment);
-        }
-        catch (Exception ex)
-        {
-            return StatusCode(500, ex.Message);
-        }
+        var orderItem = delivery.PurchaseOrder?.Items?
+            .FirstOrDefault(po => po.MaterialId == item.MaterialId);
+        return orderItem?.OrderedQuantity ?? 0m;
     }
 }

@@ -6,14 +6,14 @@ namespace BuildWise.Api.Models.Entities;
 public class Approval : BaseEntity
 {
     public int MaterialRequestId { get; set; }
-    public MaterialRequest? MaterialRequest { get; set; }
+    public MaterialRequest MaterialRequest { get; set; } = null!;
 
     public int ApprovedByUserId { get; set; }
-    public User? ApprovedByUser { get; set; }
+    public User ApprovedByUser { get; set; } = null!;
 
     public ApprovalDecision Decision { get; set; }
 
-    public string? Comment { get; set; }
+    public string? Comments { get; set; }
 
-    public DateTime DecisionDate { get; set; } = DateTime.UtcNow;
+    public DateTime DecidedAt { get; set; } = DateTime.UtcNow;
 }

@@ -1,125 +1,118 @@
 using BuildWise.Api.Data;
+using BuildWise.Api.DTOs;
 using BuildWise.Api.Models.Entities;
 using BuildWise.Api.Models.Enums;
 using Microsoft.EntityFrameworkCore;
-using System.Text.Json;
 
 namespace BuildWise.Api.Services;
 
+/// <summary>Agent 1: builds a controlled plan using only allow-listed read tools.</summary>
 public class ProcurementPlanningAgentService
 {
-    private readonly ApplicationDbContext _dbContext;
-
-    public ProcurementPlanningAgentService(ApplicationDbContext dbContext)
+    public const string AgentRole = "ProcurementPlanningAgent";
+    public static readonly IReadOnlySet<string> AllowedToolNames = new HashSet<string>(StringComparer.Ordinal)
     {
-        _dbContext = dbContext;
+        "GetMaterialRequest", "GetMaterialDetails", "GetProjectDetails", "GetAvailableQuotations"
+    };
+    public static readonly IReadOnlyList<string> ProhibitedCapabilities = new[]
+    {
+        "Approve procurement", "Issue purchase order", "Modify supplier records"
+    };
+
+    private readonly ApplicationDbContext _db;
+    public ProcurementPlanningAgentService(ApplicationDbContext db) => _db = db;
+
+    public async Task<ProcurementPlanningOutput> CreatePlanAsync(ProcurementPlanningInput input, CancellationToken ct = default)
+    {
+        if (input.MaterialRequestId <= 0) throw new ArgumentOutOfRangeException(nameof(input.MaterialRequestId));
+        var request = await _db.MaterialRequests.AsNoTracking()
+            .Include(r => r.Project).Include(r => r.Items).ThenInclude(i => i.Material)
+            .FirstOrDefaultAsync(r => r.Id == input.MaterialRequestId, ct)
+            ?? throw new KeyNotFoundException($"Material request #{input.MaterialRequestId} not found.");
+        var materialIds = request.Items.Select(i => i.MaterialId).Distinct().ToList();
+        var materials = await _db.Materials.AsNoTracking().Where(m => materialIds.Contains(m.Id))
+            .ToDictionaryAsync(m => m.Id, ct);
+        var quotations = await _db.Quotations.AsNoTracking()
+            .Where(q => q.MaterialRequestId == request.Id && q.Status != QuotationStatus.Rejected)
+            .Include(q => q.Supplier).Include(q => q.Items).ToListAsync(ct);
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var items = request.Items.Select(i => new ProcurementPlanningItemFact(i.Id, i.MaterialId,
+            materials.GetValueOrDefault(i.MaterialId)?.Name ?? $"Material #{i.MaterialId}",
+            i.Unit ?? materials.GetValueOrDefault(i.MaterialId)?.Unit ?? "Units", i.RequestedQuantity)).ToList();
+        var facts = new ProcurementPlanningInputFacts(request.Id, request.ProjectId,
+            request.Project?.Name ?? $"Project #{request.ProjectId}", request.Project?.Status.ToString() ?? "Unknown",
+            request.RequestDate, request.RequiredDate, request.Priority.ToString(), request.Status.ToString(), items, quotations.Count,
+            request.Project?.MaterialBudgetAmount);
+        var objective = string.IsNullOrWhiteSpace(input.Objective)
+            ? $"Create a controlled procurement plan for material request #{request.Id}."
+            : input.Objective.Trim();
+        var steps = new List<ProcurementPlanningStep>
+        {
+            new(1, "Validate requirement facts", "Confirm approved request, project, positive quantities and required dates.", AgentRole),
+            new(2, "Evaluate quotations", "Filter eligible quotations and rank compliant supplier options.", "QuotationSupplierAnalysisAgent"),
+            new(3, "Assess delivery risk", "Compare promised delivery information and supplier history with the required date.", "DeliveryRiskAgent"),
+            new(4, "Validate recommendation", "Re-check supplier status, validity, coverage, totals and schema.", "ProcurementValidationAgent"),
+            new(5, "Pause for human approval", "Present recommendation and warnings to an authorized Procurement Manager.", "ProcurementManager", true)
+        };
+        var requiredChecks = new List<string>
+        {
+            "Quantity must be greater than zero for every item.", "Project and request must exist and be eligible.",
+            "Supplier must be Active.", "Quotation must be unexpired and belong to the request.",
+            "Quotation must cover requested materials and totals must reconcile.",
+            "Recommendation must reference a real supported quotation.",
+            "Purchase-order authorization requires an approved authorized-manager decision.",
+            "If the project has a materials budget, compare the landed total against it and flag any overrun."
+        };
+        var toolResults = new List<ProcurementPlanningToolResult>
+        {
+            ToolResult("GetMaterialRequest", request.Items.Count > 0, $"Read request #{request.Id} with {request.Items.Count} item(s)."),
+            ToolResult("GetProjectDetails", request.ProjectId > 0, $"Read project #{request.ProjectId}: {facts.ProjectName} [{facts.ProjectStatus}]."),
+            ToolResult("GetMaterialDetails", items.Count > 0 && items.All(i => i.MaterialId > 0), $"Resolved {items.Count} material line(s)."),
+            ToolResult("GetAvailableQuotations", quotations.Count > 0, $"Found {quotations.Count} non-rejected quotation(s).")
+        };
+        return new ProcurementPlanningOutput(AgentRole, objective, steps, requiredChecks, BuildRiskFlags(request, quotations, today), facts,
+            AllowedToolNames.ToList(), ProhibitedCapabilities.ToList(), toolResults);
     }
 
-    public async Task<object> EvaluateMaterialRequestPlanAsync(int requestId, int? userId = null)
+    private static List<string> BuildRiskFlags(MaterialRequest request, List<Quotation> quotations, DateOnly today)
     {
-        var request = await _dbContext.MaterialRequests
-            .Include(r => r.Project)
-            .Include(r => r.Items)
-                .ThenInclude(i => i.Material)
-            .FirstOrDefaultAsync(r => r.Id == requestId);
+        var flags = new List<string>();
+        if (request.Status != MaterialRequestStatus.Approved) flags.Add("REQUEST_NOT_APPROVED");
+        if (request.Project?.Status != ProjectStatus.Active) flags.Add("PROJECT_NOT_ACTIVE");
+        if (request.Items.Count == 0) flags.Add("NO_REQUEST_ITEMS");
+        if (request.Items.Any(i => i.RequestedQuantity <= 0)) flags.Add("NON_POSITIVE_QUANTITY");
+        if (request.RequiredDate < DateOnly.FromDateTime(DateTime.UtcNow).AddDays(3)) flags.Add("INSUFFICIENT_LEAD_TIME");
+        if (request.Priority is MaterialRequestPriority.High or MaterialRequestPriority.Urgent) flags.Add("HIGH_PRIORITY_REQUIREMENT");
+        if (quotations.Count == 0) flags.Add("NO_AVAILABLE_QUOTATIONS");
+        if (quotations.Count == 1) flags.Add("SINGLE_QUOTATION_COMPARISON");
+        if (quotations.Any(q => q.Supplier?.Status != SupplierStatus.Active)) flags.Add("INELIGIBLE_SUPPLIER_PRESENT");
+        if (quotations.Any(q => q.ValidUntil < today)) flags.Add("EXPIRED_QUOTATION_PRESENT");
+        if (quotations.Any(q => q.Status != QuotationStatus.Submitted)) flags.Add("NON_SUBMITTED_QUOTATION_PRESENT");
 
-        if (request == null)
+        // Budget headroom: a warning when even the cheapest eligible quotation
+        // cannot fit inside the project allocation.
+        var budget = request.Project?.MaterialBudgetAmount;
+        if (budget is > 0m)
         {
-            throw new ArgumentException($"Material Request #{requestId} not found.");
-        }
-
-        var riskFlags = new List<string>();
-        var requiredChecks = new List<string>();
-        var steps = new List<string>();
-
-        // Step 1: Urgency analysis
-        var reqDateTime = request.RequiredDate.ToDateTime(TimeOnly.MinValue);
-        var daysUntilRequired = (reqDateTime - DateTime.UtcNow).TotalDays;
-        steps.Add("1. Analyzed request schedule and required-by date against standard lead times.");
-        
-        if (daysUntilRequired < 3)
-        {
-            riskFlags.Add("URGENT DEADLINE: Less than 3 days until required date. High risk of site delay.");
-        }
-        else if (daysUntilRequired < 7)
-        {
-            riskFlags.Add("TIGHT DEADLINE: Less than 7 days lead time.");
-        }
-
-        // Step 2: Item quantity & availability check
-        steps.Add("2. Verified item specifications, quantities, and material categories.");
-        foreach (var item in request.Items)
-        {
-            requiredChecks.Add($"Verify availability for {item.RequestedQuantity} {item.Material?.Unit ?? "units"} of {item.Material?.Name ?? "Material"}");
-            if (item.RequestedQuantity > 500)
+            var cheapest = quotations
+                .Where(q => q.Supplier?.Status == SupplierStatus.Active && q.ValidUntil >= today)
+                .Select(q => q.TotalAmount + Math.Max(0m, q.TransportCharge))
+                .ToList();
+            if (cheapest.Count > 0 && cheapest.Min() > budget.Value)
             {
-                riskFlags.Add($"LARGE VOLUME: {item.Material?.Name} quantity ({item.RequestedQuantity}) requires split delivery or bulk supplier agreement.");
+                flags.Add("ALL_QUOTATIONS_EXCEED_BUDGET");
+            }
+            else if (cheapest.Count > 0 && cheapest.Min() > budget.Value * 0.9m)
+            {
+                flags.Add("BUDGET_HEADROOM_LOW");
             }
         }
+        return flags.Distinct().ToList();
+    }
 
-        // Step 3: Project context check
-        steps.Add("3. Cross-referenced site location and project active status.");
-        if (request.Project != null && request.Project.Status != ProjectStatus.Active)
-        {
-            riskFlags.Add($"PROJECT STATUS ALERT: Project '{request.Project.Name}' is not currently Active ({request.Project.Status}).");
-        }
-
-        // Step 4: RFQ Strategy Formulation
-        steps.Add("4. Formulated RFQ distribution strategy to active local suppliers.");
-
-        var planOutput = new
-        {
-            AgentName = "Procurement Planning Agent (Agent 1)",
-            MaterialRequestId = request.Id,
-            ProjectName = request.Project?.Name ?? "Unknown Project",
-            RequiredDate = request.RequiredDate,
-            Objective = $"Formulate automated procurement strategy for Material Request #{request.Id}",
-            Steps = steps,
-            RequiredChecks = requiredChecks,
-            RiskFlags = riskFlags,
-            RecommendedAction = riskFlags.Any(r => r.StartsWith("URGENT") || r.StartsWith("PROJECT"))
-                ? "Immediate Expedited RFQ to Priority Suppliers"
-                : "Standard Competitive RFQ Process (Min. 2 Quotations)",
-            Timestamp = DateTime.UtcNow
-        };
-
-        // Record agent execution step in Db
-        var workflow = await _dbContext.AgentWorkflows
-            .FirstOrDefaultAsync(w => w.MaterialRequestId == requestId)
-            ?? new AgentWorkflow
-            {
-                MaterialRequestId = requestId,
-                InitiatedByUserId = userId ?? request.RequestedByUserId,
-                Objective = $"Procurement Plan for MR-{requestId:D4}",
-                Status = WorkflowStatus.Running,
-                StartedAt = DateTime.UtcNow,
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
-            };
-
-        if (workflow.Id == 0)
-        {
-            _dbContext.AgentWorkflows.Add(workflow);
-            await _dbContext.SaveChangesAsync();
-        }
-
-        var step = new AgentWorkflowStep
-        {
-            AgentWorkflowId = workflow.Id,
-            AgentRole = "Procurement Planning Agent",
-            StepName = "Requirement Analysis & Plan Generation",
-            StepOrder = 1,
-            Status = WorkflowStepStatus.Completed,
-            StructuredResultJson = JsonSerializer.Serialize(planOutput),
-            StartedAt = DateTime.UtcNow,
-            CompletedAt = DateTime.UtcNow,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
-        };
-
-        _dbContext.AgentWorkflowSteps.Add(step);
-        await _dbContext.SaveChangesAsync();
-
-        return planOutput;
+    private static ProcurementPlanningToolResult ToolResult(string tool, bool succeeded, string summary)
+    {
+        if (!AllowedToolNames.Contains(tool)) throw new InvalidOperationException($"Tool '{tool}' is not in the planning-agent allow-list.");
+        return new ProcurementPlanningToolResult(tool, succeeded, summary);
     }
 }

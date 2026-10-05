@@ -24,11 +24,6 @@ public class DeliveryConfiguration : IEntityTypeConfiguration<Delivery>
             .HasForeignKey(d => d.PurchaseOrderId)
             .OnDelete(DeleteBehavior.Restrict);
 
-        builder.HasOne(d => d.ReceivedByUser)
-            .WithMany()
-            .HasForeignKey(d => d.ReceivedByUserId)
-            .OnDelete(DeleteBehavior.SetNull);
-
         builder.HasIndex(d => d.Status);
         builder.HasIndex(d => d.DeliveryReference);
     }

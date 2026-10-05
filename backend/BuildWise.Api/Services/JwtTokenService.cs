@@ -2,6 +2,7 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
 using BuildWise.Api.Models.Entities;
+using BuildWise.Api.Security;
 using Microsoft.IdentityModel.Tokens;
 
 namespace BuildWise.Api.Services;
@@ -37,6 +38,14 @@ public class JwtTokenService
             new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
         };
         claims.AddRange(roles.Select(role => new Claim(ClaimTypes.Role, role)));
+
+        // Supplier portal scoping. Signing the supplier id into the token means
+        // supplier-scoped endpoints filter on a server-verified value, so a
+        // supplier can never widen its scope by editing a request body or query.
+        if (user.SupplierId is > 0)
+        {
+            claims.Add(new Claim(CallerScope.SupplierIdClaim, user.SupplierId.Value.ToString()));
+        }
 
         var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(key));
         var credentials = new SigningCredentials(signingKey, SecurityAlgorithms.HmacSha256);

@@ -10,7 +10,11 @@ public record CreateQuotationDto(
     int SupplierId,
     DateOnly QuotationDate,
     DateOnly ValidUntil,
-    List<QuotationItemInputDto> Items
+    int? RfqId,
+    List<QuotationItemInputDto> Items,
+    DateOnly? PromisedDeliveryDate = null,
+    decimal TransportCharge = 0m,
+    string? PaymentTerms = null
 );
 
 public record QuotationItemDto(
@@ -31,10 +35,13 @@ public record QuotationDto(
     string SupplierStatus,
     DateOnly QuotationDate,
     DateOnly ValidUntil,
+    DateOnly? PromisedDeliveryDate,
     string Status,
     decimal TotalAmount,
     DateTime CreatedAt,
-    List<QuotationItemDto> Items
+    List<QuotationItemDto> Items,
+    decimal TransportCharge = 0m,
+    string? PaymentTerms = null
 );
 
 public record QuotationOfferDto(

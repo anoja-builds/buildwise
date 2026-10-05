@@ -16,4 +16,15 @@ public class Project : BaseEntity
     public DateOnly? StartDate { get; set; }
 
     public DateOnly? EndDate { get; set; }
+
+    /// <summary>
+    /// Materials budget allocated to this project, in LKR.
+    /// <para>
+    /// Used by the deterministic validation step to flag a recommendation whose
+    /// total exceeds the allocation (§ Step 5, "Budget validation"). Null means
+    /// no budget has been set for the project, in which case the check is
+    /// skipped rather than treated as a zero budget.
+    /// </para>
+    /// </summary>
+    public decimal? MaterialBudgetAmount { get; set; }
 }

@@ -2,10 +2,17 @@ import { useEffect, useState } from 'react'
 import { Card, EmptyState, ErrorState, LoadingState, PageHeader, Pagination, SearchInput, SelectInput, StatusBadge } from '../../../components/shared'
 import { procurementApi } from '../services/procurementApi'
 import { statusTone } from '../components/statusTone'
+import { useAuth } from '../../../auth/AuthContext'
+import { canSeeCommercialTerms } from '../../../auth/accessControl'
 
 const PAGE_SIZE = 10
 
 export default function PurchaseOrderList({ onOpenOrder }) {
+  const { roles } = useAuth()
+  // The API redacts commercial terms for non-procurement roles; the UI must
+  // mirror that so a site or quality user never sees an empty money column.
+  const showCommercials = canSeeCommercialTerms(roles)
+
   const [orders, setOrders] = useState([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
@@ -47,7 +54,7 @@ export default function PurchaseOrderList({ onOpenOrder }) {
           <>
             <div className="table-wrap">
               <table className="data-table">
-                <thead><tr><th>PO</th><th>Supplier</th><th>Order date</th><th>Expected delivery</th><th>Total</th><th>Status</th><th>Actions</th></tr></thead>
+                <thead><tr><th>PO</th><th>Supplier</th><th>Order date</th><th>Expected delivery</th>{showCommercials ? <th>Total</th> : null}<th>Status</th><th>Actions</th></tr></thead>
                 <tbody>
                   {orders.map((po) => (
                     <tr key={po.id}>
@@ -55,7 +62,7 @@ export default function PurchaseOrderList({ onOpenOrder }) {
                       <td>{po.supplierName}</td>
                       <td>{po.orderDate}</td>
                       <td>{po.expectedDeliveryDate || '—'}</td>
-                      <td>{po.totalAmount.toLocaleString()}</td>
+                      {showCommercials ? <td>{po.totalAmount == null ? '—' : Number(po.totalAmount).toLocaleString()}</td> : null}
                       <td><StatusBadge status={statusTone(po.status)}>{po.status}</StatusBadge></td>
                       <td><button className="table-action" onClick={() => onOpenOrder(po.id)}>View</button></td>
                     </tr>

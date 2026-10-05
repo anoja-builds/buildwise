@@ -288,6 +288,48 @@ public class ProcurementValidationServiceTests
         Assert.Contains(result.Errors, e => e.Contains("already exists for material request"));
     }
 
+    [Fact]
+    public async Task Rejects_Unsupported_Recommendation_Supplier_Identity()
+    {
+        var db = TestDbFactory.CreateInMemory();
+        var data = await TestDbFactory.SeedStandardScenarioDataAsync(db);
+        var supplier = new Supplier { Name = "Actual Supplier", Status = SupplierStatus.Active };
+        db.Suppliers.Add(supplier); await db.SaveChangesAsync();
+        var quotation = new Quotation { MaterialRequestId = data.Request.Id, SupplierId = supplier.Id, QuotationDate = DateOnly.FromDateTime(DateTime.UtcNow), ValidUntil = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(14)), PromisedDeliveryDate = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(4)), TotalAmount = 525000m, Items = new List<QuotationItem> { new() { MaterialRequestItemId = data.RequestItem.Id, Quantity = 250, UnitPrice = 2100 } } };
+        db.Quotations.Add(quotation); await db.SaveChangesAsync();
+        var result = await new ProcurementValidationService(db).ValidateRecommendationAsync(quotation.Id, data.Request.Id, recommendedSupplierId: supplier.Id + 999);
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, e => e.Contains("Unsupported supplier identity"));
+    }
+
+    [Fact]
+    public async Task Rejects_Promised_Delivery_After_Required_Date()
+    {
+        var db = TestDbFactory.CreateInMemory();
+        var data = await TestDbFactory.SeedStandardScenarioDataAsync(db);
+        var supplier = new Supplier { Name = "Late Supplier", Status = SupplierStatus.Active };
+        db.Suppliers.Add(supplier); await db.SaveChangesAsync();
+        var quotation = new Quotation { MaterialRequestId = data.Request.Id, SupplierId = supplier.Id, QuotationDate = DateOnly.FromDateTime(DateTime.UtcNow), ValidUntil = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(30)), PromisedDeliveryDate = data.Request.RequiredDate.AddDays(3), TotalAmount = 525000m, Items = new List<QuotationItem> { new() { MaterialRequestItemId = data.RequestItem.Id, Quantity = 250, UnitPrice = 2100 } } };
+        db.Quotations.Add(quotation); await db.SaveChangesAsync();
+        var result = await new ProcurementValidationService(db).ValidateRecommendationAsync(quotation.Id, data.Request.Id, supplier.Id);
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, e => e.Contains("after the site required date"));
+    }
+
+    [Fact]
+    public async Task Missing_Promised_Date_Is_Warning_Not_Invented_Answer()
+    {
+        var db = TestDbFactory.CreateInMemory();
+        var data = await TestDbFactory.SeedStandardScenarioDataAsync(db);
+        var supplier = new Supplier { Name = "Legacy Supplier", Status = SupplierStatus.Active };
+        db.Suppliers.Add(supplier); await db.SaveChangesAsync();
+        var quotation = new Quotation { MaterialRequestId = data.Request.Id, SupplierId = supplier.Id, QuotationDate = DateOnly.FromDateTime(DateTime.UtcNow), ValidUntil = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(14)), TotalAmount = 525000m, Items = new List<QuotationItem> { new() { MaterialRequestItemId = data.RequestItem.Id, Quantity = 250, UnitPrice = 2100 } } };
+        db.Quotations.Add(quotation); await db.SaveChangesAsync();
+        var result = await new ProcurementValidationService(db).ValidateRecommendationAsync(quotation.Id, data.Request.Id, supplier.Id);
+        Assert.True(result.IsValid);
+        Assert.Contains(result.Warnings, w => w.Contains("no promised delivery date"));
+    }
+
     // ── Additional rule-path coverage (§5.1 - §5.10) ─────────────────────────
 
     [Fact]

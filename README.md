@@ -2,131 +2,122 @@
 
 ## Construction Materials Procurement, Delivery and Quality Management System
 
-BuildWise is a full-stack system developed for the SE3090 - Software Engineering Frameworks group assignment.
+BuildWise is the integrated SE3090 Software Engineering Frameworks group assignment system. It manages the complete material lifecycle: **material request → approval → RFQ/quotation → AI supplier recommendation → manager approval → purchase order → delivery → receiving → quality inspection → non-conformance resolution**.
 
-The system is designed to support construction companies in managing material requests, procurement, deliveries, material receiving, and quality inspections through one integrated platform.
+## Four business components
 
-## Main Components
+| # | Component | Owner |
+|---|---|---|
+| 1 | Material Request & Approval Management | Peiris DPSS |
+| 2 | Supplier, Quotation, RFQ & Procurement Management | Theebika (IT24102414) |
+| 3 | Delivery & Material Receiving Management | Ramya |
+| 4 | Quality Inspection & Non-Conformance Management | Anoja |
 
-1. Material Request & Approval Management
-2. Supplier, Quotation & Procurement Management
-3. Delivery & Material Receiving Management
-4. Quality Inspection & Non-Conformance Management
+## Technology stack
 
-## Technology Stack
-
-- ASP.NET Core Web API
-- PostgreSQL
-- React
-- Flutter
-- Agentic AI
-
-## Main Workflow
-
-Material Request  
-→ Approval  
-→ Supplier Quotation  
-→ Procurement  
-→ Delivery  
-→ Material Receiving  
-→ Quality Inspection  
-→ Accept / Reject / Corrective Action
-
-## Team
-
-| Member | Primary Component |
+| Layer | Technology |
 |---|---|
-| Peiris DPSS | Material Request & Approval Management |
-| Theebika | Supplier, Quotation & Procurement Management |
-| Ramya | Delivery & Material Receiving Management |
-| Anoja | Quality Inspection & Non-Conformance Management |
+| API | ASP.NET Core 8 Web API, EF Core, PostgreSQL |
+| Web | React 19, React Router 7, Vite 8 |
+| Mobile | Flutter 3, flutter_secure_storage, flutter_local_notifications |
+| Agentic AI | Python 3.12 FastAPI microservices (ports 8001–8004) |
+| Auth | JWT (HS256), RBAC (5 roles) |
+| Email | SMTP (configurable; logs to console in dev) |
+| CI | GitHub Actions (backend, Python, React, Flutter) |
 
-## Project Status
+## Agentic AI architecture
 
-Implemented and locally validated across the web frontend, ASP.NET Core API,
-Flutter mobile app, and AI agent service.
+Four distinct agents, each with different responsibilities, tools and state:
 
-## Run Locally
-
-### Prerequisites
-
-- Node.js and npm
-- .NET SDK 8.0+
-- PostgreSQL running on `localhost:5432`
-- Python 3.14+
-- Flutter 3.47.5 with Dart 3.13+
-
-The Flutter SDK is installed at `C:\src\flutter`. Open a new PowerShell
-session after adding Flutter to `PATH`, or use the full path shown below.
-
-### Web Frontend
-
-```powershell
-cd E:\SEF_Project\buildwise\web\buildwise-web
-npm install
-npm run dev
+```
+Domain objective
+      ↓
+ProcurementPlanningAgent        ← Plan + delegate (4 read tools)
+      ↓
+QuotationSupplierAnalysisAgent  ← Rank suppliers deterministically (+LLM rationale)
+      ↓
+ProcurementValidationAgent      ← Re-validate all business rules (C#, no trust)
+      ↓
+Human approval (Procurement Manager)
+      ↓
+DeliveryDiscrepancyAgent        ← Detect delivery shortfalls
+      ↓
+QualityRiskAnalysisAgent        ← Flag non-conformance risk
+      ↓
+Auditable result / safe failure
 ```
 
-The Vite development server runs at `http://localhost:5173`.
+All workflow state is persisted in PostgreSQL (`agent_workflows`, `agent_workflow_steps`, `agent_approvals`). The AI never creates a purchase order — a human must approve first.
 
-### Backend API
+## Cross-platform workflow
 
-Set the PostgreSQL connection string in .NET user-secrets. Replace the
-placeholder with the local PostgreSQL password; do not commit credentials.
-
-```powershell
-cd E:\SEF_Project\buildwise\backend\BuildWise.Api
-dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Host=localhost;Database=buildwise;Username=postgres;Password=REPLACE_WITH_LOCAL_PASSWORD"
-dotnet run
+```
+Flutter (mobile) → BuildWise API → PostgreSQL → Agentic AI → React (web) → API → Flutter
 ```
 
-The API runs at `http://localhost:5078` and Swagger is available at
-`http://localhost:5078/swagger`.
-
-### AI Agent Service
+## Running locally
 
 ```powershell
-cd E:\SEF_Project\buildwise\ai\buildwise-agent-service
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8001
+# Start all services (API + agents + web)
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/start-dev.ps1
+
+# Verify
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify-full-journey.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify-rbac.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify-planning-agent.ps1
 ```
 
-### Flutter Mobile App
+## Local evidence
 
-For Flutter web in Chrome:
+| Suite | Passed |
+|---|---|
+| Backend (.NET xUnit) | 230/230 |
+| Python agent (pytest) | 28/28 |
+| React (vitest) | 109/109 |
+| Flutter (flutter test) | 4/4 |
+| Full E2E business journey | 15/15 |
+| Component 4 checks | 5/5 |
 
-```powershell
-cd E:\SEF_Project\buildwise\mobile\buildwise_mobile
-C:\src\flutter\bin\flutter.bat pub get
-C:\src\flutter\bin\flutter.bat run -d chrome
-```
+## Environment variables
 
-The mobile API client uses `localhost:5078` in Chrome and `10.0.2.2:5078`
-for the Android emulator. Override the API URL when needed:
+Copy `.env.example` → `.env` and fill in your values. Never commit credentials.
 
-```powershell
-C:\src\flutter\bin\flutter.bat run -d chrome --dart-define=API_BASE_URL=http://localhost:5078/api
-```
+| Variable | Purpose |
+|---|---|
+| `POSTGRES_*` | Database connection |
+| `Jwt__Key` | JWT signing key |
+| `VITE_API_BASE_URL` | Web → API base URL |
+| `GEMINI_API_KEY` | LLM rationale (optional) |
+| `ANTHROPIC_API_KEY` | LLM rationale alternative (optional) |
 
-### Tests and Validation
+## API & Swagger
 
-```powershell
-cd E:\SEF_Project\buildwise\web\buildwise-web
-npm run build
-npm run lint
+- API: `http://localhost:5078`
+- Swagger: `http://localhost:5078/swagger`
+- Health: `http://localhost:5078/health`
 
-cd E:\SEF_Project\buildwise\backend\BuildWise.Api
-dotnet build
+## Deployment
 
-cd E:\SEF_Project\buildwise\mobile\buildwise_mobile
-C:\src\flutter\bin\flutter.bat test
+See [`docs/adr/ADR-005-deployment-architecture.md`](docs/adr/ADR-005-deployment-architecture.md) for the chosen deployment platform and rationale.
 
-cd E:\SEF_Project\buildwise\ai\buildwise-agent-service
-.\.venv\Scripts\python.exe -m pip install pytest
-.\.venv\Scripts\python.exe -m pytest -q
-```
+## Architecture Decision Records
 
-The current local validation results are: web build succeeds, API build
-succeeds, Flutter tests pass, and AI service tests pass. Web lint currently
-reports warnings only.
+| ADR | Decision |
+|---|---|
+| [ADR-001](docs/adr/0001-quotation-analysis-agent-and-workflow-state.md) | Quotation agent runtime & workflow state persistence |
+| [ADR-002](docs/adr/ADR-002-component2-agent-architecture.md) | Component 2 multi-agent architecture |
+| [ADR-003](docs/adr/ADR-003-react-state-management.md) | React state management strategy |
+| [ADR-004](docs/adr/ADR-004-flutter-state-management.md) | Flutter state management strategy |
+| [ADR-005](docs/adr/ADR-005-deployment-architecture.md) | Deployment platform & cloud architecture |
+
+## Documentation
+
+- [`docs/assignment_compliance_audit.md`](docs/assignment_compliance_audit.md) — Rubric compliance checklist
+- [`docs/project_verification_guide.md`](docs/project_verification_guide.md) — How to verify each component
+- [`docs/environment_and_agents.md`](docs/environment_and_agents.md) — Agent setup & environment guide
+- [`docs/BuildWise_ERD.pdf`](docs/BuildWise_ERD.pdf) — Entity-relationship diagram
+
+## GitHub
+
+Repository: https://github.com/IT24102414/build  
+CI: GitHub Actions runs on every push and pull request to `main`.

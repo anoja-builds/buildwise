@@ -16,6 +16,10 @@ public class MaterialRequestItemConfiguration : IEntityTypeConfiguration<Materia
             .HasPrecision(12, 2)
             .IsRequired();
 
+        builder.Property(mri => mri.Description).HasMaxLength(1000);
+        builder.Property(mri => mri.Unit).HasMaxLength(30);
+        builder.Property(mri => mri.Notes).HasMaxLength(2000);
+
         builder.HasOne(mri => mri.MaterialRequest)
             .WithMany(mr => mr.Items)
             .HasForeignKey(mri => mri.MaterialRequestId)

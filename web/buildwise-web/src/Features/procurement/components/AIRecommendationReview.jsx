@@ -47,10 +47,30 @@ export default function AIRecommendationReview({ workflow }) {
           </ul>
         )}
 
+        {/*
+          Deterministic validation warnings. These were being computed, persisted
+          and then never rendered, so budget and quotation-completeness flags
+          were invisible to the manager making the approval decision.
+        */}
+        {validation?.warnings?.length > 0 && (
+          <ul className="warning-list" style={{ marginBottom: 'var(--space-4)' }}>
+            {validation.warnings.map((w, i) => <li className="warning-item" key={`vw-${i}`}>⚠ {w}</li>)}
+          </ul>
+        )}
+
         {validation && !validation.isValid && validation.errors?.length > 0 && (
           <ul className="warning-list">
             {validation.errors.map((e, i) => <li className="warning-item" key={i} style={{ background: 'var(--color-danger-100)', color: 'var(--color-danger-700)' }}>✕ {e}</li>)}
           </ul>
+        )}
+
+        {recommendation?.riskFlags?.length > 0 && (
+          <>
+            <h3 style={{ marginTop: 'var(--space-5)' }}>Risk flags</h3>
+            <ul className="warning-list">
+              {recommendation.riskFlags.map((flag, i) => <li className="warning-item" key={`rf-${i}`}>⚑ {flag}</li>)}
+            </ul>
+          </>
         )}
 
         {recommendation?.rankedAlternatives?.length > 0 && (

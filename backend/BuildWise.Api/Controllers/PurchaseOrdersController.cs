@@ -2,6 +2,7 @@ using BuildWise.Api.Data;
 using BuildWise.Api.DTOs;
 using BuildWise.Api.Models.Entities;
 using BuildWise.Api.Models.Enums;
+using BuildWise.Api.Security;
 using BuildWise.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -11,7 +12,7 @@ namespace BuildWise.Api.Controllers;
 
 [ApiController]
 [Route("api")]
-[Authorize(Roles = "ProcurementOfficer,ProcurementManager,Administrator")]
+[Authorize(Policy = Policies.InternalStaffOnly)]
 public class PurchaseOrdersController : ControllerBase
 {
     private readonly ApplicationDbContext _db;
@@ -32,7 +33,8 @@ public class PurchaseOrdersController : ControllerBase
     /// Explicitly trigger Purchase Order creation from an approved agent workflow (§4.6 / §7).
     /// </summary>
     [HttpPost("procurement-workflow/{workflowId:int}/purchase-order")]
-    public async Task<ActionResult<PurchaseOrderDto>> CreateFromWorkflow(int workflowId)
+    [Authorize(Policy = Policies.ProcurementDecisionOnly)]
+    public async Task<ActionResult<object>> CreateFromWorkflow(int workflowId)
     {
         try
         {
@@ -52,18 +54,28 @@ public class PurchaseOrdersController : ControllerBase
     /// <summary>
     /// List purchase orders with search, status filtering, and pagination.
     /// Exposes read-only purchase orders to Component 3 once status >= Confirmed.
+    /// <para>
+    /// Commercial terms (<c>totalAmount</c>, per-line <c>unitPrice</c>) are
+    /// included only for procurement-desk callers; site, receiving and quality
+    /// roles receive the redacted <see cref="PurchaseOrderReceivingDto"/> shape.
+    /// </para>
     /// </summary>
     [HttpGet("purchase-orders")]
-    [Authorize(Roles = "ProcurementOfficer,ProcurementManager,Administrator,ReceivingOfficer")]
-    public async Task<ActionResult<PagedResultDto<PurchaseOrderDto>>> GetAll(
+    [Authorize(Policy = Policies.InternalStaffOnly)]
+    public async Task<ActionResult<PagedResultDto<object>>> GetAll(
         [FromQuery] string? status,
         [FromQuery] string? search,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 50)
     {
         var query = _db.PurchaseOrders
+            // C3 POs link the supplier directly; C2 POs via the winning quotation.
+            // Both must be loaded or the projection falls back to "Supplier #n".
+            .Include(po => po.Supplier)
             .Include(po => po.Quotation)
             .ThenInclude(q => q.Supplier)
+            .Include(po => po.Items)
+            .ThenInclude(poi => poi.Material)
             .Include(po => po.Items)
             .ThenInclude(poi => poi.QuotationItem)
             .ThenInclude(qi => qi.MaterialRequestItem)
@@ -78,8 +90,10 @@ public class PurchaseOrdersController : ControllerBase
         if (!string.IsNullOrWhiteSpace(search))
         {
             var cleanSearch = search.Trim().ToLower();
-            query = query.Where(po => po.Quotation.Supplier.Name.ToLower().Contains(cleanSearch) ||
-                                      po.Id.ToString().Contains(cleanSearch));
+            query = query.Where(po =>
+                (po.Supplier != null && po.Supplier.Name.ToLower().Contains(cleanSearch)) ||
+                (po.Quotation!.Supplier!.Name.ToLower().Contains(cleanSearch)) ||
+                po.Id.ToString().Contains(cleanSearch));
         }
 
         var total = await query.CountAsync();
@@ -90,20 +104,24 @@ public class PurchaseOrdersController : ControllerBase
             .Take(pageSize)
             .ToListAsync();
 
-        var dtos = list.Select(MapToPurchaseOrderDto).ToList();
-        return Ok(new PagedResultDto<PurchaseOrderDto>(dtos, total, page, pageSize));
+        var dtos = list.ToCallerDto(User).ToList();
+        return Ok(new PagedResultDto<object>(dtos, total, page, pageSize));
     }
 
     /// <summary>
     /// Get purchase order detail with items and linked quotation.
+    /// Commercial terms are returned only to procurement-desk callers.
     /// </summary>
     [HttpGet("purchase-orders/{id:int}")]
-    [Authorize(Roles = "ProcurementOfficer,ProcurementManager,Administrator,ReceivingOfficer")]
-    public async Task<ActionResult<PurchaseOrderDto>> GetById(int id)
+    [Authorize(Policy = Policies.InternalStaffOnly)]
+    public async Task<ActionResult<object>> GetById(int id)
     {
         var po = await _db.PurchaseOrders
+            .Include(p => p.Supplier)
             .Include(p => p.Quotation)
             .ThenInclude(q => q.Supplier)
+            .Include(p => p.Items)
+            .ThenInclude(poi => poi.Material)
             .Include(p => p.Items)
             .ThenInclude(poi => poi.QuotationItem)
             .ThenInclude(qi => qi.MaterialRequestItem)
@@ -113,13 +131,15 @@ public class PurchaseOrdersController : ControllerBase
         if (po is null)
             return NotFound($"Purchase Order #{id} not found.");
 
-        return Ok(MapToPurchaseOrderDto(po));
+        return Ok(po.ToCallerDto(User));
     }
 
     /// <summary>
     /// Update purchase order status (Confirmed, InProgress, Completed, Cancelled).
+    /// Procurement desk only — site and quality roles are read-only on POs.
     /// </summary>
     [HttpPatch("purchase-orders/{id:int}/status")]
+    [Authorize(Policy = Policies.ProcurementStaffOnly)]
     public async Task<IActionResult> UpdateStatus(int id, [FromBody] UpdatePurchaseOrderStatusDto dto)
     {
         var po = await _db.PurchaseOrders.FindAsync(id);
@@ -138,40 +158,5 @@ public class PurchaseOrdersController : ControllerBase
         _logger.LogInformation("Purchase Order #{Id} status changed from {OldStatus} to {NewStatus}", id, oldStatus, newStatus);
 
         return NoContent();
-    }
-
-    private static PurchaseOrderDto MapToPurchaseOrderDto(PurchaseOrder po)
-    {
-        // C2 POs carry the supplier via the winning quotation; C3 POs carry it
-        // directly (SupplierId). Prefer the direct link, fall back to quotation.
-        var supplierId = po.SupplierId ?? po.Quotation?.SupplierId ?? 0;
-        var supplierName = po.Supplier?.Name
-            ?? po.Quotation?.Supplier?.Name
-            ?? $"Supplier #{supplierId}";
-        return new PurchaseOrderDto(
-            po.Id,
-            po.QuotationId ?? 0,
-            po.Quotation?.MaterialRequestId ?? 0,
-            supplierId,
-            supplierName,
-            po.OrderDate,
-            po.ExpectedDeliveryDate,
-            po.Status.ToString(),
-            po.TotalAmount,
-            po.CreatedAt,
-            po.UpdatedAt,
-            po.Items.Select(i => new PurchaseOrderItemDto(
-                i.Id,
-                i.QuotationItemId,
-                i.MaterialId,
-                i.QuotationItem?.MaterialRequestItem?.Material?.Name
-                    ?? i.Material?.Name
-                    ?? $"Item #{i.QuotationItemId ?? i.MaterialId ?? i.Id}",
-                i.QuotationItem?.MaterialRequestItem?.Material?.Unit ?? i.Material?.Unit ?? "Units",
-                i.OrderedQuantity,
-                i.UnitPrice,
-                i.OrderedQuantity * i.UnitPrice
-            )).ToList()
-        );
     }
 }

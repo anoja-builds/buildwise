@@ -6,17 +6,20 @@ namespace BuildWise.Api.Models.Entities;
 public class Rfq : BaseEntity
 {
     public int MaterialRequestId { get; set; }
-    public MaterialRequest? MaterialRequest { get; set; }
-
-    public string Title { get; set; } = string.Empty;
-
+    public MaterialRequest MaterialRequest { get; set; } = null!;
+    public int IssuedByUserId { get; set; }
+    public DateOnly RequiredResponseDate { get; set; }
     public string? Notes { get; set; }
-
-    public RfqStatus Status { get; set; } = RfqStatus.Draft;
-
-    public DateTime? Deadline { get; set; }
-
+    public RfqStatus Status { get; set; } = RfqStatus.Issued;
     public ICollection<RfqSupplier> Suppliers { get; set; } = new List<RfqSupplier>();
+}
 
-    public ICollection<Quotation> Quotations { get; set; } = new List<Quotation>();
+public class RfqSupplier : BaseEntity
+{
+    public int RfqId { get; set; }
+    public Rfq Rfq { get; set; } = null!;
+    public int SupplierId { get; set; }
+    public Supplier Supplier { get; set; } = null!;
+    public RfqSupplierStatus Status { get; set; } = RfqSupplierStatus.Invited;
+    public DateTime? RespondedAt { get; set; }
 }

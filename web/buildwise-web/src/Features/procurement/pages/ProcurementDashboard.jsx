@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Card, ErrorState, LoadingState, PageHeader, StatusBadge } from '../../../components/shared'
+import { Card, ErrorState, LoadingState, PageHeader, StatusBadge, materialRequestTone } from '../../../components/shared'
 import { procurementApi } from '../services/procurementApi'
 import { statusTone } from '../components/statusTone'
 
@@ -69,6 +69,7 @@ export default function ProcurementDashboard({ onOpenRequest, onOpenOrder }) {
                       <span className="board-item__title"><span className="board-dot" aria-hidden="true" />MR-{r.id} — {r.projectName}</span>
                       <span className="board-item__meta">{r.quotationCount} quotation(s) · required by {r.requiredDate}</span>
                     </span>
+                    <StatusBadge status={materialRequestTone(r.status)}>{r.status}</StatusBadge>
                   </button>
                 </li>
               ))}

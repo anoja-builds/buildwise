@@ -4,13 +4,14 @@ using BuildWise.Api.Models.Entities;
 using BuildWise.Api.Models.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using BuildWise.Api.Security;
 using Microsoft.EntityFrameworkCore;
 
 namespace BuildWise.Api.Controllers;
 
 [ApiController]
 [Route("api/suppliers")]
-[Authorize(Roles = "ProcurementOfficer,ProcurementManager,Administrator")]
+[Authorize(Policy = Policies.ProcurementStaffAndAdmin)]
 public class SuppliersController : ControllerBase
 {
     private readonly ApplicationDbContext _db;
@@ -114,6 +115,7 @@ public class SuppliersController : ControllerBase
     /// Create a new supplier (defaults to Active).
     /// </summary>
     [HttpPost]
+    [Authorize(Policy = Policies.SupplierAdministrationOnly)]
     public async Task<ActionResult<SupplierDto>> Create(CreateSupplierDto dto)
     {
         if (string.IsNullOrWhiteSpace(dto.Name))
@@ -155,6 +157,7 @@ public class SuppliersController : ControllerBase
     /// Edit supplier profile details.
     /// </summary>
     [HttpPut("{id:int}")]
+    [Authorize(Policy = Policies.SupplierAdministrationOnly)]
     public async Task<ActionResult<SupplierDto>> Update(int id, UpdateSupplierDto dto)
     {
         var supplier = await _db.Suppliers.FindAsync(id);
@@ -191,6 +194,7 @@ public class SuppliersController : ControllerBase
     /// Status changes are audited and affect procurement AI eligibility (§2 / §5).
     /// </summary>
     [HttpPatch("{id:int}/status")]
+    [Authorize(Policy = Policies.SupplierAdministrationOnly)]
     public async Task<IActionResult> UpdateStatus(int id, UpdateSupplierStatusDto dto)
     {
         var supplier = await _db.Suppliers.FindAsync(id);
