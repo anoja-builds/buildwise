@@ -10,6 +10,23 @@ namespace BuildWise.Api.Tests;
 public class MaterialRequestServiceTests
 {
     [Fact]
+    public async Task CreateRequest_Invalid_New_Project_Does_Not_Persist_Project()
+    {
+        var db = TestDbFactory.CreateInMemory();
+        var service = new MaterialRequestService(db);
+        var request = new MaterialRequest
+        {
+            ProjectName = "New site",
+            RequiredDate = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-1)),
+            Items = new List<MaterialRequestItem>()
+        };
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.CreateRequestAsync(request));
+        await db.SaveChangesAsync();
+        Assert.Empty(db.Projects);
+        Assert.Empty(db.MaterialRequests);
+    }
+
+    [Fact]
     public async Task CreateRequest_Resolves_New_Alphanumeric_Material_And_Reuses_It()
     {
         var db = TestDbFactory.CreateInMemory();

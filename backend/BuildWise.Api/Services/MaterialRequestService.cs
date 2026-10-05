@@ -109,9 +109,7 @@ public class MaterialRequestService
         }
 
         var project = new Project { Name = name, Status = ProjectStatus.Active };
-        _context.Projects.Add(project);
-        await _context.SaveChangesAsync();
-        request.ProjectId = project.Id;
+        request.Project = project;
         return project;
     }
 

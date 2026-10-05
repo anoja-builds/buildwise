@@ -51,8 +51,8 @@ class OperationsService {
   }) async {
     final response = await _apiClient.post('/material-requests', body: {
       'projectId': projectId,
-      if (projectName != null) 'projectName': projectName,
-      if (requestDate != null) 'requestDate': requestDate,
+      'projectName': ?projectName,
+      'requestDate': ?requestDate,
       'requiredDate': requiredDate,
       'priority': priority,
       'reason': reason,
@@ -61,7 +61,7 @@ class OperationsService {
       'items': [
         {
           'materialId': materialId,
-          if (materialName != null) 'materialName': materialName,
+          'materialName': ?materialName,
           'requestedQuantity': quantity,
           'unit': unit,
           'description': description,
