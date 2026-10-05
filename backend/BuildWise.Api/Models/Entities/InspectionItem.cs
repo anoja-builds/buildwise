@@ -1,24 +1,16 @@
-using BuildWise.Api.Models.Common;
+using BuildWise.Api.Models.Entities;
 
 namespace BuildWise.Api.Models.Entities;
 
-public class InspectionItem : BaseEntity
+public class InspectionItem
 {
+    public int Id { get; set; }
     public int InspectionId { get; set; }
-
     public Inspection? Inspection { get; set; }
-
-    public int DeliveryItemId { get; set; }
-
-    public DeliveryItem? DeliveryItem { get; set; }
-
-    public string? Condition { get; set; }
-
-    public decimal AcceptedQuantity { get; set; } = 0;
-
-    public decimal RejectedQuantity { get; set; } = 0;
-
-    public string? Remarks { get; set; }
-
-    public ICollection<NonConformance> NonConformances { get; set; } = new List<NonConformance>();
+    public int MaterialId { get; set; }
+    public Material? Material { get; set; }
+    public decimal InspectedQuantity { get; set; }
+    public decimal AcceptedQuantity { get; set; }
+    public decimal RejectedQuantity { get; set; }
+    public string RejectionReason { get; set; } = string.Empty;
 }

@@ -1,5 +1,4 @@
 using BuildWise.Api.Models.Entities;
-using BuildWise.Api.Models.Enums;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
@@ -11,30 +10,46 @@ public class NonConformanceConfiguration : IEntityTypeConfiguration<NonConforman
     {
         builder.ToTable("non_conformances");
 
-        builder.HasKey(nc => nc.Id);
+        builder.HasKey(n => n.Id);
 
-        builder.Property(nc => nc.IssueDescription).IsRequired();
-
-        builder.Property(nc => nc.Severity)
-            .HasConversion<string>()
+        builder.Property(n => n.NcrNumber)
+            .HasMaxLength(30)
             .IsRequired();
 
-        builder.Property(nc => nc.CorrectiveAction).IsRequired(false);
-
-        builder.Property(nc => nc.Status)
+        builder.Property(n => n.Severity)
             .HasConversion<string>()
-            .HasDefaultValue(NonConformanceStatus.Open)
+            .HasMaxLength(20)
             .IsRequired();
 
-        builder.Property(nc => nc.ResolvedAt).IsRequired(false);
+        builder.Property(n => n.Status)
+            .HasConversion<string>()
+            .HasMaxLength(40)
+            .IsRequired();
 
-        builder.HasOne(nc => nc.InspectionItem)
-            .WithMany(ii => ii.NonConformances)
-            .HasForeignKey(nc => nc.InspectionItemId)
+        builder.Property(n => n.IssueDescription)
+            .HasMaxLength(2000)
+            .IsRequired();
+
+        builder.Property(n => n.CorrectiveActionPlan).HasMaxLength(2000);
+        builder.Property(n => n.Resolution).HasMaxLength(2000);
+        builder.Property(n => n.ReviewNotes).HasMaxLength(2000);
+        builder.Property(n => n.QuantityAffected).HasPrecision(12, 2).HasDefaultValue(0).IsRequired();
+
+        builder.HasIndex(n => n.DeliveryId);
+        builder.HasIndex(n => n.MaterialId);
+        builder.HasIndex(n => n.SupplierId);
+        builder.HasIndex(n => n.ResponsibleUserId);
+
+        builder.HasOne(n => n.InspectionItem)
+            .WithMany()
+            .HasForeignKey(n => n.InspectionItemId)
             .OnDelete(DeleteBehavior.Cascade);
 
-        builder.HasIndex(nc => nc.InspectionItemId);
-        builder.HasIndex(nc => nc.Severity);
-        builder.HasIndex(nc => nc.Status);
+        builder.HasOne(n => n.ResponsibleUser).WithMany().HasForeignKey(n => n.ResponsibleUserId).OnDelete(DeleteBehavior.SetNull);
+        builder.HasOne(n => n.ReviewedByUser).WithMany().HasForeignKey(n => n.ReviewedByUserId).OnDelete(DeleteBehavior.SetNull);
+
+        builder.HasIndex(n => n.NcrNumber).IsUnique();
+        builder.HasIndex(n => n.Status);
+        builder.HasIndex(n => n.InspectionItemId);
     }
 }

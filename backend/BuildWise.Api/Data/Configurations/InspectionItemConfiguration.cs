@@ -12,34 +12,29 @@ public class InspectionItemConfiguration : IEntityTypeConfiguration<InspectionIt
 
         builder.HasKey(ii => ii.Id);
 
+        builder.Property(ii => ii.InspectedQuantity)
+            .HasPrecision(12, 2)
+            .IsRequired();
+
         builder.Property(ii => ii.AcceptedQuantity)
             .HasPrecision(12, 2)
-            .HasDefaultValue(0m)
+            .HasDefaultValue(0)
             .IsRequired();
 
         builder.Property(ii => ii.RejectedQuantity)
             .HasPrecision(12, 2)
-            .HasDefaultValue(0m)
+            .HasDefaultValue(0)
             .IsRequired();
 
-        builder.Property(ii => ii.Condition)
-            .HasMaxLength(100)
-            .IsRequired(false);
+        builder.Property(ii => ii.RejectionReason)
+            .HasMaxLength(500);
 
-        builder.Property(ii => ii.Remarks).IsRequired(false);
-
-        builder.HasOne(ii => ii.Inspection)
-            .WithMany(i => i.Items)
-            .HasForeignKey(ii => ii.InspectionId)
-            .OnDelete(DeleteBehavior.Cascade);
-
-        builder.HasOne(ii => ii.DeliveryItem)
+        builder.HasOne(ii => ii.Material)
             .WithMany()
-            .HasForeignKey(ii => ii.DeliveryItemId)
+            .HasForeignKey(ii => ii.MaterialId)
             .OnDelete(DeleteBehavior.Restrict);
 
         builder.HasIndex(ii => ii.InspectionId);
-        builder.HasIndex(ii => ii.DeliveryItemId);
-        builder.HasIndex(ii => new { ii.InspectionId, ii.DeliveryItemId }).IsUnique();
+        builder.HasIndex(ii => ii.MaterialId);
     }
 }

@@ -1,0 +1,93 @@
+/* Horizontal material-lifecycle chain shown on the Inspections and
+   Non-Conformance screens. Each node is a button so a reviewer can jump to the
+   stage that produced the record they are looking at. */
+
+.lifecycle-card {
+  overflow: hidden;
+}
+
+.lifecycle {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.lifecycle__step {
+  display: flex;
+  align-items: center;
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.lifecycle__connector {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 2px;
+  background: var(--color-border, #d7dee8);
+}
+
+.lifecycle__node {
+  flex: 1 1 auto;
+  min-width: 62px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 6px;
+  border: 1px solid var(--color-border, #d7dee8);
+  border-radius: 8px;
+  background: var(--color-surface, #fff);
+  cursor: pointer;
+  font: inherit;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.lifecycle__node:hover {
+  border-color: var(--color-primary, #2563eb);
+}
+
+.lifecycle__node:focus-visible {
+  outline: 2px solid var(--color-primary, #2563eb);
+  outline-offset: 2px;
+}
+
+/* The stage the current page is about. */
+.lifecycle__node--active {
+  border-color: var(--color-primary, #2563eb);
+  background: var(--color-primary-50, #eef2ff);
+  box-shadow: inset 0 0 0 1px var(--color-primary, #2563eb);
+}
+
+/* A stage the caller's role cannot read: visible as a step, but no count. */
+.lifecycle__node--restricted {
+  opacity: 0.55;
+  border-style: dashed;
+}
+
+.lifecycle__label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--color-text-muted, #5b6b7f);
+  white-space: nowrap;
+}
+
+.lifecycle__count {
+  font-size: 16px;
+  font-weight: 800;
+  line-height: 1.2;
+  color: var(--color-text, #16202c);
+}
+
+.lifecycle__node--restricted .lifecycle__count {
+  color: var(--color-text-muted, #5b6b7f);
+}
+
+.lifecycle__legend {
+  margin: var(--space-3, 12px) 0 0;
+  font-size: 12px;
+  color: var(--color-text-muted, #5b6b7f);
+}
