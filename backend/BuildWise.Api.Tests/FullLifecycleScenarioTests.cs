@@ -349,6 +349,7 @@ public class FullLifecycleScenarioTests : IAsyncLifetime
             InspectorUserId = _qualityInspectorId,
             InspectionCriteria = "Visual check, 42.5N grade certification, no moisture ingress",
             ObservedResult = "20 bags torn and partially hydrated on arrival",
+            Notes = "20 bags torn and partially hydrated on arrival",
             // Structured five-point checklist (Rule 0). Visual, moisture,
             // packaging and defects genuinely failed here, consistent with the
             // 20 rejected bags this inspection records.

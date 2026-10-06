@@ -16,7 +16,12 @@ async function request(path, { method = 'GET', body } = {}) {
   })
   const data = await res.json().catch(() => ({}))
   if (!res.ok) {
-    throw new Error(data?.message || `Request failed (${res.status})`)
+    // `status` and `payload` travel with the error so a form can map RFC 7807
+    // ValidationProblemDetails onto its fields instead of showing one banner.
+    const error = new Error(data?.message || `Request failed (${res.status})`)
+    error.status = res.status
+    error.payload = data
+    throw error
   }
   return data
 }
@@ -68,6 +73,7 @@ export const qualityApi = {
     return request(`/quality-inspections${query.size ? `?${query}` : ''}`)
   },
   getInspection: (id) => request(`/quality-inspections/${id}`),
+  completeInspection: (payload) => request('/quality-inspections', { method: 'POST', body: payload }),
   // COMPONENT 4 agent: runs the QualityRiskAnalysisAgent (:8004) over one
   // completed inspection. Advisory only — it does not create the NCR or change
   // the inspection status; those are decided by the backend and the inspector.
