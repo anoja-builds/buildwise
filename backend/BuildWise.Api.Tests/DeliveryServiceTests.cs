@@ -145,6 +145,98 @@ public class DeliveryServiceTests
         }
     };
 
+    [Fact]
+    public async Task RecordDelivery_Requires_A_Delivery_Reference()
+    {
+        var scenario = await SeedScenarioAsync();
+        var service = new DeliveryService(scenario.Db);
+        var delivery = BuildDelivery(scenario);
+        delivery.DeliveryReference = "   ";
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => service.RecordDeliveryAsync(delivery));
+
+        Assert.Contains("delivery reference is required", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(await scenario.Db.Deliveries.ToListAsync());
+    }
+
+    [Fact]
+    public async Task RecordDelivery_Rejects_Cumulative_Over_Receipt_Across_Partial_Deliveries()
+    {
+        // Partial deliveries are normal, so the per-delivery check alone lets a
+        // supplier deliver the full 250 twice. The cumulative guard must refuse the
+        // second delivery.
+        var scenario = await SeedScenarioAsync();
+        var service = new DeliveryService(scenario.Db);
+
+        var first = BuildDelivery(scenario);
+        first.DeliveryReference = "INV-1";
+        first.Items[0].ReceivedQuantity = 200;
+        await service.RecordDeliveryAsync(first);
+
+        var second = BuildDelivery(scenario);
+        second.DeliveryReference = "INV-2";
+        second.Items[0].ReceivedQuantity = 100; // 200 + 100 = 300 > 250 ordered
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => service.RecordDeliveryAsync(second));
+
+        Assert.Contains("Cumulative received quantity cannot exceed", ex.Message);
+    }
+
+    [Fact]
+    public async Task RecordDelivery_Allows_Partial_Deliveries_That_Cumulatively_Fit()
+    {
+        // The boundary case for the cumulative guard: 200 + 50 is exactly the
+        // ordered quantity, so it must be accepted.
+        var scenario = await SeedScenarioAsync();
+        var service = new DeliveryService(scenario.Db);
+
+        var first = BuildDelivery(scenario);
+        first.DeliveryReference = "INV-1";
+        first.Items[0].ReceivedQuantity = 200;
+        await service.RecordDeliveryAsync(first);
+
+        var second = BuildDelivery(scenario);
+        second.DeliveryReference = "INV-2";
+        second.Items[0].ReceivedQuantity = 50;
+
+        var created = await service.RecordDeliveryAsync(second);
+
+        Assert.Equal(2, await scenario.Db.Deliveries.CountAsync());
+        Assert.Equal("INV-2", created.DeliveryReference);
+    }
+
+    [Fact]
+    public async Task RecordDelivery_Persists_Photo_And_Uses_Receiver_Identity()
+    {
+        var scenario = await SeedScenarioAsync();
+        var service = new DeliveryService(scenario.Db);
+        var delivery = BuildDelivery(scenario);
+        delivery.Evidence.Add(new DeliveryEvidence
+        {
+            FileUrl = "data:image/png;base64,iVBORw0KGgo=", UploadedByUserId = 999
+        });
+
+        await service.RecordDeliveryAsync(delivery);
+
+        var saved = await scenario.Db.DeliveryEvidences.SingleAsync();
+        Assert.Equal(delivery.Id, saved.DeliveryId);
+        Assert.Equal(delivery.ReceivedByUserId, saved.UploadedByUserId);
+        Assert.Single((await service.GetDeliveriesAsync()).Single().Evidence);
+    }
+
+    [Fact]
+    public async Task RecordDelivery_Rejects_Duplicate_Lines_Before_Persistence()
+    {
+        var scenario = await SeedScenarioAsync();
+        var delivery = BuildDelivery(scenario);
+        delivery.Items.Add(new DeliveryItem { MaterialId = scenario.Material.Id, ReceivedQuantity = 250 });
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => new DeliveryService(scenario.Db).RecordDeliveryAsync(delivery));
+        Assert.Empty(await scenario.Db.Deliveries.ToListAsync());
+    }
+
     private static async Task<DeliveryScenario> SeedScenarioAsync(
         PurchaseOrderStatus status = PurchaseOrderStatus.Confirmed)
     {

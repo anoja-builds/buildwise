@@ -1,17 +1,20 @@
-import { useEffect, useMemo, useState } from 'react'
+﻿import { useEffect, useMemo, useState } from 'react'
 import {
   Button,
   Card,
   Drawer,
   EmptyState,
   ErrorState,
+  FormErrorSummary,
   LoadingState,
   PageHeader,
   SelectInput,
   StatusBadge,
+  SuccessDialog,
   TextInput,
 } from '../components/shared'
 import { qualityApi } from '../services/qualityApi'
+import { describeApiFailure } from '../services/validationErrors'
 import { useAuth } from '../auth/AuthContext'
 import './common/common.css'
 import './DeliveriesPage.css'
@@ -38,9 +41,15 @@ export default function DeliveriesPage() {
   // Both panels are opt-in. The record form and the detail view are no longer
   // permanent page sections, so the list stays the primary content.
   const [isRecordOpen, setIsRecordOpen] = useState(false)
+  // Pop-up confirmation after a receiving entry was saved, mirroring the other
+  // create flows: the drawer closes and the result is shown in front of the user.
+  const [recordedNotice, setRecordedNotice] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  const canReceive = hasRole('SiteOfficer') || hasRole('ReceivingOfficer') || hasRole('Administrator')
+  // Receiving is the Site Officer's write. The Site Engineer keeps the delivery
+  // workspace to follow the material they requested, but view-only — the API
+  // enforces the same split with the DeliveryReceiversOnly policy.
+  const canReceive = hasRole('SiteOfficer')
 
   async function loadWorkspace() {
     setLoading(true)
@@ -61,7 +70,19 @@ export default function DeliveriesPage() {
     }
   }
 
-  useEffect(() => { loadWorkspace() }, [])
+  useEffect(() => {
+    loadWorkspace()
+    const refresh = async () => {
+      if (document.hidden) return
+      try {
+        const orders = await qualityApi.listConfirmedPurchaseOrders()
+        setPurchaseOrders(Array.isArray(orders) ? orders : (orders.items ?? []))
+      } catch { /* Preserve available orders during a temporary network failure. */ }
+    }
+    const timer = setInterval(refresh, 15000)
+    window.addEventListener('focus', refresh)
+    return () => { clearInterval(timer); window.removeEventListener('focus', refresh) }
+  }, [])
 
   const selectedDelivery = useMemo(
     () => deliveries.find((delivery) => delivery.id === Number(selectedId)) ?? null,
@@ -74,7 +95,7 @@ export default function DeliveriesPage() {
   function openDetail(id) { setSelectedId(id) }
   function closeDetail() { setSelectedId(null) }
 
-  if (loading) return <LoadingState message="Loading deliveries…" />
+  if (loading) return <LoadingState message="Loading deliveriesâ€¦" />
   if (error) return <ErrorState title="Could not load deliveries" message={error} onRetry={loadWorkspace} />
 
   return (
@@ -104,6 +125,7 @@ export default function DeliveriesPage() {
           userName={user?.fullName}
           onRecorded={(created) => {
             setIsRecordOpen(false)
+            setRecordedNotice(created)
             loadWorkspace()
             setSelectedId(created.id)
           }}
@@ -118,6 +140,14 @@ export default function DeliveriesPage() {
       >
         {selectedDelivery && <DeliveryDetail delivery={selectedDelivery} />}
       </Drawer>
+
+      <SuccessDialog
+        open={recordedNotice != null}
+        title={recordedNotice ? `Delivery #${recordedNotice.id} recorded` : 'Delivery recorded'}
+        message="The receiving entry was saved. The delivery detail is now open for review."
+        confirmLabel="OK"
+        onClose={() => setRecordedNotice(null)}
+      />
     </div>
   )
 }
@@ -231,6 +261,11 @@ function ReceiveDeliveryForm({ orders, userName, onRecorded }) {
   const [lines, setLines] = useState({})
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState(null)
+  // Backend field errors (from RFC 7807 ValidationProblemDetails) shown beside
+  // the offending input. Client-side checks below give instant feedback; these
+  // are authoritative and cover rules the browser cannot know, such as the
+  // cumulative quantity across earlier deliveries for this purchase order.
+  const [fieldErrors, setFieldErrors] = useState({})
   const selectedOrder = orders.find((po) => String(po.id) === form.purchaseOrderId)
   function update(field, value) { setForm((current) => ({ ...current, [field]: value })) }
   function updateLine(materialId, field, value) { setLines((current) => ({ ...current, [materialId]: { ...current[materialId], [field]: value } })) }
@@ -238,18 +273,42 @@ function ReceiveDeliveryForm({ orders, userName, onRecorded }) {
   async function handleSubmit(event) {
     event.preventDefault()
     setSubmitError(null)
+    setFieldErrors({})
     if (!selectedOrder?.items?.length) { setSubmitError('Select a confirmed purchase order with at least one line item.'); return }
-    const items = selectedOrder.items.map((item) => ({ materialId: item.materialId, receivedQuantity: Number(lines[item.materialId]?.receivedQuantity ?? 0), damagedQuantity: Number(lines[item.materialId]?.damagedQuantity ?? 0) }))
-    if (items.some((item) => item.receivedQuantity < 0 || item.damagedQuantity < 0 || item.damagedQuantity > item.receivedQuantity)) {
-      setSubmitError('Received and damaged quantities cannot be negative, and damaged cannot exceed received.')
+
+    // Immediate client-side feedback. These mirror the backend rules but are not
+    // trusted for correctness - the server re-checks every one of them.
+    const lineErrors = {}
+    const items = selectedOrder.items.map((item) => {
+      const receivedQuantity = Number(lines[item.materialId]?.receivedQuantity ?? 0)
+      const damagedQuantity = Number(lines[item.materialId]?.damagedQuantity ?? 0)
+      const materialId = item.materialId
+      if (receivedQuantity < 0) lineErrors[`received-${materialId}`] = 'Received quantity cannot be negative.'
+      else if (receivedQuantity > Number(item.orderedQuantity)) lineErrors[`received-${materialId}`] = `Received quantity cannot exceed the ordered quantity (${formatNumber(item.orderedQuantity)}).`
+      if (damagedQuantity < 0) lineErrors[`damaged-${materialId}`] = 'Damaged quantity cannot be negative.'
+      else if (damagedQuantity > receivedQuantity) lineErrors[`damaged-${materialId}`] = 'Damaged quantity cannot exceed received quantity.'
+      return { materialId, receivedQuantity, damagedQuantity }
+    })
+
+    const nextFieldErrors = {}
+    if (!form.deliveryReference.trim()) nextFieldErrors.deliveryReference = 'Enter the supplier delivery reference or invoice number.'
+    if (Object.keys(lineErrors).length > 0 || Object.keys(nextFieldErrors).length > 0) {
+      setFieldErrors({ ...nextFieldErrors, ...lineErrors })
       return
     }
-    if (!form.deliveryReference.trim()) { setSubmitError('Enter the supplier delivery reference or invoice number.'); return }
+
     setSubmitting(true)
     try {
       const created = await qualityApi.recordDelivery({ purchaseOrderId: selectedOrder.id, deliveryReference: form.deliveryReference.trim(), items })
       setForm(EMPTY_FORM); setLines({}); onRecorded(created)
-    } catch (err) { setSubmitError(err.message) } finally { setSubmitting(false) }
+    } catch (err) {
+      // Map the API failure onto fields where possible. A rule that names a
+      // material line is attached to that line's input; anything else stays in
+      // the summary banner. Entered values are deliberately left intact.
+      const described = describeApiFailure(err)
+      setSubmitError(described.general)
+      setFieldErrors(mapDeliveryFieldErrors(described, selectedOrder))
+    } finally { setSubmitting(false) }
   }
 
   return (
@@ -257,12 +316,15 @@ function ReceiveDeliveryForm({ orders, userName, onRecorded }) {
       {/* The drawer supplies the title; only the recorder attribution is
           specific to this form. */}
       {userName && <p className="delivery-recorder">Received by {initials(userName)}</p>}
-      {submitError && <ErrorState title="Delivery could not be recorded" message={submitError} />}
+      {/* Field-level messages render beside their inputs. The summary repeats
+          them in one place because rules such as the cumulative quantity span
+          more than one field. */}
+      <FormErrorSummary general={submitError} fieldErrors={fieldErrors} />
       <form onSubmit={handleSubmit} className="delivery-form">
         <Card>
           <div className="form-grid">
-            <SelectInput label="Confirmed purchase order" id="purchaseOrderId" required value={form.purchaseOrderId} onChange={(e) => update('purchaseOrderId', e.target.value)} options={[{ value: '', label: 'Select a purchase order' }, ...orders.map((po) => ({ value: po.id, label: `PO-${po.id} · ${po.items?.length ?? 0} line(s)` }))]} />
-            <TextInput label="Delivery reference / invoice" id="deliveryReference" required value={form.deliveryReference} onChange={(e) => update('deliveryReference', e.target.value)} placeholder="e.g. INV-9081" />
+            <SelectInput label="Confirmed purchase order" id="purchaseOrderId" required value={form.purchaseOrderId} onChange={(e) => update('purchaseOrderId', e.target.value)} options={[{ value: '', label: 'Select a purchase order' }, ...orders.map((po) => ({ value: po.id, label: `PO-${po.id} Â· ${po.items?.length ?? 0} line(s)` }))]} />
+            <TextInput label="Delivery reference / invoice" id="deliveryReference" required value={form.deliveryReference} error={fieldErrors.deliveryReference} onChange={(e) => update('deliveryReference', e.target.value)} placeholder="e.g. INV-9081" />
           </div>
         </Card>
         <Card title="Received line items" subtitle="Enter actual site quantities for the selected order.">
@@ -272,19 +334,58 @@ function ReceiveDeliveryForm({ orders, userName, onRecorded }) {
                 <div><strong>{item.materialName ?? `Material #${item.materialId}`}</strong><small>Ordered: {formatNumber(item.orderedQuantity)} {item.unit ?? 'units'}</small></div>
                 {/* max mirrors the backend rule Received <= Ordered, so an
                     over-receipt is caught in the browser as well as server-side. */}
-                <TextInput id={`received-${item.materialId}`} label="Received" type="number" min="0" max={item.orderedQuantity} step="0.01" value={lines[item.materialId]?.receivedQuantity ?? ''} onChange={(e) => updateLine(item.materialId, 'receivedQuantity', e.target.value)} />
-                <TextInput id={`damaged-${item.materialId}`} label="Damaged" type="number" min="0" step="0.01" value={lines[item.materialId]?.damagedQuantity ?? ''} onChange={(e) => updateLine(item.materialId, 'damagedQuantity', e.target.value)} />
+                <TextInput id={`received-${item.materialId}`} label="Received" type="number" min="0" max={item.orderedQuantity} step="0.01" error={fieldErrors[`received-${item.materialId}`]} value={lines[item.materialId]?.receivedQuantity ?? ''} onChange={(e) => updateLine(item.materialId, 'receivedQuantity', e.target.value)} />
+                <TextInput id={`damaged-${item.materialId}`} label="Damaged" type="number" min="0" step="0.01" error={fieldErrors[`damaged-${item.materialId}`]} value={lines[item.materialId]?.damagedQuantity ?? ''} onChange={(e) => updateLine(item.materialId, 'damagedQuantity', e.target.value)} />
               </div>
             ))}</div>
           )}
           {/* The form is no longer a separate view, so "Cancel" used to mean
               "leave this tab". It now clears the in-progress draft, which is
               what the button still means to someone filling the form in. */}
-          <div className="form-actions"><Button variant="secondary" onClick={() => { setForm(EMPTY_FORM); setLines({}); setSubmitError(null) }} disabled={submitting}>Clear form</Button><Button type="submit" disabled={submitting || !selectedOrder}>{submitting ? 'Recording…' : 'Submit delivery entry'}</Button></div>
+          <div className="form-actions"><Button variant="secondary" onClick={() => { setForm(EMPTY_FORM); setLines({}); setSubmitError(null) }} disabled={submitting}>Clear form</Button><Button type="submit" disabled={submitting || !selectedOrder}>{submitting ? 'Recordingâ€¦' : 'Submit delivery entry'}</Button></div>
         </Card>
       </form>
     </section>
   )
+}
+
+/**
+ * Attaches a backend delivery message to the specific line input it belongs to.
+ *
+ * The API reports quantity rules in prose ("Received quantity cannot exceed the
+ * ordered quantity. Ordered 250, received 300.") rather than naming a field, so
+ * the line is identified from the material id the server echoes back. Anything
+ * that cannot be attributed stays in the summary banner rather than being
+ * attached to an arbitrary input.
+ */
+function mapDeliveryFieldErrors(described, selectedOrder) {
+  const errors = {}
+  const message = described.general || ''
+  if (!message) return errors
+
+  const isReceivedMessage = /received quantity/i.test(message)
+  const isDamagedMessage = /damaged quantity/i.test(message)
+  if (!isReceivedMessage && !isDamagedMessage) {
+    // A reference or purchase-order rule belongs to the input at the top.
+    if (/delivery reference/i.test(message)) errors.deliveryReference = message
+    return errors
+  }
+
+  const materialIds = selectedOrder?.items?.map((item) => item.materialId) ?? []
+  for (const materialId of materialIds) {
+    if (new RegExp(`material(?:\\s+id)?\\s+${materialId}\\b`, 'i').test(message)
+      || new RegExp(`material\\s+#?${materialId}\\b`, 'i').test(message)) {
+      errors[isDamagedMessage ? `damaged-${materialId}` : `received-${materialId}`] = message
+      return errors
+    }
+  }
+
+  // No material id in the message: it applies to the order as a whole, so show it
+  // on every line's quantity field rather than guessing one line.
+  for (const materialId of materialIds) {
+    errors[isDamagedMessage ? `damaged-${materialId}` : `received-${materialId}`] = message
+  }
+  return errors
 }
 
 // ------------------------------------------------------------------ Detail
@@ -349,7 +450,7 @@ function DeliveryDetail({ delivery }) {
             <div className="detail-row">
               <span>Over-receipt</span>
               <StatusBadge status="danger">
-                {formatNumber(overReceipt)} more than ordered — this record predates quantity validation
+                {formatNumber(overReceipt)} more than ordered â€” this record predates quantity validation
               </StatusBadge>
             </div>
           )}
@@ -357,16 +458,16 @@ function DeliveryDetail({ delivery }) {
         <Card title="Activity & history" subtitle="Traceable delivery timeline">
           <ul className="activity-list">
             <li className="activity-item"><span className="activity-dot" /><div><strong>Delivery recorded</strong><div className="activity-time">{formatDate(delivery.deliveredAt, true)}</div></div></li>
-            <li className="activity-item"><span className="activity-dot" /><div><strong>Discrepancy analysis {analysis ? 'completed' : 'not yet run in this session'}</strong><div className="activity-time">{analysis ? `${analysis.agent} · ${analysis.tool}` : 'Run the AI Delivery Risk Analysis below to see the agent result'}</div></div></li>
+            <li className="activity-item"><span className="activity-dot" /><div><strong>Discrepancy analysis {analysis ? 'completed' : 'not yet run in this session'}</strong><div className="activity-time">{analysis ? `${analysis.agent} Â· ${analysis.tool}` : 'Run the AI Delivery Risk Analysis below to see the agent result'}</div></div></li>
             <li className="activity-item"><span className="activity-dot" /><div><strong>Status set to {titleCase(delivery.status)}</strong><div className="activity-time">Based on ordered, received, and damaged quantities</div></div></li>
           </ul>
           <div className="detail-items">
             <h3>Line items</h3>
-            {delivery.items?.map((item) => <div className="detail-line" key={item.id ?? item.materialId}><div><strong>{item.materialName ?? `Material #${item.materialId}`}</strong><small>Received {formatNumber(item.receivedQuantity)} · damaged {formatNumber(item.damagedQuantity)}</small></div><StatusBadge status={Number(item.damagedQuantity) > 0 ? 'warning' : 'success'}>{Number(item.damagedQuantity) > 0 ? 'Review' : 'Matched'}</StatusBadge></div>)}
+            {delivery.items?.map((item) => <div className="detail-line" key={item.id ?? item.materialId}><div><strong>{item.materialName ?? `Material #${item.materialId}`}</strong><small>Received {formatNumber(item.receivedQuantity)} Â· damaged {formatNumber(item.damagedQuantity)}</small></div><StatusBadge status={Number(item.damagedQuantity) > 0 ? 'warning' : 'success'}>{Number(item.damagedQuantity) > 0 ? 'Review' : 'Matched'}</StatusBadge></div>)}
           </div>
         </Card>
       </div>
-      {/* COMPONENT 3 — AI Delivery Risk Analysis.
+      {/* COMPONENT 3 â€” AI Delivery Risk Analysis.
           This is the real DeliveryDiscrepancyAgent (:8003) result, surfaced so
           the agent contribution is demonstrable rather than asserted in copy.
           Advisory only: it never changes the recorded delivery status. */}
@@ -376,7 +477,7 @@ function DeliveryDetail({ delivery }) {
       >
         <div className="form-actions">
           <Button variant="secondary" onClick={runDiscrepancyAnalysis} disabled={analyzing}>
-            {analyzing ? 'Analyzing…' : analysis ? 'Re-run Analysis' : 'Run Delivery Analysis'}
+            {analyzing ? 'Analyzingâ€¦' : analysis ? 'Re-run Analysis' : 'Run Delivery Analysis'}
           </Button>
         </div>
 
@@ -422,4 +523,5 @@ function DeliveryDetail({ delivery }) {
     </section>
   )
 }
+
 

@@ -149,6 +149,15 @@ public class PurchaseOrdersController : ControllerBase
         if (!Enum.TryParse<PurchaseOrderStatus>(dto.Status, true, out var newStatus))
             return BadRequest($"Invalid status '{dto.Status}'. Allowed: Confirmed, InProgress, Completed, Cancelled.");
 
+        var allowed = (po.Status, newStatus) switch
+        {
+            (PurchaseOrderStatus.Created, PurchaseOrderStatus.Confirmed or PurchaseOrderStatus.Cancelled) => true,
+            (PurchaseOrderStatus.Confirmed, PurchaseOrderStatus.InProgress or PurchaseOrderStatus.Cancelled) => true,
+            (PurchaseOrderStatus.InProgress, PurchaseOrderStatus.Completed or PurchaseOrderStatus.Cancelled) => true,
+            _ => false
+        };
+        if (!allowed)
+            return BadRequest(new { message = $"Cannot change purchase order status from {po.Status} to {newStatus}." });
         var oldStatus = po.Status;
         po.Status = newStatus;
         po.UpdatedAt = DateTime.UtcNow;

@@ -95,16 +95,13 @@ async function request(path, { method = 'GET', body, mockFallback } = {}) {
     }
 
     if (!res.ok) {
-      let message = `Request failed (${res.status})`
-      try {
-        const data = await res.json()
-        message = data?.error || data?.title || (typeof data === 'string' ? data : message)
-      } catch {
-        // response had no JSON body
-      }
-      throw new Error(message)
+      let payload
+      try { payload = await res.json() } catch { /* No JSON response. */ }
+      const validation = payload?.errors && Object.values(payload.errors).flat().join(' ')
+      const message = validation || payload?.message || payload?.error || payload?.title ||
+        (typeof payload === 'string' ? payload : `Request failed (${res.status})`)
+      throw Object.assign(new Error(message), { status: res.status, payload })
     }
-
     usingMockFallback = false
     if (res.status === 204) return null
     return await res.json()
@@ -177,6 +174,8 @@ export const procurementApi = {
   createRfq: (data) => request('/rfqs', { method: 'POST', body: data }),
   addRfqSuppliers: (id, supplierIds) => request(`/rfqs/${id}/suppliers`, { method: 'POST', body: { supplierIds } }),
   closeRfq: (id, reason) => request(`/rfqs/${id}/close`, { method: 'POST', body: { reason } }),
+
+  sendRfqEmail: (id, data) => request(`/rfqs/${id}/send-email`, { method: 'POST', body: data }),
 
   // Agentic AI workflow
   startWorkflow: (requestId, body) => request(`/material-requests/${requestId}/procurement-workflow`, { method: 'POST', body: body ?? {}, mockFallback: () => ({ workflowId: MOCK.workflow.id, status: MOCK.workflow.status, message: 'Quotation & Supplier Analysis Agent completed (demo data — agent service not reachable).' }) }),
