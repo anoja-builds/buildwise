@@ -28,8 +28,10 @@ public class MaterialRequestService
         if (request.RequestDate == default) request.RequestDate = DateOnly.FromDateTime(DateTime.UtcNow);
         if (request.Priority == default) request.Priority = MaterialRequestPriority.Normal;
 
-        var project = await _context.Projects.FindAsync(request.ProjectId);
-        if (project == null || project.Status != ProjectStatus.Active)
+        var project = await ResolveProjectAsync(request);
+        if (project == null)
+            throw new InvalidOperationException("Enter a project name for this request.");
+        if (project.Status != ProjectStatus.Active)
             throw new InvalidOperationException("Material requests can only be created for Active projects.");
         if (request.RequiredDate < request.RequestDate)
             throw new InvalidOperationException("Required date cannot be earlier than the request date.");
@@ -42,10 +44,31 @@ public class MaterialRequestService
         if (request.Items.Any(item => item.RequiredDate.HasValue && item.RequiredDate.Value < request.RequestDate))
             throw new InvalidOperationException("Item required date cannot be earlier than the request date.");
 
-        var materialIds = request.Items.Select(item => item.MaterialId).Distinct().ToList();
+        var materialIds = request.Items.Where(item => item.MaterialId != 0).Select(item => item.MaterialId).Distinct().ToList();
         var activeCount = await _context.Materials.CountAsync(m => materialIds.Contains(m.Id) && m.IsActive);
         if (activeCount != materialIds.Count)
             throw new InvalidOperationException("Every material request item must reference an Active material.");
+
+        foreach (var item in request.Items.Where(item => item.MaterialId == 0))
+        {
+            var name = item.MaterialName?.Trim();
+            if (string.IsNullOrWhiteSpace(name) || name.Length > 200)
+                throw new InvalidOperationException("Enter a material name of 200 characters or less.");
+            if (item.Unit?.Length > 50)
+                throw new InvalidOperationException("Material unit must be 50 characters or less.");
+            var normalized = name.ToLower();
+            var material = _context.Materials.Local.FirstOrDefault(m => m.Name.ToLower() == normalized)
+                ?? await _context.Materials.FirstOrDefaultAsync(m => m.Name.ToLower() == normalized);
+            if (material is not null && !material.IsActive)
+                throw new InvalidOperationException("Every material request item must reference an Active material.");
+            if (material is null)
+            {
+                material = new Material { Name = name, Unit = string.IsNullOrWhiteSpace(item.Unit) ? "units" : item.Unit.Trim() };
+                _context.Materials.Add(material);
+            }
+            item.Material = material;
+            item.MaterialId = material.Id;
+        }
 
         request.Status = MaterialRequestStatus.PendingApproval;
         request.CreatedAt = DateTime.UtcNow;
@@ -54,6 +77,40 @@ public class MaterialRequestService
         await _context.SaveChangesAsync();
         await AddHistoryAsync(request.Id, authenticatedUserId ?? request.RequestedByUserId, "Created", null, request.Status, "Material request submitted for approval.");
         return request;
+    }
+
+    /// Resolves the project a request is filed against.
+    ///
+    /// The form sends the project two ways, because the engineer works in names
+    /// rather than ids:
+    ///
+    /// - <c>projectId</c> — exact, and always preferred when present.
+    /// - <c>projectName</c> — ordinary text, matched against the project list
+    ///   case-insensitively. A name that matches nothing creates the project, so
+    ///   a request can be raised for a site that is new to BuildWise instead of
+    ///   being filed against whichever project happened to be first in the list.
+    ///
+    /// Returns null when neither identifies a project, which the caller turns
+    /// into the "Active projects only" validation failure.
+    private async Task<Project?> ResolveProjectAsync(MaterialRequest request)
+    {
+        if (request.ProjectId > 0)
+            return await _context.Projects.FirstOrDefaultAsync(p => p.Id == request.ProjectId);
+
+        var name = request.ProjectName?.Trim();
+        if (string.IsNullOrWhiteSpace(name)) return null;
+
+        var normalized = name.ToLower();
+        var existing = await _context.Projects.FirstOrDefaultAsync(p => p.Name.ToLower() == normalized);
+        if (existing is not null)
+        {
+            request.ProjectId = existing.Id;
+            return existing;
+        }
+
+        var project = new Project { Name = name, Status = ProjectStatus.Active };
+        request.Project = project;
+        return project;
     }
 
     public async Task<MaterialRequest> ReviseRequestAsync(int requestId, int userId, ReviseMaterialRequestRequestDto dto)

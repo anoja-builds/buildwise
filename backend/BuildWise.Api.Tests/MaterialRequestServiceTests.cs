@@ -10,6 +10,43 @@ namespace BuildWise.Api.Tests;
 public class MaterialRequestServiceTests
 {
     [Fact]
+    public async Task CreateRequest_Invalid_New_Project_Does_Not_Persist_Project()
+    {
+        var db = TestDbFactory.CreateInMemory();
+        var service = new MaterialRequestService(db);
+        var request = new MaterialRequest
+        {
+            ProjectName = "New site",
+            RequiredDate = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-1)),
+            Items = new List<MaterialRequestItem>()
+        };
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.CreateRequestAsync(request));
+        await db.SaveChangesAsync();
+        Assert.Empty(db.Projects);
+        Assert.Empty(db.MaterialRequests);
+    }
+
+    [Fact]
+    public async Task CreateRequest_Resolves_New_Alphanumeric_Material_And_Reuses_It()
+    {
+        var db = TestDbFactory.CreateInMemory();
+        var data = await TestDbFactory.SeedStandardScenarioDataAsync(db);
+        var service = new MaterialRequestService(db);
+        MaterialRequest NewRequest(string name) => new()
+        {
+            ProjectId = data.Project.Id,
+            RequestedByUserId = 1,
+            RequiredDate = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(14)),
+            Items = new List<MaterialRequestItem> { new() { MaterialName = name, Unit = "kg", RequestedQuantity = 10 } }
+        };
+        var first = await service.CreateRequestAsync(NewRequest("Steel 12mm Grade 500"));
+        var second = await service.CreateRequestAsync(NewRequest("steel 12mm grade 500"));
+        Assert.True(first.Items.Single().MaterialId > 0);
+        Assert.Equal(first.Items.Single().MaterialId, second.Items.Single().MaterialId);
+        Assert.Equal("Steel 12mm Grade 500", first.Items.Single().Material!.Name);
+    }
+
+    [Fact]
     public async Task CreateRequest_Rejects_NonActive_Project()
     {
         var db = TestDbFactory.CreateInMemory();

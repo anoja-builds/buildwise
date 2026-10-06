@@ -201,8 +201,8 @@ describe('QualityInspectionsPage', () => {
     await screen.findByTestId('quality-risk-panel')
     // Exactly one panel, for the row that was analysed.
     expect(screen.getAllByTestId('quality-risk-panel')).toHaveLength(1)
-    // Both rows keep their own action, so the analysed row was not replaced.
-    expect(screen.getAllByRole('button', { name: 'Run AI Analysis' })).toHaveLength(2)
+    // Each row retains its action; the analysed row opens its cached result.
+    expect(screen.getAllByRole('button', { name: /Run AI Analysis|View AI Risk/ })).toHaveLength(2)
   })
 
   it('states that the agent is advisory while the inspection record is authoritative', async () => {

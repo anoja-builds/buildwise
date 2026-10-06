@@ -1,3 +1,4 @@
+import QualityLifecycleFlow from '../Features/quality/components/QualityLifecycleFlow'
 import { useEffect, useState } from 'react'
 import { Button, Card, Drawer, EmptyState, ErrorState, LoadingState, PageHeader, StatusBadge } from '../components/shared'
 import { qualityApi } from '../services/qualityApi'
@@ -91,6 +92,8 @@ export default function QualityInspectionsPage() {
         title="Quality Inspections"
         description="Material accepted, partially accepted or rejected on site. Rejected lines automatically raise a non-conformance."
       />
+      <QualityLifecycleFlow activeKey='inspection' />
+
 
 
       <div className="grid grid--4">
