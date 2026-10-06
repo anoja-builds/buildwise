@@ -1,4 +1,3 @@
-import QualityLifecycleFlow from '../Features/quality/components/QualityLifecycleFlow'
 import { useEffect, useState } from 'react'
 import { Button, Card, Drawer, EmptyState, ErrorState, LoadingState, PageHeader, StatusBadge, TextInput } from '../components/shared'
 import { qualityApi } from '../services/qualityApi'
@@ -119,9 +118,8 @@ export default function NonConformancesPage() {
       <PageHeader
         title="Non-Conformance Reports"
         description="Every rejected inspection line raises an NCR automatically. Review these to a resolution and close them."
+        actions={canReview ? <StatusBadge status="success">Review & Resolve</StatusBadge> : <StatusBadge status="info">Read / Coordinate</StatusBadge>}
       />
-      <QualityLifecycleFlow activeKey='ncr' />
-
 
       {actionError && (
         <ErrorState title="Could not save that change" message={actionError} />

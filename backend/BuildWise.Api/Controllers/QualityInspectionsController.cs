@@ -159,6 +159,12 @@ public class QualityInspectionsController : ControllerBase
         catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
     }
 
+    /// <summary>
+    /// Simpler status change kept for clients that only need to move an NCR to
+    /// the next step. It is NOT a way around <c>POST .../transition</c>: the same
+    /// lifecycle map and resolution requirement apply, and the review metadata is
+    /// stamped, so an NCR still cannot jump straight to Closed.
+    /// </summary>
     [HttpPut("non-conformances/{id}/status")]
     [Authorize(Policy = Policies.ProcurementDecisionOnly)]
     public async Task<IActionResult> UpdateNonConformanceStatus(
@@ -167,12 +173,20 @@ public class QualityInspectionsController : ControllerBase
     {
         try
         {
-            var ncr = await _service.UpdateNonConformanceStatusAsync(id, request.NewStatus);
+            var reviewerUserId = int.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var parsed) && parsed > 0
+                ? parsed
+                : (int?)null;
+
+            var ncr = await _service.UpdateNonConformanceStatusAsync(id, request.NewStatus, request.Resolution, reviewerUserId);
             return Ok(ncr);
         }
         catch (KeyNotFoundException ex)
         {
             return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
         }
     }
     private int ParseUserId()
@@ -187,4 +201,10 @@ public class QualityInspectionsController : ControllerBase
 public class UpdateNcrStatusRequest
 {
     public BuildWise.Api.Models.Enums.NonConformanceStatus NewStatus { get; set; }
+
+    /// <summary>
+    /// Required when the target status represents a finished defect
+    /// (Resolved, Closed, AcceptedException), matching the transition endpoint.
+    /// </summary>
+    public string? Resolution { get; set; }
 }

@@ -11,7 +11,7 @@ public class InspectionEvidenceConfiguration : IEntityTypeConfiguration<Inspecti
         builder.ToTable("inspection_evidences");
         builder.HasKey(e => e.Id);
         builder.Property(e => e.FileName).HasMaxLength(255).IsRequired();
-        builder.Property(e => e.FileUrl).HasMaxLength(2000).IsRequired();
+        builder.Property(e => e.FileUrl).HasColumnType("text").IsRequired();
         builder.Property(e => e.ContentType).HasMaxLength(100).IsRequired();
         builder.Property(e => e.FileSizeBytes).IsRequired();
         builder.HasOne(e => e.Inspection).WithMany(i => i.Evidence).HasForeignKey(e => e.InspectionId).OnDelete(DeleteBehavior.Cascade);
