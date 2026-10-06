@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, intergration/final-buildwise]
+    branches: [main, integration/final-buildwise, intergration/final-buildwise]
   pull_request:
-    branches: [main, intergration/final-buildwise]
+    branches: [main, integration/final-buildwise, intergration/final-buildwise]
 
 jobs:
   backend:
