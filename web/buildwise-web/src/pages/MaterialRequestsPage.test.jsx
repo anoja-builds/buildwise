@@ -95,6 +95,10 @@ async function renderAsManager() {
   // Wait for the detail fetch so the Decision card is on screen.
   await screen.findByText('OPC Cement')
 }
+const validRequestDate = new Date().toISOString().slice(0, 10)
+const validRequiredDate = new Date(
+  Date.now() + 10 * 24 * 60 * 60 * 1000
+).toISOString().slice(0, 10)
 
 beforeEach(() => {
   vi.resetAllMocks()
@@ -282,10 +286,10 @@ describe('MaterialRequestsPage (Step 2 — manager reviews request)', () => {
       target: { value: 'OPC Cement' },
     })
     fireEvent.change(screen.getByLabelText(/request date/i), {
-      target: { value: '2026-10-01' },
+      target: { value: validRequestDate },
     })
     fireEvent.change(screen.getByLabelText(/required date/i), {
-      target: { value: '2026-10-11' },
+      target: { value: validRequiredDate },
     })
     fireEvent.change(screen.getByLabelText(/quantity/i), {
       target: { value: '25' },
@@ -580,8 +584,8 @@ describe('MaterialRequestsPage (create form validation)', () => {
     fireEvent.change(screen.getByRole('combobox', { name: /^material/i }), {
       target: { value: 'OPC Cement' },
     })
-    fireEvent.change(screen.getByLabelText(/request date/i), { target: { value: '2026-10-01' } })
-    fireEvent.change(screen.getByLabelText(/required date/i), { target: { value: '2026-10-11' } })
+    fireEvent.change(screen.getByLabelText(/request date/i), { target: { value: validRequestDate } })
+    fireEvent.change(screen.getByLabelText(/required date/i), { target: { value: validRequiredDate } })
     fireEvent.change(screen.getByLabelText(/quantity/i), { target: { value: '25' } })
     fireEvent.change(screen.getByLabelText(/reason/i), { target: { value: 'Block C slab concreting' } })
     fireEvent.change(screen.getByLabelText(/site notes/i), { target: { value: 'Crane access from Gate 2.' } })
