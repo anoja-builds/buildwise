@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+﻿import { useEffect, useState } from 'react'
 import { Card } from '../../../components/shared'
 import { procurementApi } from '../../procurement/services/procurementApi'
 import { qualityApi } from '../../../services/qualityApi'
@@ -9,8 +9,8 @@ import './qualityLifecycleFlow.css'
 /**
  * The connected material lifecycle, as a chain of stages:
  *
- *   Request → Approval → RFQ → Quotation → Purchase Order → Delivery
- *           → Inspection → NCR → Resolution
+ *   Request â†’ Approval â†’ RFQ â†’ Quotation â†’ Purchase Order â†’ Delivery
+ *           â†’ Inspection â†’ NCR â†’ Resolution
  *
  * Why this exists: Inspections and Non-Conformances used to be a single page,
  * and neither made it obvious that an inspection is *caused* by a delivery, or
@@ -62,7 +62,7 @@ const STAGES = [
     label: 'Purchase Orders',
     short: 'PO',
     to: '/purchase-orders',
-    groups: [ROLES.SiteEngineer, ROLES.SiteOfficer, ROLES.ReceivingOfficer, ROLES.ProcurementOfficer, ROLES.ProcurementManager, ROLES.SiteManager, ROLES.QualityInspector, ROLES.Administrator],
+    groups: [ROLES.SiteEngineer, ROLES.SiteOfficer, ROLES.ProcurementOfficer, ROLES.ProcurementManager, ROLES.SiteManager, ROLES.QualityInspector, ROLES.Administrator],
     load: async () => (await procurementApi.listPurchaseOrders({ pageSize: 1 })).total,
   },
   {
@@ -70,7 +70,7 @@ const STAGES = [
     label: 'Deliveries',
     short: 'Delivery',
     to: '/deliveries',
-    groups: [ROLES.SiteEngineer, ROLES.SiteOfficer, ROLES.ReceivingOfficer, ROLES.QualityInspector, ROLES.ProcurementManager, ROLES.SiteManager, ROLES.Administrator],
+    groups: [ROLES.SiteEngineer, ROLES.SiteOfficer, ROLES.ProcurementOfficer, ROLES.QualityInspector, ROLES.ProcurementManager, ROLES.SiteManager, ROLES.Administrator],
     load: async () => (await qualityApi.listDeliveries()).length,
   },
   {
@@ -78,7 +78,7 @@ const STAGES = [
     label: 'Quality Inspections',
     short: 'Inspection',
     to: '/quality-inspections',
-    groups: [ROLES.SiteEngineer, ROLES.SiteOfficer, ROLES.ReceivingOfficer, ROLES.QualityInspector, ROLES.ProcurementManager, ROLES.SiteManager, ROLES.Administrator],
+    groups: [ROLES.SiteEngineer, ROLES.SiteOfficer, ROLES.ProcurementOfficer, ROLES.QualityInspector, ROLES.ProcurementManager, ROLES.SiteManager, ROLES.Administrator],
     load: async () => (await qualityApi.listInspections()).length,
   },
   {
@@ -86,7 +86,7 @@ const STAGES = [
     label: 'Non-Conformances',
     short: 'NCR',
     to: '/non-conformances',
-    groups: [ROLES.SiteEngineer, ROLES.SiteOfficer, ROLES.ReceivingOfficer, ROLES.QualityInspector, ROLES.ProcurementManager, ROLES.SiteManager, ROLES.Administrator],
+    groups: [ROLES.SiteEngineer, ROLES.SiteOfficer, ROLES.ProcurementOfficer, ROLES.QualityInspector, ROLES.ProcurementManager, ROLES.SiteManager, ROLES.Administrator],
     load: async () => (await qualityApi.listNonConformances()).length,
   },
   {
@@ -94,7 +94,7 @@ const STAGES = [
     label: 'Resolutions',
     short: 'Resolved',
     to: '/non-conformances',
-    groups: [ROLES.SiteEngineer, ROLES.SiteOfficer, ROLES.ReceivingOfficer, ROLES.QualityInspector, ROLES.ProcurementManager, ROLES.SiteManager, ROLES.Administrator],
+    groups: [ROLES.SiteEngineer, ROLES.SiteOfficer, ROLES.ProcurementOfficer, ROLES.QualityInspector, ROLES.ProcurementManager, ROLES.SiteManager, ROLES.Administrator],
     // Resolved + closed + accepted-exception = reports that reached an outcome.
     load: async () => {
       const ncrs = await qualityApi.listNonConformances()
@@ -136,7 +136,7 @@ export default function QualityLifecycleFlow({ activeKey, counts: providedCounts
           continue
         }
         if (!canRead(stage.groups)) {
-          // Not entitled to read this stage: show "—" instead of a false 0.
+          // Not entitled to read this stage: show "â€”" instead of a false 0.
           results[stage.key] = null
           continue
         }
@@ -165,7 +165,7 @@ export default function QualityLifecycleFlow({ activeKey, counts: providedCounts
   return (
     <Card
       title="Material lifecycle"
-      subtitle="How a request becomes a delivered, inspected and accepted material. Counts are live; stages you cannot read show —."
+      subtitle="How a request becomes a delivered, inspected and accepted material. Counts are live; stages you cannot read show â€”."
       className="lifecycle-card"
     >
       <nav className="lifecycle" aria-label="Material lifecycle stages" data-testid="lifecycle-flow">
@@ -189,7 +189,7 @@ export default function QualityLifecycleFlow({ activeKey, counts: providedCounts
               >
                 <span className="lifecycle__label">{stage.short}</span>
                 <span className="lifecycle__count">
-                  {loading && value === undefined ? '…' : value === null ? '—' : value}
+                  {loading && value === undefined ? 'â€¦' : value === null ? 'â€”' : value}
                 </span>
               </button>
             </div>
@@ -204,3 +204,4 @@ export default function QualityLifecycleFlow({ activeKey, counts: providedCounts
     </Card>
   )
 }
+

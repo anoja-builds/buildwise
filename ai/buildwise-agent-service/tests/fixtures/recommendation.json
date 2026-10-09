@@ -1,0 +1,12 @@
+{
+  "inspectionId": 1, "riskLevel": "Medium", "riskFlags": [
+    {"flag": "Damaged received bags", "evidenceReferences": ["inspection-item:10"]}],
+  "evidenceSummary": "Two inspected bags were rejected. Historical evidence is insufficient.",
+  "ncrRecommended": true, "itemRecommendations": [
+    {"inspectionItemId": 10, "ncrRecommended": true, "suggestedSeverity": "Medium",
+     "suggestedIssueDescription": "Two received bags were damaged.",
+     "suggestedCorrectiveAction": "Segregate rejected bags and request supplier review.",
+     "rationale": "The inspector recorded rejected material.",
+     "evidenceReferences": ["inspection-item:10"]}],
+  "rationaleSummary": "Review the rejected bags; no supplier trend can be inferred."
+}

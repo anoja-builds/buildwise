@@ -12,4 +12,6 @@ public class Delivery
     public DeliveryStatus Status { get; set; } = DeliveryStatus.Arrived;
     public DateTime DeliveredAt { get; set; } = DateTime.UtcNow;
     public List<DeliveryItem> Items { get; set; } = new();
+    [System.ComponentModel.DataAnnotations.Schema.NotMapped]
+    public List<DeliveryEvidence> Evidence { get; set; } = new();
 }

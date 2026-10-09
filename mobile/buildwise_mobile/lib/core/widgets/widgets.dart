@@ -10,3 +10,4 @@ export 'error_widget.dart';
 export 'loading_widget.dart';
 export 'section_header.dart';
 export 'status_chip.dart';
+export 'evidence_picker_widget.dart';

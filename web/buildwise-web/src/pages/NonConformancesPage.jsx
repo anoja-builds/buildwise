@@ -118,6 +118,7 @@ export default function NonConformancesPage() {
       <PageHeader
         title="Non-Conformance Reports"
         description="Every rejected inspection line raises an NCR automatically. Review these to a resolution and close them."
+        actions={canReview ? <StatusBadge status="success">Review & Resolve</StatusBadge> : <StatusBadge status="info">Read / Coordinate</StatusBadge>}
       />
 
       {actionError && (

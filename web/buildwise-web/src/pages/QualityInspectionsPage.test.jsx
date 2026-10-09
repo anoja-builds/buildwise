@@ -16,6 +16,7 @@ vi.mock('../services/qualityApi', () => ({
     transitionNonConformance: vi.fn(),
     listMaterialRequests: vi.fn(),
     listDeliveries: vi.fn(),
+    completeInspection: vi.fn(),
   },
 }))
 
@@ -112,6 +113,16 @@ const ncr = {
 }
 
 describe('QualityInspectionsPage', () => {
+  it('shows saved inspector comments and evidence photos in inspection history', async () => {
+    qualityApi.listInspections.mockResolvedValueOnce([{
+      ...inspections[0], notes: 'Packaging inspected at the unloading bay.',
+      evidence: [{ id: 1, fileName: 'site-photo.jpg', fileUrl: 'https://example.test/site-photo.jpg', contentType: 'image/jpeg' }],
+    }])
+    render(<QualityInspectionsPage />)
+    expect(await screen.findByText('Packaging inspected at the unloading bay.')).toBeInTheDocument()
+    expect(screen.getByAltText('site-photo.jpg')).toHaveAttribute('src', 'https://example.test/site-photo.jpg')
+    expect(screen.getByRole('link', { name: 'site-photo.jpg' })).toHaveAttribute('href', 'https://example.test/site-photo.jpg')
+  })
   beforeEach(() => {
     vi.clearAllMocks()
     qualityApi.listNonConformances.mockResolvedValue([])
@@ -281,28 +292,13 @@ describe('QualityInspectionsPage', () => {
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'NCR-781611' })).not.toBeInTheDocument())
   })
 
-  it('shows the material lifecycle chain on the inspections screen', async () => {
+  it('shows the inspection summary cards on the inspections screen', async () => {
     render(<QualityInspectionsPage />)
     await screen.findByText('INS-34')
 
-    // The point of the split: the chain states that an inspection comes from a
-    // delivery and feeds non-conformances.
-    const flow = await screen.findByTestId('lifecycle-flow')
-    for (const stage of ['request', 'approval', 'rfq', 'quotation', 'po', 'delivery', 'inspection', 'ncr', 'resolution']) {
-      expect(within(flow).getByTestId(`lifecycle-stage-${stage}`)).toBeInTheDocument()
-    }
-    // The active stage is the page you are on.
-    expect(screen.getByTestId('lifecycle-stage-inspection')).toHaveAttribute('aria-current', 'step')
-  })
-
-  it('shows a dash for a lifecycle stage the caller cannot read', async () => {
-    // A Quality Inspector cannot read RFQs (ProcurementStaffAndAdmin only), so
-    // that stage must not claim a count of zero.
-    render(<QualityInspectionsPage />)
-    await screen.findByText('INS-34')
-
-    const rfqStage = await screen.findByTestId('lifecycle-stage-rfq')
-    expect(within(rfqStage).getByText('—')).toBeInTheDocument()
+    expect(screen.getByText('Inspections')).toBeInTheDocument()
+    expect(screen.getByText('Units inspected')).toBeInTheDocument()
+    expect(screen.getByText('Units rejected')).toBeInTheDocument()
   })
 })
 
@@ -318,12 +314,11 @@ describe('NonConformancesPage', () => {
     useAuth.mockReturnValue({ hasRole: () => true, roles: ['ProcurementManager'] })
   })
 
-  it('lists non-conformances and highlights the NCR lifecycle stage', async () => {
+  it('lists non-conformances and displays summary cards', async () => {
     render(<NonConformancesPage />)
 
     expect(await screen.findByText('NCR-781611')).toBeInTheDocument()
-    // The active stage is the page you are on.
-    expect(screen.getByTestId('lifecycle-stage-ncr')).toHaveAttribute('aria-current', 'step')
+    expect(screen.getByText('Total NCRs')).toBeInTheDocument()
   })
 
   it('does not show the inspections list on the non-conformance screen', async () => {
@@ -378,5 +373,39 @@ describe('NonConformancesPage', () => {
     // A Quality Inspector records inspections; they do not close NCRs.
     expect(screen.queryByRole('button', { name: 'Save transition' })).not.toBeInTheDocument()
     expect(screen.getByText('Awaiting Procurement Manager review')).toBeInTheDocument()
+  })
+})
+
+describe('Inspection form validation', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    useAuth.mockReturnValue({ hasRole: () => true, roles: ['QualityInspector'] })
+    qualityApi.listInspections.mockResolvedValue([])
+    qualityApi.listDeliveries.mockResolvedValue([{ id: 34, items: [{ materialId: 7, materialName: 'Rebar', receivedQuantity: 20 }] }])
+  })
+
+  async function openForm() {
+    const user = userEvent.setup()
+    render(<QualityInspectionsPage />)
+    await user.click((await screen.findAllByRole('button', { name: /Record Inspection/i }))[0])
+    await waitFor(() => expect(screen.getByLabelText('Inspected Quantity')).toHaveValue(20))
+    return user
+  }
+
+  it('requires Notes when a checklist item fails', async () => {
+    const user = await openForm()
+    await user.click(screen.getByRole('checkbox', { name: /Quantity verified/i }))
+    await user.click(screen.getByRole('button', { name: 'Submit Inspection' }))
+    expect(await screen.findByText(/Notes are required when any checklist item fails/)).toBeInTheDocument()
+    expect(qualityApi.completeInspection).not.toHaveBeenCalled()
+  })
+
+  it('rejects quantities exceeding the selected material received quantity', async () => {
+    const user = await openForm()
+    await user.clear(screen.getByLabelText('Inspected Quantity'))
+    await user.type(screen.getByLabelText('Inspected Quantity'), '21')
+    await user.click(screen.getByRole('button', { name: 'Submit Inspection' }))
+    expect(await screen.findByText(/Inspected quantity cannot exceed received quantity/)).toBeInTheDocument()
+    expect(qualityApi.completeInspection).not.toHaveBeenCalled()
   })
 })

@@ -1,0 +1,10 @@
+/* The shared .stack has an implicit auto-sized column. Its table's 700px
+   minimum would otherwise expand every card instead of the .table-wrap scroller. */
+.quality-workspace { min-width: 0; grid-template-columns: minmax(0, 1fr); }
+.quality-facts { display: grid; grid-template-columns: minmax(110px, 180px) minmax(0, 1fr); gap: 12px 20px; }
+.quality-facts dt { font-weight: 600; }
+.quality-facts dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.quality-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 16px; }
+.quality-workspace .data-table td { overflow-wrap: anywhere; }
+.quality-workspace pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 0.85rem; }
+@media (max-width: 600px) { .quality-facts { grid-template-columns: 1fr; gap: 8px; } .quality-facts dd { margin-bottom: 8px; } }

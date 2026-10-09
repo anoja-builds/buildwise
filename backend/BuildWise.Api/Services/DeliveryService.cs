@@ -2,6 +2,7 @@ using BuildWise.Api.Data;
 using BuildWise.Api.Models.Entities;
 using BuildWise.Api.Models.Enums;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using DeliveryStatusEnum = BuildWise.Api.Models.Enums.DeliveryStatus;
 
 namespace BuildWise.Api.Services;
@@ -48,6 +49,59 @@ public class DeliveryService
 
     public async Task<Delivery> RecordDeliveryAsync(Delivery delivery)
     {
+        // Advisory agent outcomes are collected during validation but written
+        // after the transaction commits, so a slow agent call never holds a
+        // database lock.
+        var agentResults = new List<object>();
+        var executionSources = new List<string>();
+
+        // Concurrency: two receivers can log deliveries against the same purchase
+        // order at the same time. Both would read the same "already received"
+        // total, both pass the cumulative check, and the order ends up
+        // over-received. A SERIALIZABLE transaction makes the second request wait
+        // for the first to commit, then re-read the totals and fail the check.
+        //
+        // The transaction covers only validate-and-persist. The advisory agent
+        // calls run after the commit so a slow agent never holds a database lock.
+        //
+        // The in-memory provider used by the unit tests has no transaction
+        // support, so the transaction is only opened for a relational database.
+        var useTransaction = _context.Database.IsRelational();
+        IDbContextTransaction? transaction = useTransaction
+            ? await _context.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable)
+            : null;
+
+        try
+        {
+            await ValidateAndPersistAsync(delivery, agentResults, executionSources);
+
+            if (transaction is not null)
+                await transaction.CommitAsync();
+        }
+        catch
+        {
+            if (transaction is not null)
+                await transaction.RollbackAsync();
+            throw;
+        }
+        finally
+        {
+            if (transaction is not null)
+                await transaction.DisposeAsync();
+        }
+
+        // Advisory work runs after the commit: the delivery is already durably
+        // recorded, and a slow or failing agent must not hold a database lock.
+        await RecordAdvisoryOutcomesAsync(delivery, agentResults, executionSources);
+
+        return delivery;
+    }
+
+    private async Task ValidateAndPersistAsync(
+        Delivery delivery,
+        List<object> agentResults,
+        List<string> executionSources)
+    {
         var po = await _context.PurchaseOrders
             .Include(p => p.Items)
                 .ThenInclude(i => i.Material)
@@ -56,12 +110,67 @@ public class DeliveryService
         if (po == null || po.Status != PurchaseOrderStatus.Confirmed)
             throw new InvalidOperationException("Deliveries can only be recorded for Confirmed Purchase Orders.");
 
+        // A delivery is tracked by its reference on paperwork, packing slips and
+        // quality records, so an empty one cannot be reconciled later. The entity
+        // column is a plain string (nullable in the DB), so this has to be an
+        // explicit rule rather than a [Required] attribute on the model.
+        if (string.IsNullOrWhiteSpace(delivery.DeliveryReference))
+            throw new InvalidOperationException("A delivery reference is required.");
+
         if (delivery.Items == null || delivery.Items.Count == 0)
             throw new InvalidOperationException("A delivery must contain at least one received item.");
 
+        if (delivery.Items.Select(item => item.MaterialId).Distinct().Count() != delivery.Items.Count)
+            throw new InvalidOperationException("Each material must occur only once in a delivery.");
+        if (delivery.DeliveryReference.Length > 100)
+            throw new InvalidOperationException("Delivery reference must be 100 characters or less.");
+        if (delivery.Evidence is null || delivery.Evidence.Count > 5)
+            throw new InvalidOperationException("A delivery may contain at most five evidence photos.");
+        foreach (var photo in delivery.Evidence)
+        {
+            var parts = photo.FileUrl.Split(',', 2);
+            if (parts.Length != 2 || parts[1].Length > 7_000_000 ||
+                parts[0] is not ("data:image/jpeg;base64" or "data:image/png;base64" or "data:image/webp;base64"))
+                throw new InvalidOperationException("Evidence must be a JPEG, PNG or WebP photo of at most 5 MB.");
+            try
+            {
+                if (Convert.FromBase64String(parts[1]).Length > 5 * 1024 * 1024)
+                    throw new InvalidOperationException("Evidence photo exceeds 5 MB.");
+            }
+            catch (FormatException)
+            {
+                throw new InvalidOperationException("Evidence photo contains invalid image data.");
+            }
+            photo.Id = 0;
+            photo.Delivery = null;
+            photo.DeliveryItem = null;
+            photo.DeliveryItemId = null;
+            photo.UploadedByUser = null;
+            photo.UploadedByUserId = delivery.ReceivedByUserId;
+            photo.FileType = parts[0][5..^7];
+            photo.UploadedAt = DateTime.UtcNow;
+        }
+
+        // Quantities already received against this purchase order by earlier
+        // deliveries. PO lines are received across several deliveries (partial
+        // deliveries are normal), so the per-line check further down only sees
+        // THIS delivery. Without folding in the earlier ones a supplier could
+        // deliver 250 against a 250 order twice and the API would accept both.
+        //
+        // The incoming material ids are extracted to a plain list first: the
+        // entity being recorded is not yet tracked by EF, so referencing
+        // delivery.Items inside the query would fail to translate to SQL.
+        var incomingMaterialIds = delivery.Items.Select(i => i.MaterialId).Distinct().ToList();
+
+        var alreadyReceived = (await _context.DeliveryItems
+                .Where(item => incomingMaterialIds.Contains(item.MaterialId)
+                               && _context.Deliveries.Any(d => d.Id == item.DeliveryId && d.PurchaseOrderId == delivery.PurchaseOrderId))
+                .GroupBy(item => item.MaterialId)
+                .Select(group => new { MaterialId = group.Key, Quantity = group.Sum(item => item.ReceivedQuantity) })
+                .ToListAsync())
+            .ToDictionary(x => x.MaterialId, x => x.Quantity);
+
         bool hasDiscrepancy = false;
-        var agentResults = new List<object>();
-        var executionSources = new List<string>();
         foreach (var item in delivery.Items)
         {
             if (item.ReceivedQuantity < 0 || item.DamagedQuantity < 0)
@@ -83,11 +192,21 @@ public class DeliveryService
                 throw new InvalidOperationException(
                     $"Received quantity cannot exceed the ordered quantity. Ordered {poItem.OrderedQuantity:0.##}, received {item.ReceivedQuantity:0.##}.");
 
-            var agentRun = _agentClient == null
-                ? new AgentClientResult<DeliveryAgentResult>(
-                    DeliveryAgentResult.Deterministic(poItem.OrderedQuantity, item.ReceivedQuantity, item.DamagedQuantity),
-                    "DeterministicFallback")
-                : await _agentClient.AnalyzeDiscrepancyAsync(poItem.OrderedQuantity, item.ReceivedQuantity, item.DamagedQuantity);
+            // Cumulative guard across partial deliveries: this delivery plus every
+            // earlier delivery for the same PO line must still fit inside the
+            // ordered quantity.
+            if (alreadyReceived.TryGetValue(item.MaterialId, out var previouslyReceived))
+            {
+                var cumulative = previouslyReceived + item.ReceivedQuantity;
+                if (cumulative > poItem.OrderedQuantity)
+                    throw new InvalidOperationException(
+                        $"Cumulative received quantity cannot exceed the ordered quantity. Ordered {poItem.OrderedQuantity:0.##}, " +
+                        $"already received {previouslyReceived:0.##}, this delivery {item.ReceivedQuantity:0.##} (total {cumulative:0.##}).");
+            }
+
+            var agentRun = new AgentClientResult<DeliveryAgentResult>(
+                DeliveryAgentResult.Deterministic(poItem.OrderedQuantity, item.ReceivedQuantity, item.DamagedQuantity),
+                "DeterministicValidation");
             var assessment = agentRun.Output;
             agentResults.Add(new { materialId = item.MaterialId, ordered = poItem.OrderedQuantity, received = item.ReceivedQuantity, damaged = item.DamagedQuantity, assessment });
             executionSources.Add(agentRun.ExecutionSource);
@@ -103,6 +222,12 @@ public class DeliveryService
 
         _context.Deliveries.Add(delivery);
         await _context.SaveChangesAsync();
+
+        foreach (var photo in delivery.Evidence)
+        {
+            photo.DeliveryId = delivery.Id;
+            _context.DeliveryEvidences.Add(photo);
+        }
 
         foreach (var item in delivery.Items)
         {
@@ -136,6 +261,37 @@ public class DeliveryService
         }
         await _context.SaveChangesAsync();
 
+        // Carry the discrepancy verdict out so the advisory audit records it.
+        AgentDiscrepancyDetected = hasDiscrepancy;
+    }
+
+    /// <summary>Set by <see cref="ValidateAndPersistAsync"/> so the post-commit
+    /// audit can record whether a discrepancy was found.</summary>
+    internal bool AgentDiscrepancyDetected { get; private set; }
+
+    /// <summary>
+    /// Post-commit, advisory work: the delivery audit trail and the delivery-risk
+    /// agent. Neither affects whether the delivery was accepted, and neither may
+    /// run while a database lock is held.
+    /// </summary>
+    private async Task RecordAdvisoryOutcomesAsync(
+        Delivery delivery,
+        List<object> agentResults,
+        List<string> executionSources)
+    {
+        var hasDiscrepancy = AgentDiscrepancyDetected;
+
+        if (_agentClient is not null)
+        {
+            foreach (var item in delivery.Items)
+            {
+                var ordered = delivery.PurchaseOrder!.Items.First(line => line.MaterialId == item.MaterialId).OrderedQuantity;
+                var result = await _agentClient.AnalyzeDiscrepancyAsync(ordered, item.ReceivedQuantity, item.DamagedQuantity);
+                agentResults.Add(new { materialId = item.MaterialId, assessment = result.Output });
+                executionSources.Add(result.ExecutionSource);
+            }
+        }
+
         if (_auditService is not null)
         {
             await _auditService.RecordAsync(
@@ -167,13 +323,11 @@ public class DeliveryService
                 _logger.LogWarning(ex, "Delivery saved for {DeliveryId}, but delivery-risk assessment failed safely.", delivery.Id);
             }
         }
-
-        return delivery;
     }
 
     public async Task<List<Delivery>> GetDeliveriesAsync()
     {
-        return await _context.Deliveries
+        var deliveries = await _context.Deliveries
             .Include(d => d.PurchaseOrder)
                 .ThenInclude(p => p!.Supplier)
             .Include(d => d.PurchaseOrder)
@@ -188,5 +342,11 @@ public class DeliveryService
                 .ThenInclude(i => i.Material)
             .OrderByDescending(d => d.DeliveredAt)
             .ToListAsync();
+        var ids = deliveries.Select(delivery => delivery.Id).ToList();
+        var photos = await _context.DeliveryEvidences.AsNoTracking()
+            .Where(photo => ids.Contains(photo.DeliveryId)).ToListAsync();
+        foreach (var delivery in deliveries)
+            delivery.Evidence = photos.Where(photo => photo.DeliveryId == delivery.Id).ToList();
+        return deliveries;
     }
 }

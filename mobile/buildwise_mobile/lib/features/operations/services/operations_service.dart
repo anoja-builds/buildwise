@@ -45,9 +45,14 @@ class OperationsService {
     String? description,
     String? unit,
     String? itemRequiredDate,
+    String? projectName,
+    String? materialName,
+    String? requestDate,
   }) async {
     final response = await _apiClient.post('/material-requests', body: {
       'projectId': projectId,
+      'projectName': ?projectName,
+      'requestDate': ?requestDate,
       'requiredDate': requiredDate,
       'priority': priority,
       'reason': reason,
@@ -56,6 +61,7 @@ class OperationsService {
       'items': [
         {
           'materialId': materialId,
+          'materialName': ?materialName,
           'requestedQuantity': quantity,
           'unit': unit,
           'description': description,
@@ -95,21 +101,18 @@ class OperationsService {
   Future<Map<String, dynamic>> recordDelivery({
     required int purchaseOrderId,
     required String reference,
-    required int materialId,
-    required double received,
-    required double damaged,
+    required List<Map<String, dynamic>> items,
+    List<Map<String, dynamic>> evidence = const [],
   }) async {
     final response = await _apiClient.post('/deliveries', body: {
       'purchaseOrderId': purchaseOrderId,
       'deliveryReference': reference,
       'status': 'Arrived',
-      'items': [
-        {'materialId': materialId, 'receivedQuantity': received, 'damagedQuantity': damaged},
-      ],
-    });
+      'items': items,
+      'evidence': evidence,
+    }, timeout: _agentTimeout);
     return _map(response, 'record delivery');
   }
-
   Future<List<Map<String, dynamic>>> listInspections({String? status}) async {
     final query = status == null ? '' : '?status=$status';
     final response = await _apiClient.get('/quality-inspections$query');
@@ -186,8 +189,9 @@ class OperationsService {
   }
 
   /// Agent workflow runs, newest first. The backend returns a paged envelope.
-  Future<Map<String, dynamic>> listAgentWorkflows({int page = 1, int pageSize = 20}) async {
-    final response = await _apiClient.get('/agent-workflows?page=$page&pageSize=$pageSize');
+  Future<Map<String, dynamic>> listAgentWorkflows({int page = 1, int pageSize = 20, String? status}) async {
+    final filter = status == null || status == 'all' ? '' : '&status=${Uri.encodeQueryComponent(status)}';
+    final response = await _apiClient.get('/agent-workflows?page=$page&pageSize=$pageSize$filter');
     return _map(response, 'load agent workflows');
   }
 
@@ -296,6 +300,14 @@ class OperationsService {
     }
   }
 
+  Future<Map<String, dynamic>> getMaterialRequestDetail(int id) async =>
+      _map(await _apiClient.get('/material-requests/$id'), 'load material request');
+
+  Future<List<Map<String, dynamic>>> listProjects() async =>
+      _list(await _apiClient.get('/projects'), 'projects');
+
+  Future<List<Map<String, dynamic>>> listMaterials() async =>
+      _list(await _apiClient.get('/materials'), 'materials');
   List<Map<String, dynamic>> _list(dynamic response, String label) {
     if (response.statusCode != 200) {
       throw Exception(_error(response, 'Could not load $label'));

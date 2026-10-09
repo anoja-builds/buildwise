@@ -1,5 +1,31 @@
 # React + Vite
 
+## Quality responsive regression tests
+
+The browser suite renders the existing application with explicit API fixtures at
+390px, 768px, and 1440px. It checks real layout geometry, local table scrolling,
+NCR forms, long corrective actions, expanded agent output, and sidebar navigation.
+It does not connect to an API or database. Unit/component tests remain available
+through `npm test -- --run`.
+
+```sh
+npm ci
+npx playwright install chromium
+npm run test:responsive
+```
+
+To use an already-installed Chrome on Windows PowerShell instead:
+
+```powershell
+$env:PLAYWRIGHT_CHANNEL = 'chrome'
+npm.cmd run test:responsive
+```
+
+The suite starts and stops its own Vite server on `127.0.0.1:5191`; that port must
+be free. It overrides `VITE_API_BASE_URL` only for the test process and intercepts
+every API request. Screenshots and the JSON report go to the repository's ignored
+`logs/quality-responsive/` and `logs/quality-responsive-results.json`.
+
 This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
 
 Currently, two official plugins are available:

@@ -67,6 +67,8 @@ class ApiClient {
 
   Future<bool> isSignedIn() async => (await readToken()) != null;
 
+  void close() => _client.close();
+
   Future<void> signOut() async {
     await _storage.delete(key: _tokenKey);
     await _storage.delete(key: _userKey);
@@ -118,5 +120,16 @@ class ApiClient {
           body: body == null ? null : jsonEncode(body),
         )
         .timeout(timeout ?? _defaultTimeout);
+  }
+  Future<http.Response> patch(String path, {Map<String, dynamic>? body, Duration? timeout}) async {
+    final headers = await _authHeaders(json: true);
+    return _client.patch(Uri.parse('$apiBaseUrl$path'), headers: headers,
+      body: body == null ? null : jsonEncode(body)).timeout(timeout ?? _defaultTimeout);
+  }
+
+  Future<http.Response> delete(String path, {Duration? timeout}) async {
+    final headers = await _authHeaders();
+    return _client.delete(Uri.parse('$apiBaseUrl$path'), headers: headers)
+      .timeout(timeout ?? _defaultTimeout);
   }
 }
